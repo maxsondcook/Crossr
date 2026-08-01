@@ -436,6 +436,7 @@ def run_sales_menu(pedigrees_database=None):
         print("[1] Search by Year Catalog")
         print("[2] Search Stallion Progeny Entries")
         print("[3] Search Horse Sale History (Profile)")
+        print("[4] Launch Pre-Sale Catalog Analyzer")
         print("----------------------------------")
         print("[X] Return to Main Menu")
         
@@ -519,3 +520,12 @@ def run_sales_menu(pedigrees_database=None):
                 execute_global_search(db, search_type="profile", profile_dict=profile)
             else:
                 print("⚠️ Search cancelled. All fields empty.")
+        elif main_choice == '4':
+            try:
+                import sale_analyzer
+                import importlib
+                importlib.reload(sale_analyzer)
+                sale_analyzer.main_entry()
+            except Exception as e:
+                print(f"❌ Error running Sale Analyzer: {e}")
+                input("\nPress Enter to return...")

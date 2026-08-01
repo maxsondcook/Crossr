@@ -362,14 +362,38 @@ def get_sire_line_ancestry(horse_name):
         ancestry.append(current)
     return ancestry
 
-def find_all_descendants(stallion_clean):
+def find_lineage_relatives(stallion_clean):
+    """
+    Finds the stallion's immediate sire, paternal half-brothers,
+    and all generations of deep sons/descendants.
+    """
     target = stallion_clean.strip().lower()
-    descendants = []
-    for son, parent in SIRE_PARENTS.items():
-        if parent.strip().lower() == target:
-            descendants.append(son.strip().lower())
-            descendants.extend(find_all_descendants(son))
-    return list(set(descendants))
+    relatives = set()
+    
+    # 1. Find the immediate Sire
+    immediate_sire = SIRE_PARENTS.get(target, "").strip().lower()
+    if immediate_sire:
+        relatives.add(immediate_sire)
+        
+        # 2. Find Paternal Half-Brothers (Sires sharing the same father)
+        for son, parent in SIRE_PARENTS.items():
+            if parent.strip().lower() == immediate_sire and son.strip().lower() != target:
+                relatives.add(son.strip().lower())
+                
+    # 3. Find Sons and Deep Descendants (Recursive helper)
+    def get_all_sons(parent_name):
+        sons = []
+        for son, parent in SIRE_PARENTS.items():
+            if parent.strip().lower() == parent_name:
+                sons.append(son.strip().lower())
+                sons.extend(get_all_sons(son.strip().lower()))
+        return sons
+
+    descendants = get_all_sons(target)
+    for desc in descendants:
+        relatives.add(desc)
+
+    return list(relatives)
 
 def get_mare_sire_from_pedigree(pedigree_dict):
     if not pedigree_dict or not isinstance(pedigree_dict, dict):
@@ -508,7 +532,12 @@ def get_profile_meta(name, all_profiles):
         fee_str = "$0" if not raw_fee else str(raw_fee)
         
     has_progeny = profile.get("HasProgeny", profile.get("Has Progeny", True))
-    return {"rank": rank_val, "fee_str": fee_str, "fee_num": fee_num, "has_progeny": has_progeny, "is_active": len(profile) > 0}
+    
+    # SIMPLIFICATION RULE: Check if horse is in profiles AND status is not pensioned
+    is_pensioned = str(profile.get("Status", "")).strip().lower() == "pensioned"
+    is_active = (len(profile) > 0) and not is_pensioned
+
+    return {"rank": rank_val, "fee_str": fee_str, "fee_num": fee_num, "has_progeny": has_progeny, "is_active": is_active}
 
 def sort_ancestor_list(ancestor_names, all_profiles, budget_filter=None):
     meta_list = []
@@ -534,18 +563,9 @@ def sort_ancestor_list(ancestor_names, all_profiles, budget_filter=None):
 def has_lineage_options(stallion_name, all_profiles, budget_filter=None):
     """Checks if a stallion actually has ancestors, sibling sires, or descendants available."""
     st_clean = main.clean_horse_name(stallion_name)
-    ancestry = get_sire_line_ancestry(st_clean)
+    lineage_options = find_lineage_relatives(st_clean)
     
-    if len(ancestry) > 1:
-        if sort_ancestor_list(ancestry[1:], all_profiles, budget_filter):
-            return True
-        immediate_sire = ancestry[1]
-        sibling_sires = [k for k, v in SIRE_PARENTS.items() if v == immediate_sire and k != st_clean]
-        if sort_ancestor_list(sibling_sires, all_profiles, budget_filter):
-            return True
-            
-    descendants = find_all_descendants(st_clean)
-    if sort_ancestor_list(descendants, all_profiles, budget_filter):
+    if sort_ancestor_list(lineage_options, all_profiles, budget_filter):
         return True
         
     return False
@@ -553,37 +573,20 @@ def has_lineage_options(stallion_name, all_profiles, budget_filter=None):
 def show_lineage_branch_flow(stallion_name, all_profiles, pedigree_db, budget_filter=None):
     st_clean = main.clean_horse_name(stallion_name)
     print(f"\n--- ANCESTRY & ALTERNATIVE VARIANT OPTIONS FOR {stallion_name.upper()} ---")
-    ancestry = get_sire_line_ancestry(st_clean)
     
     available_options = []
     
-    if len(ancestry) > 1:
-        sorted_ancestry_steps = sort_ancestor_list(ancestry[1:], all_profiles, budget_filter)
-        if sorted_ancestry_steps:
-            print(" ⭐ SIRE ANCESTOR PATHWAY (ACTIVE PROFILE REPLICAS):")
-            for step in sorted_ancestry_steps:
-                meta = get_profile_meta(step, all_profiles)
-                print(f"   [{len(available_options) + 1}] {step.title()} | Stud Rank: #{meta['rank']} | Stud Fee: {meta['fee_str']} |")
-                available_options.append(step)
-        
-        immediate_sire = ancestry[1]
-        sibling_sires = [k for k, v in SIRE_PARENTS.items() if v == immediate_sire and k != st_clean]
-        sorted_siblings = sort_ancestor_list(sibling_sires, all_profiles, budget_filter)
-        if sorted_siblings:
-            print(f"\n Sires sharing the same father ({immediate_sire.upper()}):")
-            for s in sorted_siblings:
-                meta = get_profile_meta(s, all_profiles)
-                print(f"   [{len(available_options) + 1}] {s.title()} | Stud Rank: #{meta['rank']} | Stud Fee: {meta['fee_str']} |")
-                available_options.append(s)
-            
-    descendants = find_all_descendants(st_clean)
-    sorted_descendants = sort_ancestor_list(descendants, all_profiles, budget_filter)
-    if sorted_descendants:
-        print(f"\n Active sons/descendants of {stallion_name.upper()}:")
-        for d in sorted_descendants:
-            meta = get_profile_meta(d, all_profiles)
-            print(f"   [{len(available_options) + 1}] {d.title()} | Stud Rank: #{meta['rank']} | Stud Fee: {meta['fee_str']} |")
-            available_options.append(d)
+    # Pull the Sire, half-brothers, and descendants together
+    all_relatives = find_lineage_relatives(st_clean)
+    sorted_relatives = sort_ancestor_list(all_relatives, all_profiles, budget_filter)
+    
+    if sorted_relatives:
+        print(" ⭐ AVAILABLE LINEAGE OPTIONS (SIRE, PATERNAL HALF-BROS, & SONS):")
+        for relative in sorted_relatives:
+            meta = get_profile_meta(relative, all_profiles)
+            if meta['is_active']:
+                print(f"   [{len(available_options) + 1}] {relative.title()} | Stud Rank: #{meta['rank']} | Stud Fee: {meta['fee_str']} |")
+                available_options.append(relative)
 
     if not available_options:
         print(" (No active variants or lineages available for this stallion profile within budget bounds.)")
@@ -652,10 +655,6 @@ def execute_top_crosses_search(pedigree_db):
         winners_strings = [f"{w['name']} ({w['status']})" for w in sorted_progeny]
         winners_list = ", ".join(winners_strings)
         
-        # ------------------------------------------------------------------
-        # FIXED EMBED: Clean matching string and retrieve capital 'Rank' key 
-        # from imported dataset BROODMARE_DATABASE
-        # ------------------------------------------------------------------
         lookup_key = clean_horse_name(ds_name) 
         bms_rank_info = BROODMARE_DATABASE.get(lookup_key)
         
@@ -663,7 +662,6 @@ def execute_top_crosses_search(pedigree_db):
             rank_display = f"Rank: #{bms_rank_info['Rank']}"
         else:
             rank_display = "Rank: Unranked"
-        # ------------------------------------------------------------------
             
         print(f"  {idx}) {ds_name} | {rank_display} | Progeny: {winners_list}")
         
@@ -692,19 +690,14 @@ def execute_suggestion_wizard(pedigree_db, all_profiles):
             import importlib
             import add_pedigrees
             
-            # Reload ensures any file modifications are read live on successive runs
             importlib.reload(add_pedigrees)
-            
-            # SAFE BYPASS: Calls the main interactive builder cleanly without modifying its parameters
             add_pedigrees.main()
             
-            # Post-run synchronization: Re-load the data so the engine captures what was just built
             if hasattr(main, 'load_and_sync_all_data'):
                 main.load_and_sync_all_data()
             if hasattr(main, 'PEDIGREE_DATABASE'):
                 pedigree_db.update(main.PEDIGREE_DATABASE)
                 
-            # Direct mapping sync fallback
             try:
                 import pedigrees_database
                 importlib.reload(pedigrees_database)
@@ -718,13 +711,11 @@ def execute_suggestion_wizard(pedigree_db, all_profiles):
         except Exception as e:
             print(f"⚠️ An error occurred while running the pedigree builder: {e}")
 
-        # Post-run synchronization retrieval strategy
         if clean_mare in pedigree_db:
             mare_pedigree = copy.deepcopy(pedigree_db[clean_mare])
         elif upper_mare in pedigree_db:
             mare_pedigree = copy.deepcopy(pedigree_db[upper_mare])
         else:
-            # Final flexible backup matching check
             matched_key = None
             for key in pedigree_db.keys():
                 if clean_mare in key or key in clean_mare:
@@ -990,4 +981,3 @@ def execute_suggestion_wizard(pedigree_db, all_profiles):
         dam_name=mare_name,
         combined_tree=combined_pedigree
     )
-    
