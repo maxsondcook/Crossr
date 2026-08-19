@@ -18,7 +18,7 @@ STATE_MAP = {
 }
 
 def clean_filename_title(filename):
-    name = filename.replace(".csv", "").lower()
+    name = re.sub(r'\.csv$', '', filename, flags=re.IGNORECASE).lower()
     if name.startswith("analyzed_"):
         name = name.replace("analyzed_", "")
     name = re.sub(r'\s+', '_', name)
@@ -46,23 +46,24 @@ def uppercase_country_suffix(text):
     
     return re.sub(r'(.*?)\(([a-zA-Z]{2,3})\)', repl, text_str)
 
-def determine_sold_as(birth_year_str, sex_str, sale_year, covering_sire_str=""):
-    """Calculates age relative to the sale year and classifies the horse type.
-       Forcibly flags as Broodmare if a covering sire exists.
-    """
+def determine_sold_as(birth_year_str, sex_str, sale_year, filename="", covering_sire_str=""):
+    """Calculates age relative to the sale year and classifies the horse type."""
     if covering_sire_str and str(covering_sire_str).strip().lower() not in ['nan', 'none', '']:
         return "Broodmare"
 
+    # If Yearling appears in file name and no birth year is provided, default to Yearling
+    if "yearling" in filename.lower() and (not birth_year_str or str(birth_year_str).lower() in ['nan', 'none', '']):
+        return "Yearling"
+
     sex = str(sex_str).strip().upper()
-    
     birth_year = None
-    if birth_year_str and str(birth_year_str).lower() != 'nan':
+    if birth_year_str and str(birth_year_str).lower() not in ['nan', 'none', '']:
         year_match = re.search(r'\b(\d{4})\b', str(birth_year_str))
         if year_match:
             birth_year = int(year_match.group(1))
             
     if birth_year is None:
-        return "Unknown"
+        return "Yearling" if "yearling" in filename.lower() else "Unknown"
         
     age = sale_year - birth_year
     
@@ -143,7 +144,7 @@ def format_race_list_grammatically(races):
 
 def analyze_dataframe(df):
     """Core analysis engine that calculates cross successes and producer stats."""
-    for col in ["CROSS SUCCESS", "DAM SUCCESS (RACER)", "DAM SUCCESS (PRODUCER)", "RACING SUCCESS", "STARRED", "COVERING SIRE"]:
+    for col in ["CROSS SUCCESS", "DAM SUCCESS (RACER)", "DAM SUCCESS (PRODUCER)", "RACING SUCCESS", "STARRED", "COVERING SIRE", "NOTES"]:
         if col not in df.columns:
             df[col] = ""
         else:
@@ -342,7 +343,7 @@ def print_female_family_section(ped_data, raw_stakes, horse_summaries, total_wid
                         p_str = f"{p_display_name} ({sex_char}. by {p_sire_desc}) won {p_races}."
                         p_str = uppercase_country_suffix(p_str)
                         
-                        # Print 1st-level offspring (Fixed 3-space indent instead of \t)
+                        # Print 1st-level offspring
                         wrapped_p = wrap_text_to_lines(p_str, total_width - 8)
                         for idx_p, pline in enumerate(wrapped_p):
                             indent = "   " if idx_p == 0 else "     "
@@ -366,82 +367,130 @@ def print_female_family_section(ped_data, raw_stakes, horse_summaries, total_wid
                                         gk_str = f"{gk_display_name} ({gk_sex_char}. by {gk_sire_desc}) won {gk_races}."
                                         gk_str = uppercase_country_suffix(gk_str)
                                         
-                                        # Print 2nd-level grand-offspring (Fixed 6-space indent instead of \t\t)
+                                        # Print 2nd-level grand-offspring
                                         wrapped_gk = wrap_text_to_lines(gk_str, total_width - 12)
                                         for idx_gk, gkline in enumerate(wrapped_gk):
                                             gk_indent = "      " if idx_gk == 0 else "        "
                                             print(f"|{gk_indent}{gkline}".ljust(total_width - 1) + "|")
 
     print("-" * total_width)
-    
+
+def print_notes_section(notes_text, total_width):
+    """Prints a notes section formatted to match the table width."""
+    print("| NOTES:")
+    if notes_text and str(notes_text).strip() not in ["", "nan", "NaN", "None"]:
+        wrapped_notes = wrap_text_to_lines(str(notes_text).strip(), total_width - 4)
+        for line in wrapped_notes:
+            print(f"| {line}".ljust(total_width - 1) + "|")
+    else:
+        print("| [No notes entered for this horse]".ljust(total_width - 1) + "|")
+    print("-" * total_width)
+
 def process_new_sales():
     os.makedirs(INPUT_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    csv_files = [f for f in os.listdir(INPUT_DIR) if f.endswith('.csv')]
+    csv_files = [f for f in os.listdir(INPUT_DIR) if f.lower().endswith('.csv')]
+    if not csv_files:
+        return
+
     for target_filename in csv_files:
         input_csv_path = os.path.join(INPUT_DIR, target_filename)
-        
-        raw_df = pd.read_csv(input_csv_path, index_col=False)
-        raw_df.columns = [str(c).upper().strip() for c in raw_df.columns]
-        sale_year = extract_sale_year(target_filename)
-        
-        corrected_rows = []
-        for _, row in raw_df.iterrows():
-            hip_val = str(row.get('HIP', '')).strip()
-            if hip_val and hip_val.lower() != 'nan':
-                birth_year_val = str(row.get('YEAR OF BIRTH', '')).strip()
-                sex_val = str(row.get('SEX', '')).strip().upper()
-                sire_val = uppercase_country_suffix(str(row.get('SIRE', '')).strip().title())
-                dam_val = uppercase_country_suffix(str(row.get('DAM', '')).strip().title())
-                bms_val = uppercase_country_suffix(str(row.get('SIRE OF DAM', '')).strip().title())
-                cov_sire_val = uppercase_country_suffix(str(row.get('COVERING SIRE', '')).strip().title())
-                
-                h_name = ""
-                for name_variant in ['HORSE NAME', 'NAME', 'HORSE']:
-                    if name_variant in row and str(row[name_variant]).strip() and str(row[name_variant]).lower() not in ['nan', 'none', '']:
-                        h_name = str(row[name_variant]).strip()
-                        break
-                
-                if not h_name:
-                    yr_digits = "00"
-                    if birth_year_val and birth_year_val.lower() != 'nan':
-                        year_match = re.search(r'\b\d{2}(\d{2})\b', birth_year_val)
-                        if year_match:
-                            yr_digits = year_match.group(1)
-                    h_name = f"{sire_val} x {dam_val} '{yr_digits}"
-                else:
-                    h_name = uppercase_country_suffix(h_name.title())
-                
-                sold_as_class = determine_sold_as(birth_year_val, sex_val, sale_year, cov_sire_val)
-                
-                corrected_rows.append({
-                    'HIP': hip_val,
-                    'HORSE NAME': h_name,
-                    'SEX': sex_val if sex_val != 'NAN' else "",
-                    'SIRE': sire_val,
-                    'DAM': dam_val,
-                    'SIRE OF DAM': bms_val,
-                    'YEAR OF BIRTH': birth_year_val, 
-                    'FOALED': str(row.get('FOALED', '')).strip().upper(),        
-                    'SOLD AS': sold_as_class,
-                    'COVERING SIRE': cov_sire_val if cov_sire_val not in ['Nan', 'None', ''] else ""
-                })
-        
-        if not corrected_rows:
-            continue
-            
-        df = pd.DataFrame(corrected_rows)
-        df = analyze_dataframe(df)
-        
-        output_filename = clean_filename_title(target_filename)
-        output_csv_path = os.path.join(OUTPUT_DIR, output_filename)
-        df.to_csv(output_csv_path, index=False)
+        print(f"\nProcessing upcoming sale file: '{target_filename}'...")
         
         try:
-            os.remove(input_csv_path)
-        except Exception:
-            pass
+            # Use utf-8-sig to automatically strip BOM bytes (\ufeff)
+            try:
+                raw_df = pd.read_csv(input_csv_path, encoding='utf-8-sig', index_col=False)
+            except Exception:
+                raw_df = pd.read_csv(input_csv_path, encoding='utf-8-sig', index_col=False, sep=None, engine='python')
+                
+            raw_df.columns = [str(c).upper().strip().lstrip('\ufeff') for c in raw_df.columns]
+            sale_year = extract_sale_year(target_filename)
+            
+            # Smart discovery for HIP column
+            hip_col = None
+            for c in raw_df.columns:
+                if re.search(r'\b(HIP|LOT|HIP NUMBER|HIP NO)\b', c):
+                    hip_col = c
+                    break
+            if not hip_col and len(raw_df.columns) > 0:
+                hip_col = raw_df.columns[0]
+
+            corrected_rows = []
+            for _, row in raw_df.iterrows():
+                hip_val = str(row.get(hip_col, '')).strip()
+
+                # Clean numeric hip values (e.g., '0001' -> '1')
+                if hip_val and hip_val.lower() not in ['nan', 'none', '']:
+                    hip_val = str(int(re.sub(r'\D', '', hip_val))) if re.sub(r'\D', '', hip_val) else hip_val
+                    
+                    birth_year_val = str(row.get('YEAR OF BIRTH', row.get('YOB', row.get('DOB', '')))).strip()
+                    if birth_year_val.lower() in ['nan', 'none', ''] and "yearling" in target_filename.lower():
+                        birth_year_val = str(sale_year - 1)
+
+                    sex_val = str(row.get('SEX', '')).strip().upper()
+                    sire_val = uppercase_country_suffix(str(row.get('SIRE', '')).strip().title())
+                    dam_val = uppercase_country_suffix(str(row.get('DAM', '')).strip().title())
+                    bms_val = uppercase_country_suffix(str(row.get('SIRE OF DAM', row.get('BMS', ''))).strip().title())
+                    cov_sire_val = uppercase_country_suffix(str(row.get('COVERING SIRE', '')).strip().title())
+                    
+                    h_name = ""
+                    for name_variant in ['HORSE NAME', 'NAME', 'HORSE']:
+                        val = str(row.get(name_variant, '')).strip()
+                        # Reject placeholder names like 'Hip 0001'
+                        if val and val.lower() not in ['nan', 'none', ''] and not re.match(r'^hip\s*\d+$', val.lower()):
+                            h_name = val
+                            break
+                    
+                    if not h_name:
+                        yr_digits = "00"
+                        if birth_year_val and birth_year_val.lower() != 'nan':
+                            year_match = re.search(r'\b\d{2}(\d{2})\b', birth_year_val)
+                            if year_match:
+                                yr_digits = year_match.group(1)
+                        h_name = f"{sire_val} x {dam_val} '{yr_digits}"
+                    else:
+                        h_name = uppercase_country_suffix(h_name.title())
+                    
+                    sold_as_class = determine_sold_as(birth_year_val, sex_val, sale_year, target_filename, cov_sire_val)
+                    
+                    corrected_rows.append({
+                        'HIP': hip_val,
+                        'HORSE NAME': h_name,
+                        'SEX': sex_val if sex_val != 'NAN' else "",
+                        'SIRE': sire_val,
+                        'DAM': dam_val,
+                        'SIRE OF DAM': bms_val,
+                        'YEAR OF BIRTH': birth_year_val, 
+                        'FOALED': str(row.get('FOALED', row.get('STATE', ''))).strip().upper(),        
+                        'SOLD AS': sold_as_class,
+                        'COVERING SIRE': cov_sire_val if cov_sire_val not in ['Nan', 'None', ''] else "",
+                        'NOTES': str(row.get('NOTES', '')).strip()
+                    })
+            
+            if not corrected_rows:
+                print(f"Warning: Could not parse any valid rows from '{target_filename}'. Check headers.")
+                input("Press Enter to continue...")
+                continue
+                
+            df = pd.DataFrame(corrected_rows)
+            df = analyze_dataframe(df)
+            
+            output_filename = clean_filename_title(target_filename)
+            output_csv_path = os.path.join(OUTPUT_DIR, output_filename)
+            df.to_csv(output_csv_path, index=False)
+            
+            try:
+                os.remove(input_csv_path)
+            except Exception as e:
+                print(f"Note: Unable to delete original source CSV: {e}")
+
+            print(f"Successfully processed: '{target_filename}' -> '{output_filename}'")
+            input("Press Enter to refresh catalog menu...")
+        except Exception as err:
+            print(f"Error processing file '{target_filename}': {err}")
+            input("Press Enter to continue...")
 
 def run_interactive_viewer(csv_path):
     base_df = pd.read_csv(csv_path)
@@ -449,7 +498,7 @@ def run_interactive_viewer(csv_path):
     sale_year = extract_sale_year(os.path.basename(csv_path))
     if 'YEAR OF BIRTH' in base_df.columns and 'SEX' in base_df.columns:
         base_df['SOLD AS'] = base_df.apply(
-            lambda r: determine_sold_as(r['YEAR OF BIRTH'], r['SEX'], sale_year, r.get('COVERING SIRE', '')), axis=1
+            lambda r: determine_sold_as(r['YEAR OF BIRTH'], r['SEX'], sale_year, os.path.basename(csv_path), r.get('COVERING SIRE', '')), axis=1
         )
         
     df = analyze_dataframe(base_df)
@@ -616,9 +665,16 @@ def run_interactive_viewer(csv_path):
             else:
                 print("-" * total_width)
 
+            # -------------------------------------------------------------
+            # NOTES SECTION DISPLAY
+            # -------------------------------------------------------------
+            current_orig_idx = row['ORIG_INDEX']
+            current_notes = df.loc[current_orig_idx, 'NOTES']
+            print_notes_section(current_notes, total_width)
+
             print(f"Viewing Entry {current_idx + 1} of {len(filtered_df)} items (Total Count: {len(df)})".center(total_width))
 
-        print("\n[N]ext | [P]revious | [J]ump to | [*] Star/Unstar | [F]ilter | [R]eset Filters | [Q]uit to Catalog Menu")
+        print("\n[N]ext | [P]revious | [J]ump to | [*] Star/Unstar | [E]dit Notes | [F]ilter | [R]eset Filters | [Q]uit to Catalog Menu")
         choice = input("Select an option: ").strip().lower()
 
         if choice == 'q':
@@ -631,12 +687,10 @@ def run_interactive_viewer(csv_path):
         elif choice == 'j':
             jump_input = input("Jump to Hip: ").strip()
             if jump_input:
-                # Handle relative jump (e.g., -5 or +10)
                 if re.match(r'^[+-]\d+$', jump_input):
                     offset = int(jump_input)
                     current_idx = max(0, min(len(filtered_df) - 1, current_idx + offset))
                 else:
-                    # Clean absolute hip number (e.g., "hip 45" or "#45" -> "45")
                     clean_hip = re.sub(r'\D', '', jump_input)
                     if clean_hip:
                         found = filtered_df[filtered_df['HIP'].astype(str) == clean_hip]
@@ -647,6 +701,16 @@ def run_interactive_viewer(csv_path):
                 orig_idx = filtered_df.iloc[current_idx]['ORIG_INDEX']
                 df.loc[orig_idx, 'STARRED'] = "" if str(df.loc[orig_idx, 'STARRED']) == "*" else "*"
                 df.drop(columns=['ORIG_INDEX'], errors='ignore').to_csv(csv_path, index=False)
+        elif choice == 'e':
+            if len(filtered_df) > 0:
+                orig_idx = filtered_df.iloc[current_idx]['ORIG_INDEX']
+                existing_notes = str(df.loc[orig_idx, 'NOTES'])
+                print(f"\nCurrent Notes: {existing_notes if existing_notes else '[None]'}")
+                new_note = input("Enter new notes (or press Enter to keep current): ").strip()
+                if new_note:
+                    df.loc[orig_idx, 'NOTES'] = new_note
+                    filtered_df.loc[current_idx, 'NOTES'] = new_note
+                    df.drop(columns=['ORIG_INDEX'], errors='ignore').to_csv(csv_path, index=False)
         elif choice == 'r':
             filtered_df = df.copy()
             current_idx = 0
@@ -682,9 +746,9 @@ def run_sales_menu():
     main_entry()
 
 def main_entry():
-    process_new_sales()
-    
     while True:
+        process_new_sales()
+        
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         analyzed_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith('.csv')]
         

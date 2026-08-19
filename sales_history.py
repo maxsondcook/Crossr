@@ -1,6 +1,7 @@
 from pathlib import Path
 import csv
 import re
+import sales_health
 
 # Fallback directories to search for CSV files
 SEARCH_DIRS = [Path("sales_data"), Path(".")]
@@ -68,18 +69,13 @@ def parse_price(val):
     """Cleans up raw prices into floats for accurate sorting."""
     val_str = safe_str(val).upper()
     if not val_str or "OUT" in val_str or val_str == "-2.00":
-        return 0
-    if "R.N.A." in val_str or "RNA" in val_str:
-        match = re.search(r'\((.*?)\)', val_str)
-        if match:
-            val_str = match.group(1)
-        else:
-            return 0
+        return 0.0
+    
     cleaned = "".join(c for c in val_str if c.isdigit() or c == '.')
     try:
-        return float(cleaned) if cleaned else 0
+        return float(cleaned) if cleaned else 0.0
     except ValueError:
-        return 0
+        return 0.0
 
 def clean_search_string(text):
     """Normalizes names and entries cleanly for precise lookup matching."""
@@ -90,7 +86,6 @@ def load_and_process_csv(file_path: Path, gender_filter=None, sort_choice="3", h
     """Reads CSV, parses dynamic headers, and applies filters safely across Keeneland and Fasig-Tipton structures."""
     results = []
     
-    # Extract the catalog year from the filename to use as a fallback calculation anchor
     catalog_year_match = re.search(r'\d{4}', file_path.name)
     catalog_year = int(catalog_year_match.group(0)) if catalog_year_match else None
     file_name_lower = file_path.name.lower()
@@ -112,14 +107,13 @@ def load_and_process_csv(file_path: Path, gender_filter=None, sort_choice="3", h
             reader = csv.DictReader(f, dialect=dialect)
             headers = {k.lower().strip(): k for k in reader.fieldnames} if reader.fieldnames else {}
             
-            hip_key = next((headers[k] for k in ['hip number', 'hip'] if k in headers), None)
+            hip_key = next((headers[k] for k in ['hip number', 'hip', 'hip_no'] if k in headers), None)
             name_key = next((headers[k] for k in ['horse', 'horse name', 'name', 'description'] if k in headers), None)
             sex_key = next((headers[k] for k in ['sex', 'gender'] if k in headers), None)
-            price_key = next((headers[k] for k in ['sale price', 'price'] if k in headers), None)
+            price_key = next((headers[k] for k in ['sale price', 'price', 'final bid', 'price_raw'] if k in headers), None)
+            purchaser_key = next((headers[k] for k in ['purchaser', 'buyer', 'buyer name'] if k in headers), None)
             sire_key = next((headers[k] for k in ['sire'] if k in headers), None)
             dam_key = next((headers[k] for k in ['dam'] if k in headers), None)
-            
-            # Check explicit year columns before picking up state 'foaled' columns
             dob_key = next((headers[k] for k in ['year of birth', 'birth year', 'dob', 'date of birth', 'foaled'] if k in headers), None)
 
             is_fasig = "fasig" in file_name_lower or "sale title" in headers
@@ -142,7 +136,6 @@ def load_and_process_csv(file_path: Path, gender_filter=None, sort_choice="3", h
                     if year_match:
                         extracted_birth_year = year_match.group(0)
                 
-                # Dynamic Smart Foaling Year Deductions from Sale Types
                 if not extracted_birth_year and catalog_year:
                     if "yearling" in file_name_lower:
                         extracted_birth_year = str(catalog_year - 1)
@@ -163,7 +156,6 @@ def load_and_process_csv(file_path: Path, gender_filter=None, sort_choice="3", h
 
                 raw_name = safe_str(row.get(name_key, "")).strip() if name_key else ""
                 
-                # Intercept to build custom format if name is a generic placeholder
                 if not raw_name or is_fasig or re.match(r'^hip\s*\d+', raw_name.lower()):
                     short_yr = extracted_birth_year[-2:] if extracted_birth_year else ""
                     raw_name = f"{raw_sire} x {raw_dam} '{short_yr}".strip()
@@ -186,11 +178,9 @@ def load_and_process_csv(file_path: Path, gender_filter=None, sort_choice="3", h
                 clean_sire_field = clean_search_string(raw_sire)
                 clean_dam_field = clean_search_string(raw_dam)
 
-                # STRICT EXACT MATCH for Named Horses
                 if horse_search and horse_search == clean_name_field:
                     match_found = True
                 
-                # Pedigree match for Unnamed / Placeholder listings
                 if sire_search and dam_search:
                     if sire_search == clean_sire_field and dam_search == clean_dam_field:
                         match_found = True
@@ -217,14 +207,27 @@ def load_and_process_csv(file_path: Path, gender_filter=None, sort_choice="3", h
                 elif "WEANLING" in raw_sex: sex_letter = "W"
                 
                 raw_price = safe_str(row.get(price_key, "0")) if price_key else "0"
+                raw_purchaser = safe_str(row.get(purchaser_key, "")).strip().upper() if purchaser_key else ""
+                raw_price_upper = raw_price.upper()
+
+                # Determine status flags
+                is_out = "OUT" in raw_purchaser or "OUT" in raw_price_upper
+                is_rna = ("NOT SOLD" in raw_purchaser or "RNA" in raw_purchaser or 
+                          "R.N.A." in raw_purchaser or "RNA" in raw_price_upper or 
+                          "R.N.A." in raw_price_upper or raw_price.strip() == "-2.00")
+                
                 numeric_price = parse_price(raw_price)
                 
-                is_rna = "RNA" in raw_price.upper() or "R.N.A." in raw_price.upper() or raw_price.strip() == "-2.00"
-                
-                clean_disp_price = raw_price.strip()
-                if clean_disp_price in ["-2.00", "0", ""] or "OUT" in clean_disp_price.upper():
-                    clean_disp_price = "Out/RNA"
-                
+                if is_out:
+                    clean_disp_price = "WITHDRAWN"
+                    numeric_price = 0.0
+                elif is_rna:
+                    clean_disp_price = f"RNA (${int(numeric_price):,})" if numeric_price > 0 else "RNA"
+                elif numeric_price == 0:
+                    clean_disp_price = "N/A"
+                else:
+                    clean_disp_price = f"${int(numeric_price):,}"
+
                 results.append({
                     'hip': hip_val,
                     'name': raw_name,
@@ -236,6 +239,7 @@ def load_and_process_csv(file_path: Path, gender_filter=None, sort_choice="3", h
                     'price_raw': clean_disp_price,
                     'price_num': numeric_price,
                     'is_rna': is_rna,
+                    'is_out': is_out,
                     'is_fasig': is_fasig
                 })
     except FileNotFoundError:
@@ -253,13 +257,22 @@ def calculate_and_print_stats(records, target_stallion=None):
     last_5_years_cutoff = max(sale_years) - 4 if sale_years else 0
 
     def compute_metrics(dataset):
-        unique_horses = len(set(clean_search_string(r['name']) for r in dataset if r.get('name')))
-        valid_sales = [r['price_num'] for r in dataset if r['price_num'] > 0 and not r.get('is_rna', False)]
-        rna_count = sum(1 for r in dataset if r.get('is_rna', False) or (r['price_raw'] == "Out/RNA" and r['price_num'] == 0))
-        total_entries = len(dataset)
+        # 1. Filter out 'WITHDRAWN' (OUT) entries to represent offered horses accurately
+        offered = [r for r in dataset if not r.get('is_out', False)]
         
+        # 2. Separate sold horses from RNA horses
+        sold_records = [r for r in offered if not r.get('is_rna', False) and r.get('price_num', 0) > 0]
+        rna_records = [r for r in offered if r.get('is_rna', False)]
+        
+        valid_sales = [r['price_num'] for r in sold_records]
+        
+        total_offered = len(offered)
+        total_sold = len(valid_sales)
+        rna_count = len(rna_records)
+        
+        # 3. Calculate financial metrics using ONLY completed sales
         gross = sum(valid_sales)
-        avg = gross / len(valid_sales) if valid_sales else 0
+        avg = gross / total_sold if total_sold > 0 else 0
         
         sorted_sales = sorted(valid_sales)
         n = len(sorted_sales)
@@ -270,11 +283,11 @@ def calculate_and_print_stats(records, target_stallion=None):
         else:
             median = (sorted_sales[(n // 2) - 1] + sorted_sales[n // 2]) / 2.0
             
-        sold_pct = (len(valid_sales) / total_entries * 100) if total_entries > 0 else 0
-        million_plus = sum(1 for p in valid_sales if p > 1000000)
+        sold_pct = (total_sold / total_offered * 100) if total_offered > 0 else 0
+        million_plus = sum(1 for p in valid_sales if p >= 1000000)
         
         return {
-            'horses': str(unique_horses),
+            'horses': str(total_offered),
             'gross': f"${int(gross):,}",
             'avg': f"${int(avg):,}",
             'median': f"${int(median):,}",
@@ -302,7 +315,7 @@ def calculate_and_print_stats(records, target_stallion=None):
         print(f"{'Median:':<25} | {lt['median']:<14} | {rc['median']:<14}")
         print(f"{'Sold %:':<25} | {lt['sold_pct']:<14} | {rc['sold_pct']:<14}")
         print(f"{'# of RNA/Not Sold:':<25} | {lt['rna']:<14} | {rc['rna']:<14}")
-        print(f"{'> $1,000,000:':<25} | {lt['mil']:<14} | {rc['mil']:<14}")
+        print(f"{'>= $1,000,000:':<25} | {lt['mil']:<14} | {rc['mil']:<14}")
     else:
         stats = compute_metrics(records)
         print(f"{'Total Horses:':<25} {stats['horses']}")
@@ -311,7 +324,7 @@ def calculate_and_print_stats(records, target_stallion=None):
         print(f"{'Median:':<25} {stats['median']}")
         print(f"{'Sold %:':<25} {stats['sold_pct']}")
         print(f"{'# of RNA/Not Sold:':<25} {stats['rna']}")
-        print(f"{'> $1,000,000:':<25} {stats['mil']}")
+        print(f"{'>= $1,000,000:':<25} {stats['mil']}")
         
     print("=======================================================\n")
 
@@ -325,42 +338,58 @@ def display_paginated_records(records, show_sale_name=False, is_catalog_view=Fal
         chunk = current_records[i:i+chunk_size]
         print(f"\n--- Results {i+1} to {min(i+chunk_size, len(current_records))} of {len(current_records)} ---")
         
-        # FIXED: Injected descriptive tabular headers padded precisely to fit the record columns
         if show_sale_name:
-            print(f"{'Year':<5} | {'Sale Catalog Title':<45} | {'Hip':<11} | {'Horse Name':<35} | {'Sex':<8} | {'Price':<12}")
-            print("-" * 132)
+            print(f"{'Year':<5} | {'Sale Catalog Title':<45} | {'Hip':<8} | {'Horse Name':<38} | {'Sex':<4} | {'Price':>16}")
+            print("-" * 127)
         else:
             if chunk and chunk[0].get('is_fasig'):
-                print(f"{'Hip':<11} | {'Horse Name':<45} | {'Sex':<8} | {'Price':<12}")
-                print("-" * 88)
+                print(f"{'Hip':<8} | {'Horse Name':<45} | {'Sex':<4} | {'Price':>16}")
+                print("-" * 79)
             else:
-                print(f"{'Hip':<11} | {'Horse Name':<45} | {'Sex':<8} | {'Sire':<18} | {'Price':<12}")
-                print("-" * 96)
+                print(f"{'Hip':<8} | {'Horse Name':<38} | {'Sex':<4} | {'Sire':<20} | {'Price':>16}")
+                print("-" * 95)
         
         for r in chunk:
-            price_display = f"${int(r['price_num']):,}" if r['price_num'] > 0 else r['price_raw']
+            price_display = r['price_raw']
             
+            yr = str(r.get('year', 'N/A'))[:4]
+            sale_title = str(r.get('sale', 'Sale'))
+            if len(sale_title) > 45:
+                sale_title = sale_title[:42] + "..."
+            
+            hip_str = f"Hip {r['hip']}" if not str(r['hip']).startswith("Hip") else str(r['hip'])
+            horse_name = str(r['name'])
+            if len(horse_name) > 38:
+                horse_name = horse_name[:35] + "..."
+                
+            sire_name = str(r.get('sire', ''))
+            if len(sire_name) > 20:
+                sire_name = sire_name[:17] + "..."
+
             if show_sale_name:
-                print(f"{r.get('year', 'N/A'):<5} | {r.get('sale', 'Sale'):<45} | Hip {r['hip']:<7} | {r['name'][:35]:<35} | {r['sex_letter']:<8} | {price_display:<12}")
+                print(f"{yr:<5} | {sale_title:<45} | {hip_str:<8} | {horse_name:<38} | {r['sex_letter']:<4} | {price_display:>16}")
             else:
                 if r.get('is_fasig'):
-                    print(f"Hip {r['hip']:<7} | {r['name']:<45} | {r['sex_letter']:<8} | {price_display:<12}")
+                    print(f"{hip_str:<8} | {horse_name:<45} | {r['sex_letter']:<4} | {price_display:>16}")
                 else:
-                    print(f"Hip {r['hip']:<7} | {r['name'][:35]:<45} | {r['sex_letter']:<8} | {r['sire'][:18]:<18} | {price_display:<12}")
+                    print(f"{hip_str:<8} | {horse_name:<38} | {r['sex_letter']:<4} | {sire_name:<20} | {price_display:>16}")
         
-        prompt_menu = "\n[Enter] Next page | [b] Back page | [s] Sort/Filter options | [q] Stop: "
+        prompt_menu = "\n[N] Next page | [b] Back page | [s] Sort/Filter options | [q] Stop: "
         cont = input(prompt_menu).strip().lower()
         
         if cont == 'q':
             break
         elif cont == 'b':
-            if i >= chunk_size: i -= chunk_size
+            if i >= chunk_size: 
+                i -= chunk_size
         elif cont == 's':
             print("\n--- Sort & Filter Options ---")
             print("[1] Sort by Price: Highest to Lowest")
             print("[2] Sort by Price: Lowest to Highest")
-            print("[3] Sort by Chronological Order / Hip")
-            print("[4] Filter by Sex")
+            print("[3] Sort by Date/Year: Most Recent to Oldest")
+            print("[4] Sort by Date/Year: Oldest to Most Recent")
+            print("[5] Filter by Sex")
+            print("[6] Filter by Stallion Name")
             choice = input("Select Action: ").strip()
             
             if choice == "1":
@@ -371,22 +400,37 @@ def display_paginated_records(records, show_sale_name=False, is_catalog_view=Fal
                 i = 0
             elif choice == "3":
                 if show_sale_name:
+                    current_records.sort(key=lambda x: (int(x.get('year', 0)), x.get('month_index', 0)), reverse=True)
+                else:
+                    current_records.sort(key=lambda x: x['hip'], reverse=True)
+                i = 0
+            elif choice == "4":
+                if show_sale_name:
                     current_records.sort(key=lambda x: (int(x.get('year', 0)), x.get('month_index', 0)))
                 else:
                     current_records.sort(key=lambda x: x['hip'])
                 i = 0
-            elif choice == "4":
+            elif choice == "5":
                 s_filter = input("Enter sex letter filter (F=Filly, M=Mare, H=Horse, C=Colt, R=Ridgling, W=Weanling, G=Gelding): ").strip().upper()
                 if s_filter:
                     current_records = [r for r in records if r['sex_letter'] == s_filter]
                     i = 0
-        else:
+            elif choice == "6":
+                sire_input = input("Enter Stallion Name: ").strip()
+                clean_sire = clean_search_string(sire_input)
+                if clean_sire:
+                    current_records = [r for r in current_records if clean_sire in clean_search_string(r.get('sire', ''))]
+                    i = 0
+                    if not current_records:
+                        print(f"⚠️ No matches found for stallion '{sire_input}'. Resetting view.")
+                        current_records = list(records)
+        elif cont == 'n' or cont == '':  # Accepts 'n' or pressing Enter
             if i + chunk_size < len(current_records): 
                 i += chunk_size
             else: 
                 break
 
-def execute_global_search(db, query=None, search_type="horse", profile_dict=None):
+def execute_global_search(db, query=None, search_type="horse", profile_dict=None, sort_descending=True):
     """Scans all database files and runs comparative matches safely."""
     print(f"\n🔍 Searching sales archives... Please wait...")
     all_matches = []
@@ -415,7 +459,7 @@ def execute_global_search(db, query=None, search_type="horse", profile_dict=None
         print(f"\n⚠️ No matching public records found across database criteria.")
         return
         
-    all_matches.sort(key=lambda x: (int(x.get('year', 0)), x.get('month_index', 0)), reverse=False)
+    all_matches.sort(key=lambda x: (int(x.get('year', 0)), x.get('month_index', 0)), reverse=sort_descending)
     
     stallion_key = query if search_type == "sire" else None
     calculate_and_print_stats(all_matches, target_stallion=stallion_key)
@@ -437,6 +481,7 @@ def run_sales_menu(pedigrees_database=None):
         print("[2] Search Stallion Progeny Entries")
         print("[3] Search Horse Sale History (Profile)")
         print("[4] Launch Pre-Sale Catalog Analyzer")
+        print("[5] Market Health Dashboard (SQL Graphs)")  # <--- ADDED OPTION
         print("----------------------------------")
         print("[X] Return to Main Menu")
         
@@ -473,7 +518,8 @@ def run_sales_menu(pedigrees_database=None):
 
         elif main_choice == "2":
             q = input("\nEnter Stallion Name: ").strip()
-            if q: execute_global_search(db, query=q, search_type="sire")
+            if q:
+                execute_global_search(db, query=q, search_type="sire", sort_descending=True)
 
         elif main_choice == "3":
             print("\n--- Targeted Horse Search Setup ---")
@@ -529,3 +575,15 @@ def run_sales_menu(pedigrees_database=None):
             except Exception as e:
                 print(f"❌ Error running Sale Analyzer: {e}")
                 input("\nPress Enter to return...")
+        elif main_choice == "5":  # <--- ADDED HANDLER
+            try:
+                import sales_health
+                import importlib
+                importlib.reload(sales_health)
+                sales_health.display_sales_health_dashboard()
+            except Exception as e:
+                print(f"❌ Error rendering sales health dashboard: {e}")
+                input("\nPress Enter to return...")
+
+if __name__ == "__main__":
+    run_sales_menu()
