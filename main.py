@@ -404,7 +404,7 @@ def analyze_inbreeding(horse_dict):
 
 
 # ==============================================================================
-# 6. PROFILE INTERFACE RUNTIME VIEWERS
+# 6. PROFILE INTERFACE RUNTIME VIEWERS & GRID RENDERER
 # ==============================================================================
 def load_master_profiles():
     """Loads display cards from stallion_profiles database if available."""
@@ -417,36 +417,141 @@ def load_master_profiles():
         return {}
 
 
-def print_pedigree(horse_dict, depth=0):
-    """Recursively prints the clean tree layout."""
-    if not horse_dict:
-        return
-    
-    indent = "    " * depth
-    h_name = horse_dict.get("Horse", "UNKNOWN").upper()
-    
-    if depth == 0:
-        print(f"🐴 {h_name}")
-    else:
-        print(f"{indent}🐴 {h_name}")
-        
-    if depth >= 5:
-        return
+def print_pedigree_grid(horse_dict):
+    """
+    Renders a complete 5-generation pedigree grid table:
+    - Generation 1 (Sire/Dam): 16 rows
+    - Generation 2: 8 rows
+    - Generation 3: 4 rows
+    - Generation 4: 2 rows (Horse Name / (Year))
+    - Generation 5: 1 row (Horse Name (Year))
+    Total table height = 32 rows
+    """
 
-    db_lookup = PEDIGREE_DATABASE.get(clean_horse_name(h_name), {})
-    sire_node = horse_dict.get("Sire") or db_lookup.get("Sire")
-    dam_node = horse_dict.get("Dam") or db_lookup.get("Dam")
+    def parse_node(node):
+        if not node or not isinstance(node, dict):
+            return {"name": "UNKNOWN", "year": ""}
+        raw = node.get("Horse", "UNKNOWN").strip()
+        match = re.search(r'(.*?)\s*\((.*?)\)', raw)
+        if match:
+            name = match.group(1).strip()
+            year = match.group(2).strip()
+        else:
+            name = raw
+            year = str(node.get("Year Born", ""))
+        return {"name": name, "year": year}
 
-    if sire_node:
-        print(f"{indent}├── Sire:")
-        print_pedigree(sire_node, depth + 1)
-    if dam_node:
-        print(f"{indent}└── Dam:")
-        print_pedigree(dam_node, depth + 1)
+    nodes_map = {}
+
+    def fill_tree(node, idx, depth):
+        if depth > 5 or idx > 62:
+            return
+        parsed = parse_node(node)
+        nodes_map[idx] = parsed
+
+        if depth < 5:
+            h_name = parsed["name"]
+            db_lookup = PEDIGREE_DATABASE.get(clean_horse_name(h_name), {}) if 'PEDIGREE_DATABASE' in globals() else {}
+            sire = (node.get("Sire") if isinstance(node, dict) else None) or db_lookup.get("Sire")
+            dam = (node.get("Dam") if isinstance(node, dict) else None) or db_lookup.get("Dam")
+
+            fill_tree(sire, 2 * idx + 1, depth + 1)
+            fill_tree(dam, 2 * idx + 2, depth + 1)
+
+    fill_tree(horse_dict, 0, 0)
+
+    cols_nodes = [
+        [1, 2],                          # Gen 1 Parents (Sire, Dam)
+        [3, 4, 5, 6],                    # Gen 2 Grandparents
+        list(range(7, 15)),              # Gen 3 Great-Grandparents
+        list(range(15, 31)),             # Gen 4 Great-Great-Grandparents
+        list(range(31, 63))              # Gen 5 Ancestors
+    ]
+
+    # Dynamically calculate exact column widths
+    col_widths = []
+    for c_idx in range(5):
+        max_w = 0
+        for n_idx in cols_nodes[c_idx]:
+            info = nodes_map.get(n_idx, {})
+            name = info.get("name", "").strip().upper()
+            year = info.get("year", "").strip()
+            year_str = f"({year})" if year else ""
+
+            if c_idx == 4:
+                # Measure combined single-line length for Gen 5: "NAME (YEAR)"
+                full_str = f"{name} {year_str}".strip() if year_str else name
+                max_w = max(max_w, len(full_str))
+            else:
+                # Measure independent line lengths for stacked Gen 1-4: "NAME" vs "(YEAR)"
+                max_w = max(max_w, len(name), len(year_str))
+
+        # Add 2 spaces for standard left/right cell margin padding
+        col_widths.append(max_w + 2)
+
+    total_lines = 32
+    spans = [16, 8, 4, 2, 1] # Row heights per column cell
+
+    grid = [["" for _ in range(5)] for _ in range(total_lines)]
+
+    # Fill cell contents according to exact row spans
+    for c_idx in range(5):
+        span = spans[c_idx]
+        w = col_widths[c_idx]
+        node_list = cols_nodes[c_idx]
+
+        for cell_idx, n_idx in enumerate(node_list):
+            info = nodes_map.get(n_idx, {})
+            name = info.get("name", "").strip().upper()
+            year = info.get("year", "").strip()
+            year_str = f"({year})" if year else ""
+
+            start_row = cell_idx * span
+
+            # Generation 5 (1 row height): Single line layout "NAME (YEAR)"
+            if c_idx == 4:
+                full_str = f"{name} {year_str}".strip() if year_str else name
+                grid[start_row][c_idx] = full_str.center(w)
+
+            # Generations 1-4: Stacked layout ("NAME" on top, "(YEAR)" underneath)
+            else:
+                name_row = start_row + (span // 2) - 1
+                year_row = start_row + (span // 2)
+                for r in range(start_row, start_row + span):
+                    if r == name_row:
+                        grid[r][c_idx] = name.center(w)
+                    elif r == year_row and year_str:
+                        grid[r][c_idx] = year_str.center(w)
+                    else:
+                        grid[r][c_idx] = " " * w
+
+    # Construct formatted table borders & print output
+    top_border = "+" + "+".join(["-" * w for w in col_widths]) + "+"
+
+    print(top_border)
+
+    for r in range(total_lines):
+        row_str = "|" + "|".join([grid[r][c] for c in range(5)]) + "|"
+        print(row_str)
+
+        # Print horizontal division gridlines between separate lineage slots
+        if r < total_lines - 1:
+            div_parts = []
+            has_line = False
+            for c in range(5):
+                if (r + 1) % spans[c] == 0:
+                    div_parts.append("-" * col_widths[c])
+                    has_line = True
+                else:
+                    div_parts.append(" " * col_widths[c])
+            if has_line:
+                print("+" + "+".join(div_parts) + "+")
+
+    print(top_border)
 
 
 def display_stallion_profile(search_name, all_profiles):
-    """Prints stallion profile stats together with the combined pedigree tree."""
+    """Prints stallion profile stats together with the combined pedigree tree grid."""
     data = None
     matched_key = None
     clean_search = clean_horse_name(search_name)
@@ -481,9 +586,9 @@ def display_stallion_profile(search_name, all_profiles):
         else:
             stud_fee_display = str(raw_fee)
 
-        print("================================================================================")
+        print("=" * 80)
         print(f"🐴 STALLION PROFILE: {horse_name}")
-        print("================================================================================")
+        print("=" * 80)
         print(f"📍 Standing Location:{data.get('Farm', 'Unknown').replace('_', ' ').title()}")
         print(f"📅 Year Foaled:      {birth_year}")
         print(f"🧬 Entered Stud:     {year_entered_stud}")      
@@ -669,28 +774,28 @@ def display_stallion_profile(search_name, all_profiles):
             has_printed_mb_stats = True
 
         if has_printed_mb_stats:
-            print("-" * 69)
+            print("-" * 80)
 
         if has_valid_pedigree:
-            print("5 Generation Pedigree:")
-            print_pedigree(pedigree_data if pedigree_data else {"Horse": horse_name})
+            print(f"5 Generation Pedigree for {horse_name.title()}")
+            print_pedigree_grid(pedigree_data if pedigree_data else {"Horse": horse_name})
             analyze_inbreeding(pedigree_data if pedigree_data else {"Horse": horse_name})
         else:
-            print("=========================================================")
+            print("=" * 80)
             print(f"There is no pedigree loaded for {horse_name}")
             
-        print("=========================================================")
+        print("=" * 80)
     else:
-        print(f"=========================================================")
+        print("=" * 80)
         print(f"Pedigree Tree for: {search_name.upper()}")
-        print(f"=========================================================")
+        print("=" * 80)
         if has_valid_pedigree:
-            print_pedigree(pedigree_data)
+            print_pedigree_grid(pedigree_data)
             analyze_inbreeding(pedigree_data)
         else:
             print(f"There is no pedigree loaded for {horse_name}")
             
-        print("=========================================================")
+        print("=" * 80)
 
 
 # ==============================================================================
@@ -793,3 +898,4 @@ if __name__ == "__main__":
         else:
             if choice:
                 print("❌ Invalid entry. Select a valid choice from the menu window.")
+print_pedigree = print_pedigree_grid

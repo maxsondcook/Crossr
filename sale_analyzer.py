@@ -342,10 +342,10 @@ def print_female_family_section(ped_data, raw_stakes, horse_summaries, total_wid
                         p_str = f"{p_display_name} ({sex_char}. by {p_sire_desc}) won {p_races}."
                         p_str = uppercase_country_suffix(p_str)
                         
-                        # Print 1st-level offspring (1 tab)
+                        # Print 1st-level offspring (Fixed 3-space indent instead of \t)
                         wrapped_p = wrap_text_to_lines(p_str, total_width - 8)
                         for idx_p, pline in enumerate(wrapped_p):
-                            indent = " \t" if idx_p == 0 else " \t  "
+                            indent = "   " if idx_p == 0 else "     "
                             print(f"|{indent}{pline}".ljust(total_width - 1) + "|")
                             
                         # Find grand-offspring (grandkids) under this progeny
@@ -366,14 +366,14 @@ def print_female_family_section(ped_data, raw_stakes, horse_summaries, total_wid
                                         gk_str = f"{gk_display_name} ({gk_sex_char}. by {gk_sire_desc}) won {gk_races}."
                                         gk_str = uppercase_country_suffix(gk_str)
                                         
-                                        # Print 2nd-level grand-offspring (2 tabs)
+                                        # Print 2nd-level grand-offspring (Fixed 6-space indent instead of \t\t)
                                         wrapped_gk = wrap_text_to_lines(gk_str, total_width - 12)
                                         for idx_gk, gkline in enumerate(wrapped_gk):
-                                            gk_indent = " \t\t" if idx_gk == 0 else " \t\t  "
+                                            gk_indent = "      " if idx_gk == 0 else "        "
                                             print(f"|{gk_indent}{gkline}".ljust(total_width - 1) + "|")
 
     print("-" * total_width)
-
+    
 def process_new_sales():
     os.makedirs(INPUT_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -576,8 +576,8 @@ def run_interactive_viewer(csv_path):
                     col_cells[col] = wrap_text_to_lines(val, 10)
                 elif col == "COVERING SIRE" and len(val) > 15:
                     col_cells[col] = wrap_text_to_lines(val, 15)
-                elif col == "CROSS SUCCESS" and len(val) > 18:
-                    col_cells[col] = wrap_text_to_lines(val, 18)
+                elif col == "CROSS SUCCESS" and len(val) > 45:
+                    col_cells[col] = wrap_text_to_lines(val, 45)
                 elif (col == "DAM SUCCESS (PRODUCER)" or col == "RACING SUCCESS") and len(val) > 24:
                     col_cells[col] = wrap_text_to_lines(val, 24)
                 elif "SUCCESS" in col and len(val) > 28:
@@ -587,7 +587,7 @@ def run_interactive_viewer(csv_path):
 
             col_widths = {}
             for col in base_cols:
-                max_cell_line = max(len(line) for line in col_cells[col])
+                max_cell_line = max(len(line) for line in col_cells[col]) if col_cells[col] else 0
                 col_widths[col] = max(len(col), max_cell_line)
 
             total_width = sum(col_widths.values()) + (len(base_cols) * 3) + 1

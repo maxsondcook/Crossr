@@ -5542,5 +5542,38 @@ stallion_profiles = {
             "GSW / G1W Ratio": "0/0"
         },
         "Pedigree": "yoshida_pedigree"
-    }
+    },
+    "Journalism": {
+        "Farm": "coolmore_ashford_stud",
+        "Year Born": 2022,
+        "Stud Duty Year": 2027,
+        "Stud Fee": "Yet To Be Announced",
+        "Status": "Active",
+        "Surface": "Dirt",
+        "Height": "16.2 hh",
+        "Conformation & Physical Profile": (
+            "\n"
+        ),
+        "Major Wins": (
+            "G1 Preakness Stakes\n"
+            "G1 Santa Anita Derby\n"
+            "G1 Haskell Stakes\n"
+            "G2 San Felipe Stakes\n"
+            "G2 San Diego Handicap\n"
+            "G2 Los Alamitos Futurity\n"
+        ),
+        "Career Highlight": (
+            "A physical freak who showed immense durability as he was the only horse in his crop to compete in all three Triple Crown Races as he won the 2025 Preakness and placed second in the Derby and Belmont. His courageous efforts in the G1 Preakness Stakes and the G1 Haskell Stakes showcased the heart of a champion that Journalism possessed.\n"
+        ),
+        "Race Record": {
+            "Age 2": {"Season": "2024", "Starts": 3, "1sts": 2, "2nds": 0, "3rds": 1, "Earnings": 158880, "Major Accomplishments": "A promising season capped by a win in the G2 Los Alamitos Futurity."},
+            "Age 3": {"Season": "2025", "Starts": 8, "1sts": 4, "2nds": 3, "3rds": 0, "Earnings": 4190000, "Major Accomplishments": "Heroic come from behind wins in the G1 Preakness Stakes and the G1 Haskell Stakes were the highlights for the beaten Derby and Belmont favorite (2nd to Sovereignty in both)"},
+            "Age 4": {"Season": "2026", "Starts": 3, "1sts": 1, "2nds": 0, "3rds": 2, "Earnings": 8288800, "Major Accomplishments": "Appeared to be just rounding into form when a soft tissue injury suffered in the starting gate prematurely ended his season."}
+        },
+         "Legacy Progeny Stats": {
+            "Total Earnings": "n/a",
+            "Average Progeny Win Distance": "n/a",
+            "GSW / G1W Ratio": "n/a"
+        },        "Pedigree": "journalism_pedigree"
+    },
 }
