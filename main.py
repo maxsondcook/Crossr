@@ -8,9 +8,7 @@ import copy
 import stallion_stats 
 import hypomating_engine
 
-# ==============================================================================
-# 1. STRING NORMALIZATION AND CLEANING UTILITIES
-# ==============================================================================
+# NAME CLEANING
 def clean_horse_name(name: str) -> str:
     """
     Normalizes horse names accurately for absolute dictionary matches.
@@ -27,9 +25,7 @@ def clean_horse_name(name: str) -> str:
     return cleaned.strip().upper()
 
 
-# ==============================================================================
-# 2. STANDARD UPPERCASE RE-MAPPING LOADER
-# ==============================================================================
+# UPPERCASE NAMES
 def load_and_sync_all_data():
     """
     Safely reads compiled map registries from pedigrees_database.py 
@@ -70,9 +66,7 @@ for alias_key, standard_key in aliases.items():
         PEDIGREE_DATABASE[clean_horse_name(alias_key)] = PEDIGREE_DATABASE[norm_std]
 
 
-# ==============================================================================
-# 3. COMPRESSED AND INDENTED PY FILE STORAGE EXPORTERS
-# ==============================================================================
+# UPDATE PEDIGREE DATABASE
 def save_database_to_file():
     """Writes the updated PEDIGREE_DATABASE back to pedigrees_database.py."""
     try:
