@@ -1,7 +1,6 @@
 from pathlib import Path
 import csv
 import re
-import sales_health
 
 # Fallback directories to search for CSV files
 SEARCH_DIRS = [Path("sales_data"), Path(".")]

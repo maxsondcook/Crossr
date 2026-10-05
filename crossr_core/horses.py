@@ -1,11 +1,17 @@
 """Horse search, profiles, and pedigree trees as JSON."""
+import csv
 import datetime
+import glob
+import os
 import re
 
 import main
 import hypomating_engine
 
 _SEARCH_INDEX = None
+_FEE_HISTORY = None
+_MARES_HISTORY = None
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def parse_horse_label(raw):
@@ -274,6 +280,280 @@ def search_horses(query, limit=15, profiles=None):
     return [item for _, item in scored[:limit]]
 
 
+def _format_stud_fee(raw):
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if text.lower() == "private":
+        return "Private"
+    usd = re.match(r"^USD\s*([\d,]+)$", text, re.I)
+    if usd:
+        return f"${int(usd.group(1).replace(',', '')):,}"
+    return text
+
+
+def _intish(val):
+    if val is None or str(val).strip() == "":
+        return None
+    digits = re.sub(r"[^\d]", "", str(val))
+    if not digits:
+        return None
+    try:
+        return int(digits)
+    except ValueError:
+        return None
+
+
+def load_book_stats():
+    """Load historical stud fees and mares-bred rows, keyed by cleaned stallion name."""
+    global _FEE_HISTORY, _MARES_HISTORY
+    if _FEE_HISTORY is not None and _MARES_HISTORY is not None:
+        return _FEE_HISTORY, _MARES_HISTORY
+
+    fees = {}
+    fee_path = os.path.join(ROOT, "stud_fee_database.csv")
+    if os.path.exists(fee_path):
+        with open(fee_path, encoding="utf-8-sig", errors="ignore") as f:
+            for row in csv.DictReader(f):
+                name = main.clean_horse_name(row.get("Stallion") or "")
+                year = _intish(row.get("Year"))
+                if not name or not year:
+                    continue
+                fees.setdefault(name, {})[year] = _format_stud_fee(row.get("Stud Fee"))
+
+    mares = {}
+    pattern = os.path.join(ROOT, "live_foal_statistics", "*.csv")
+    for path in glob.glob(pattern):
+        match = re.search(r"(\d{4}) Breeding Season", os.path.basename(path))
+        year = int(match.group(1)) if match else None
+        if not year:
+            continue
+        with open(path, encoding="utf-8-sig", errors="ignore") as f:
+            for row in csv.DictReader(f):
+                name = main.clean_horse_name(row.get("Stallion") or "")
+                if not name:
+                    continue
+                mares.setdefault(name, {})[year] = {
+                    "year": year,
+                    "mares_bred": _intish(row.get("Mares Bred")),
+                    "live_foals": _intish(row.get("Live Foals")),
+                    "live_foal_pct": (row.get("Live Foal %") or "").strip() or None,
+                    "state": (row.get("State") or "").strip() or None,
+                }
+
+    try:
+        import mares_bred_2025_by_stallion as mb_data
+        for s in mb_data.mares_bred_database.get("North American Stallions", []):
+            name = main.clean_horse_name(s.get("stallion") or "")
+            if not name:
+                continue
+            raw_lf = s.get("live_foal_percentage_for_2025_foals")
+            live_foals = None
+            live_pct = None
+            if raw_lf and "/" in str(raw_lf):
+                parts = str(raw_lf).split("/")
+                try:
+                    reports, foals = int(parts[0]), int(parts[1])
+                    live_foals = foals
+                    live_pct = f"{(foals / reports) * 100:.0f}%" if reports else None
+                except Exception:
+                    live_pct = str(raw_lf)
+            mares.setdefault(name, {})[2025] = {
+                "year": 2025,
+                "mares_bred": _intish(s.get("mares_bred_2025")),
+                "live_foals": live_foals,
+                "live_foal_pct": live_pct,
+                "state": s.get("state_prov"),
+            }
+    except Exception:
+        pass
+
+    _FEE_HISTORY = fees
+    _MARES_HISTORY = mares
+    return fees, mares
+
+
+def stud_book_history(stallion_name):
+    fees, mares = load_book_stats()
+    key = main.clean_horse_name(stallion_name)
+    fee_years = fees.get(key, {})
+    mare_years = mares.get(key, {})
+    years = sorted(set(fee_years) | set(mare_years), reverse=True)
+    rows = []
+    for year in years:
+        mb = mare_years.get(year) or {}
+        rows.append({
+            "year": year,
+            "stud_fee": fee_years.get(year),
+            "mares_bred": mb.get("mares_bred"),
+            "live_foals": mb.get("live_foals"),
+            "live_foal_pct": mb.get("live_foal_pct"),
+            "state": mb.get("state"),
+        })
+    return rows
+
+
+_DAM_INDEX = None
+_STAKES_BY_KEY = None
+_STATUS_WEIGHT = {"MG1W": 7, "G1W": 6, "MGSW": 5, "G2W": 4, "G3W": 3, "MSW": 2, "SW": 1}
+
+
+def _sex_letter(sex):
+    s = str(sex or "").strip().upper()
+    if s.startswith("F") or s.startswith("M"):
+        return "f"
+    if s.startswith("G"):
+        return "g"
+    if s.startswith("H") or s.startswith("C") or s.startswith("S"):
+        return "c"
+    return ""
+
+
+def _race_labels(records):
+    labels = []
+    seen = set()
+    for rec in records or []:
+        name = str(rec.get("Race Name") or "").strip()
+        if not name:
+            continue
+        grade = str(rec.get("Grade") or "").strip().upper()
+        year = str(rec.get("Race Year") or "").strip()
+        label = name
+        if grade:
+            label = f"{name} [{grade}]"
+        if year:
+            label = f"{label} ({year})"
+        key = label.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        labels.append(label)
+    return labels
+
+
+def load_stakes_index():
+    global _STAKES_BY_KEY
+    if _STAKES_BY_KEY is not None:
+        return _STAKES_BY_KEY
+    raw = hypomating_engine.load_stakes_data()
+    summaries = hypomating_engine.build_horse_summaries(raw)
+    grouped = {}
+    for rec in raw:
+        key = main.clean_horse_name(rec.get("Horse Name") or "")
+        if not key:
+            continue
+        grouped.setdefault(key, []).append(rec)
+    by_key = {}
+    for key, recs in grouped.items():
+        first = recs[0]
+        summary = summaries.get(first.get("Horse Name")) or {}
+        by_key[key] = {
+            "name": first.get("Horse Name") or key,
+            "sex": _sex_letter(first.get("Sex") or summary.get("sex")),
+            "status": summary.get("status"),
+            "races": _race_labels(recs),
+        }
+    _STAKES_BY_KEY = by_key
+    return _STAKES_BY_KEY
+
+
+def dam_produce_index():
+    global _DAM_INDEX
+    if _DAM_INDEX is not None:
+        return _DAM_INDEX
+    idx = {}
+    for key, tree in main.PEDIGREE_DATABASE.items():
+        if not isinstance(tree, dict):
+            continue
+        dam = tree.get("Dam")
+        dam_raw = dam.get("Horse") if isinstance(dam, dict) else dam
+        dam_key = main.clean_horse_name(dam_raw or "")
+        if not dam_key:
+            continue
+        sire = tree.get("Sire")
+        sire_raw = sire.get("Horse") if isinstance(sire, dict) else sire
+        parsed = parse_horse_label(tree.get("Horse") or key)
+        sire_parsed = parse_horse_label(sire_raw or "")
+        idx.setdefault(dam_key, []).append({
+            "name": parsed["name"],
+            "year": parsed["year"],
+            "key": main.clean_horse_name(tree.get("Horse") or key),
+            "sire": sire_parsed["name"],
+        })
+    _DAM_INDEX = idx
+    return _DAM_INDEX
+
+
+def _produce_rows(dam_key, subject_key, include_grandkids=True, limit=20):
+    stakes = load_stakes_index()
+    children = dam_produce_index().get(dam_key) or []
+    uniq = {}
+    for child in children:
+        uniq.setdefault(child["key"], child)
+    rows = []
+    for child in uniq.values():
+        rec = stakes.get(child["key"]) or {}
+        grand = []
+        if include_grandkids:
+            for gk in (dam_produce_index().get(child["key"]) or [])[:8]:
+                gk_rec = stakes.get(gk["key"]) or {}
+                if not gk_rec.get("status") and not gk_rec.get("races"):
+                    continue
+                grand.append({
+                    "name": gk["name"],
+                    "year": gk["year"],
+                    "sire": gk["sire"],
+                    "sex": gk_rec.get("sex") or "",
+                    "status": gk_rec.get("status"),
+                    "races": gk_rec.get("races") or [],
+                    "is_subject": gk["key"] == subject_key,
+                })
+        rows.append({
+            "name": child["name"],
+            "year": child["year"],
+            "sire": child["sire"],
+            "sex": rec.get("sex") or "",
+            "status": rec.get("status"),
+            "races": rec.get("races") or [],
+            "is_subject": child["key"] == subject_key,
+            "produce": grand,
+        })
+    rows.sort(key=lambda r: (
+        0 if r["is_subject"] else 1,
+        -_STATUS_WEIGHT.get(r.get("status") or "", 0),
+        r["name"].lower(),
+    ))
+    return rows[:limit]
+
+
+def female_family(pedigree_data, subject_name=""):
+    ordinals = ["1st dam", "2nd dam", "3rd dam", "4th dam"]
+    subject_key = main.clean_horse_name(subject_name)
+    stakes = load_stakes_index()
+    dams = []
+    curr = pedigree_data.get("Dam") if isinstance(pedigree_data, dict) else None
+    for i in range(4):
+        if not curr or not isinstance(curr, dict):
+            break
+        parsed = parse_horse_label(curr.get("Horse") or "")
+        sire_node = curr.get("Sire")
+        sire_raw = sire_node.get("Horse") if isinstance(sire_node, dict) else sire_node
+        sire_parsed = parse_horse_label(sire_raw or "")
+        dam_key = main.clean_horse_name(curr.get("Horse") or "")
+        rec = stakes.get(dam_key) or {}
+        dams.append({
+            "ordinal": ordinals[i],
+            "name": parsed["name"],
+            "year": parsed["year"],
+            "sire": sire_parsed["name"],
+            "status": rec.get("status"),
+            "racing": rec.get("races") or [],
+            "produce": _produce_rows(dam_key, subject_key, include_grandkids=(i == 0)),
+        })
+        curr = curr.get("Dam")
+    return dams
+
+
 def get_horse_profile(search_name, profiles=None):
     profiles = profiles if profiles is not None else main.load_master_profiles()
     clean_search = main.clean_horse_name(search_name)
@@ -426,5 +706,7 @@ def get_horse_profile(search_name, profiles=None):
         "pedigree": tree,
         "inbreeding": inbreeding,
         "top_progeny": payload_top,
+        "stud_book": stud_book_history(matched_key or search_name) if data else [],
+        "female_family": female_family(pedigree_data, parsed["name"]) if pedigree_data else [],
     }
     return result

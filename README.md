@@ -26,4 +26,16 @@ and filtered), along with major sales stats for the entirety of their stud caree
 Lastly, users can type in a horse's name, foaling year, sire, and dam in order to see that individual horse's sales history.
 
 There are also numerous other files that are meant to keep the main file working properly.
+
+Crossr website (v1)
+-------------------
+The public UI never serves `sales_data/` or `graded_stakes_winners.csv`. Those stay on the API server; the browser only receives JSON.
+
+1. Index sales once: `python3 scripts/index_sales.py`
+2. API: `uvicorn crossr_api.app:app --reload --port 8000`
+3. UI: `cd web && npm install && npm run dev` then open http://localhost:3000
+
+Docker: `docker compose up --build` after the sales index exists.
+
+Do not upload Keeneland/Fasig-Tipton CSVs to a public frontend host (Vercel). Keep them on the API machine only.
 """

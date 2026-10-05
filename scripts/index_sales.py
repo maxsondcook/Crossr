@@ -1,4 +1,4 @@
-"""One-shot indexer: load sales_data CSVs into crossr_sales.db."""
+"""One-shot indexer: load sales_data CSVs into crossr_sales.db (backend only)."""
 import os
 import sqlite3
 import sys
@@ -31,6 +31,13 @@ CREATE TABLE IF NOT EXISTS lots (
     sire_key TEXT,
     dam TEXT,
     dam_key TEXT,
+    damsire TEXT,
+    damsire_key TEXT,
+    color TEXT,
+    consignor TEXT,
+    purchaser TEXT,
+    barn TEXT,
+    foaled_location TEXT,
     birth_year TEXT,
     price_raw TEXT,
     price_num REAL,
@@ -84,6 +91,13 @@ def main():
                     sales_history.clean_search_string(r.get("sire")),
                     r.get("dam"),
                     sales_history.clean_search_string(r.get("dam")),
+                    r.get("damsire"),
+                    sales_history.clean_search_string(r.get("damsire")),
+                    r.get("color"),
+                    r.get("consignor"),
+                    r.get("purchaser"),
+                    r.get("barn"),
+                    r.get("foaled_location"),
                     r.get("birth_year"),
                     r.get("price_raw"),
                     r.get("price_num") or 0,
@@ -94,13 +108,14 @@ def main():
             conn.executemany(
                 """INSERT INTO lots (
                     catalog_id, hip, name, name_key, sex, sex_letter, sire, sire_key,
-                    dam, dam_key, birth_year, price_raw, price_num, is_rna, is_out, is_fasig
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    dam, dam_key, damsire, damsire_key, color, consignor, purchaser, barn,
+                    foaled_location, birth_year, price_raw, price_num, is_rna, is_out, is_fasig
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 rows,
             )
             total_lots += len(rows)
             print(f"  {year} {title}: {len(rows)} lots")
-        conn.commit()
+            conn.commit()
 
     conn.close()
     print(f"Indexed {catalog_count} catalogs / {total_lots} lots -> {DB_PATH}")

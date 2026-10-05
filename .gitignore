@@ -1,0 +1,8 @@
+web/node_modules/
+web/.next/
+__pycache__/
+*.pyc
+.DS_Store
+.mypy_cache/
+crossr_sales.db
+crossr_users.db
