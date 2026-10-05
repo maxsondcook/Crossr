@@ -274,11 +274,12 @@ def get_horse_input(role="the horse", depth=0, prefilled_data=None, parent_looku
 # ==============================================================================
 # 5. INBREEDING ANALYSIS ENGINE
 # ==============================================================================
-def analyze_inbreeding(horse_dict):
+def compute_inbreeding(horse_dict):
     """
     Parses a 5-generation pedigree dictionary to track ancestor locations,
-    computes consolidated cross-matching (Sire x Dam) using an uppercase layout format, 
+    computes consolidated cross-matching (Sire x Dam) using an uppercase layout format,
     and flags single-side linebreeding (Sire-side or Dam-side duplicates).
+    Returns a JSON-serializable report (no printing).
     """
     sire_occurrences = {}
     dam_occurrences = {}
@@ -369,32 +370,45 @@ def analyze_inbreeding(horse_dict):
             gens_str = ", ".join([f"{g}D" for g in sorted(d_gens)])
             dam_side_linebred.append(f"{ancestor_name} ({gens_str})")
 
+    return {
+        "cross_inbreeding": cross_inbred_results,
+        "sire_side_linebreeding": sire_side_linebred,
+        "dam_side_linebreeding": dam_side_linebred,
+        "coefficient": coefficient_total,
+        "coefficient_pct": round(coefficient_total * 100, 4),
+    }
+
+
+def analyze_inbreeding(horse_dict):
+    """CLI printer for compute_inbreeding."""
+    report = compute_inbreeding(horse_dict)
     print("-" * 80)
     print("Pedigree Inbreeding & Linebreeding Report:\n")
     
     print("Cross-Inbreeding (Sire x Dam):")
-    if cross_inbred_results:
-        for result in cross_inbred_results:
+    if report["cross_inbreeding"]:
+        for result in report["cross_inbreeding"]:
             print(f" • {result}")
     else:
         print(" None detected within 5 generations.")
         
     print("\nSire-Side Linebreeding (Duplicates on Sire side):")
-    if sire_side_linebred:
-        for result in sire_side_linebred:
+    if report["sire_side_linebreeding"]:
+        for result in report["sire_side_linebreeding"]:
             print(f" • {result}")
     else:
         print(" None detected.")
 
     print("\nDam-Side Linebreeding (Duplicates on Dam side):")
-    if dam_side_linebred:
-        for result in dam_side_linebred:
+    if report["dam_side_linebreeding"]:
+        for result in report["dam_side_linebreeding"]:
             print(f" • {result}")
     else:
         print(" None detected.")
         
-    print(f"\nInbreeding Coefficient (Wright's Equation): {coefficient_total * 100:.4f}%")
+    print(f"\nInbreeding Coefficient (Wright's Equation): {report['coefficient_pct']:.4f}%")
     print("-" * 80)
+    return report
 
 
 # ==============================================================================
