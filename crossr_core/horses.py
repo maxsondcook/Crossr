@@ -11,6 +11,8 @@ import hypomating_engine
 _SEARCH_INDEX = None
 _FEE_HISTORY = None
 _MARES_HISTORY = None
+_BMS_RANKS = None
+_STALLION_RANK_TABLES = None
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -29,7 +31,7 @@ def trim_pedigree(node, depth=0, max_depth=5):
         return None
     raw = node.get("Horse", "UNKNOWN")
     parsed = parse_horse_label(raw)
-    db_lookup = main.PEDIGREE_DATABASE.get(main.clean_horse_name(raw), {}) if depth < max_depth else {}
+    db_lookup = main.pedigree_tree(raw) if depth < max_depth else {}
     sire = (node.get("Sire") if isinstance(node, dict) else None) or db_lookup.get("Sire")
     dam = (node.get("Dam") if isinstance(node, dict) else None) or db_lookup.get("Dam")
     return {
@@ -123,7 +125,7 @@ def top_progeny_for_sire(sire_name, limit=12):
 
 
 def parent_names(search_name):
-    tree = main.PEDIGREE_DATABASE.get(main.clean_horse_name(search_name))
+    tree = main.pedigree_tree(search_name)
     if not tree:
         return None, None
     sire = tree.get("Sire") or {}
@@ -133,6 +135,337 @@ def parent_names(search_name):
     sire_name = re.sub(r"\s*\(\d{4}\)", "", str(sire_name or "")).strip()
     dam_name = re.sub(r"\s*\(\d{4}\)", "", str(dam_name or "")).strip()
     return sire_name or None, dam_name or None
+
+
+def _horse_id(node):
+    if not node:
+        return ""
+    if not isinstance(node, dict):
+        raw = str(node).strip()
+    else:
+        raw = str(node.get("Horse") or "").strip()
+    if not raw or "UNKNOWN" in raw.upper():
+        return ""
+    clean = main.clean_horse_name(raw)
+    year = main.foaling_year(raw)
+    return f"{clean}|{year}" if year else clean
+
+
+def _as_pedigree_node(raw):
+    if not raw:
+        return None
+    if isinstance(raw, dict):
+        return raw if _horse_id(raw) else None
+    text = str(raw).strip()
+    if not text or "UNKNOWN" in text.upper():
+        return None
+    return {"Horse": text}
+
+
+def _parents_of(node, cache):
+    nid = _horse_id(node)
+    if not nid:
+        return None, None
+    if nid in cache:
+        return cache[nid]
+    sire = node.get("Sire") if isinstance(node, dict) else None
+    dam = node.get("Dam") if isinstance(node, dict) else None
+    if not _as_pedigree_node(sire) or not _as_pedigree_node(dam):
+        raw = node.get("Horse") if isinstance(node, dict) else ""
+        looked = main.pedigree_tree(raw) or {}
+        sire = sire or looked.get("Sire")
+        dam = dam or looked.get("Dam")
+    pair = (_as_pedigree_node(sire), _as_pedigree_node(dam))
+    cache[nid] = pair
+    return pair
+
+
+def _hypo_tree(name):
+    if not name:
+        return None
+    try:
+        import hypofoals_manager
+
+        db = hypofoals_manager.load_hypo_database()
+    except Exception:
+        return None
+    want = main.clean_horse_name(str(name).replace("×", "x"))
+    for key, tree in (db or {}).items():
+        if not isinstance(tree, dict):
+            continue
+        labels = [tree.get("Horse") or "", key, str(key).replace(" x ", " x ")]
+        if any(main.clean_horse_name(str(label).replace("×", "x")) == want for label in labels if label):
+            return tree
+    return None
+
+
+def resolve_pedigree_tree(name=None, tree=None, sire=None, dam=None, damsire=None):
+    """Build a Horse/Sire/Dam node from a name, hypo-foal, or sire×dam pair."""
+    if isinstance(tree, dict) and (tree.get("Horse") or tree.get("Sire") or tree.get("Dam") or tree.get("name")):
+        if "Horse" not in tree and "name" in tree:
+            return _from_trimmed(tree)
+        return tree
+    if sire or dam:
+        sire_tree = main.pedigree_tree(sire) if sire else {}
+        dam_tree = main.pedigree_tree(dam) if dam else {}
+        if not isinstance(dam_tree, dict) or not dam_tree:
+            dam_tree = {"Horse": dam or "UNKNOWN"}
+        elif "Horse" not in dam_tree and dam:
+            dam_tree = {**dam_tree, "Horse": dam}
+        if damsire and isinstance(dam_tree, dict) and not (
+            isinstance(dam_tree.get("Sire"), dict) and dam_tree.get("Sire", {}).get("Horse")
+        ):
+            damsire_tree = main.pedigree_tree(damsire) if damsire else {}
+            dam_tree = {
+                **dam_tree,
+                "Sire": damsire_tree if isinstance(damsire_tree, dict) and damsire_tree else {"Horse": damsire},
+            }
+        return {
+            "Horse": name or f"{sire or 'UNKNOWN'} x {dam or 'UNKNOWN'}",
+            "Sire": sire_tree if isinstance(sire_tree, dict) and sire_tree else {"Horse": sire or "UNKNOWN"},
+            "Dam": dam_tree,
+        }
+    if not name:
+        return None
+    hit = main.pedigree_tree(name)
+    if hit:
+        return hit
+    hypo = _hypo_tree(name)
+    if hypo:
+        return hypo
+    if re.search(r"\s+x\s+", str(name), re.I):
+        parts = re.split(r"\s+[x×]\s+", str(name), maxsplit=1, flags=re.I)
+        if len(parts) == 2:
+            return resolve_pedigree_tree(name=name, sire=parts[0].strip(), dam=parts[1].strip(), damsire=damsire)
+    return {"Horse": name}
+
+
+def _from_trimmed(node):
+    if not node or not isinstance(node, dict):
+        return None
+    raw = node.get("display") or node.get("Horse") or node.get("name")
+    if not raw:
+        return None
+    out = {"Horse": raw}
+    if node.get("sire"):
+        out["Sire"] = _from_trimmed(node["sire"])
+    elif node.get("Sire"):
+        out["Sire"] = node["Sire"] if isinstance(node["Sire"], dict) else {"Horse": node["Sire"]}
+    if node.get("dam"):
+        out["Dam"] = _from_trimmed(node["dam"])
+    elif node.get("Dam"):
+        out["Dam"] = node["Dam"] if isinstance(node["Dam"], dict) else {"Horse": node["Dam"]}
+    return out
+
+
+def _slot_ids_match(id_a, id_b):
+    if not id_a or not id_b:
+        return False
+    if id_a == id_b:
+        return True
+    name_a, _, year_a = id_a.partition("|")
+    name_b, _, year_b = id_b.partition("|")
+    if name_a != name_b:
+        return False
+    if year_a and year_b:
+        return year_a == year_b
+    return True
+
+
+def _ancestor_slots(node, cache, max_depth=5):
+    """Path -> horse id for 5 generations of ancestors (62 slots when full)."""
+    slots = {}
+
+    def walk(current, path, depth):
+        if depth >= max_depth or not current:
+            return
+        sire, dam = _parents_of(current, cache)
+        for letter, parent in (("S", sire), ("D", dam)):
+            pid = _horse_id(parent)
+            if not pid:
+                continue
+            slots[path + letter] = pid
+            walk(parent, path + letter, depth + 1)
+
+    walk(node, "", 0)
+    return slots
+
+
+def _slot_overlap_percent(tree_a, tree_b, cache):
+    slots_a = _ancestor_slots(tree_a, cache)
+    slots_b = _ancestor_slots(tree_b, cache)
+    both = [path for path in slots_a if path in slots_b]
+    if not both:
+        return 0
+    matches = sum(1 for path in both if _slot_ids_match(slots_a[path], slots_b[path]))
+    return int(round(min(100.0, 100.0 * matches / len(both))))
+
+
+def _full_siblings(sire_a, dam_a, sire_b, dam_b):
+    return bool(
+        _horse_id(sire_a)
+        and _slot_ids_match(_horse_id(sire_a), _horse_id(sire_b))
+        and _horse_id(dam_a)
+        and _slot_ids_match(_horse_id(dam_a), _horse_id(dam_b))
+    )
+
+
+def pedigree_similarity(a=None, b=None, a_tree=None, b_tree=None, a_sire=None, a_dam=None, b_sire=None, b_dam=None):
+    """Percent of matching 5-generation ancestor slots; sibling floors as a safety net."""
+    tree_a = resolve_pedigree_tree(name=a, tree=a_tree, sire=a_sire, dam=a_dam)
+    tree_b = resolve_pedigree_tree(name=b, tree=b_tree, sire=b_sire, dam=b_dam)
+    if not _horse_id(tree_a) or not _horse_id(tree_b):
+        return None
+    cache = {}
+    percent = _slot_overlap_percent(tree_a, tree_b, cache)
+    sa, da = _parents_of(tree_a, cache)
+    sb, db = _parents_of(tree_b, cache)
+    same_sire = bool(_horse_id(sa) and _slot_ids_match(_horse_id(sa), _horse_id(sb)))
+    same_dam = bool(_horse_id(da) and _slot_ids_match(_horse_id(da), _horse_id(db)))
+    sire_bros = _full_siblings(*_parents_of(sa, cache), *_parents_of(sb, cache)) if sa and sb else False
+    dam_sis = _full_siblings(*_parents_of(da, cache), *_parents_of(db, cache)) if da and db else False
+    three_quarter = (same_sire and dam_sis) or (same_dam and sire_bros)
+    label = None
+    if _slot_ids_match(_horse_id(tree_a), _horse_id(tree_b)):
+        percent = 100
+        label = "Same horse"
+    elif same_sire and same_dam:
+        percent = max(percent, 100)
+        label = "Full siblings"
+    elif three_quarter:
+        percent = max(percent, 75)
+        label = "3/4 siblings"
+    elif same_dam:
+        percent = max(percent, 50)
+        label = "Same dam"
+    elif same_sire:
+        percent = max(percent, 50)
+        label = "Same sire"
+    return {
+        "percent": percent,
+        "label": label,
+        "a": a or (tree_a.get("Horse") if isinstance(tree_a, dict) else None),
+        "b": b or (tree_b.get("Horse") if isinstance(tree_b, dict) else None),
+    }
+
+
+def similar_cross_rows(sire_name, reference_tree=None, reference_name=None, reference_sire=None, reference_dam=None, limit=20):
+    """Proven GSWs by this sire, with pedigree similarity to a reference horse."""
+    payload = hypomating_engine.top_crosses_payload(main.PEDIGREE_DATABASE, sire_name, limit=40)
+    ref = resolve_pedigree_tree(name=reference_name, tree=reference_tree, sire=reference_sire, dam=reference_dam)
+    rows = []
+    for cross in payload.get("crosses") or []:
+        for winner in cross.get("winners") or []:
+            sim = None
+            if ref and _horse_id(ref):
+                sim = pedigree_similarity(a_tree=ref, b=winner.get("name"))
+            rows.append({
+                "name": winner.get("name"),
+                "broodmare_sire": cross.get("broodmare_sire"),
+                "class": winner.get("status"),
+                "dam": winner.get("dam"),
+                "similarity": (sim or {}).get("percent"),
+                "similarity_label": (sim or {}).get("label"),
+            })
+    tier = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "SW": 6}
+    rows.sort(key=lambda row: (-(row["similarity"] if row["similarity"] is not None else -1), tier.get(row["class"], 9)))
+    return rows[:limit]
+
+
+def _clean_attr(value):
+    text = "" if value is None else str(value).strip()
+    if text.lower() in {"", "nan", "none", "null", "n/a", "na", "information unavailable."}:
+        return None
+    return text
+
+
+def _year_only(value):
+    match = re.search(r"(?:19|20)\d{2}", str(value or ""))
+    return match.group(0) if match else ""
+
+
+def profile_lookup(profiles):
+    return {main.clean_horse_name(key): data for key, data in (profiles or {}).items()}
+
+
+def sire_height(sire_name, lookup):
+    data = (lookup or {}).get(main.clean_horse_name(sire_name or ""))
+    if not data:
+        return None
+    return _clean_attr(data.get("Height"))
+
+
+def _profile_for(name, profiles):
+    if not name or not profiles:
+        return None
+    return profile_lookup(profiles).get(main.clean_horse_name(name))
+
+
+def _sire_class(sire_name, profile):
+    if profile:
+        wins = _clean_attr(profile.get("Major Wins"))
+        if wins:
+            return wins.split(",")[0].strip()[:48]
+    rank = _stud_rank(sire_name) if sire_name else None
+    return f"#{rank}" if rank else None
+
+
+def _is_catalog_placeholder(name):
+    label = (name or "").strip()
+    if not label:
+        return True
+    if re.match(r"^hip\s*\d+$", label, re.I):
+        return True
+    if re.match(r"^\d{4}-", label):
+        return True
+    if re.search(r"\s+x\s+", label, re.I):
+        return True
+    return False
+
+
+def catalog_pedigree(name=None, year=None, sire=None, dam=None, damsire=None):
+    """Subject tree when the horse is on file, otherwise the sire × dam catalog fallback."""
+    label = (name or "").strip()
+    # Upcoming yearlings often use 2025-DAM or "Sire x Dam" labels — prefer catalog parents.
+    if sire or dam:
+        if _is_catalog_placeholder(label):
+            return resolve_pedigree_tree(name=label, sire=sire, dam=dam, damsire=damsire)
+    year_s = _year_only(year)
+    lookup = label
+    if year_s and label and not re.search(r"\(\d{4}\)", label) and not _is_catalog_placeholder(label):
+        lookup = f"{label} ({year_s})"
+    direct = main.pedigree_tree(lookup) if lookup and not _is_catalog_placeholder(label) else None
+    if not direct and label and label != lookup and not _is_catalog_placeholder(label):
+        direct = main.pedigree_tree(label)
+    if isinstance(direct, dict) and direct.get("Sire"):
+        return direct
+    return resolve_pedigree_tree(name=lookup or label, sire=sire, dam=dam, damsire=damsire)
+
+
+def sale_workspace(name, sire=None, dam=None, year=None, sex=None, color=None, foaled=None, sold_as=None, covering_sire=None, damsire=None, profiles=None):
+    """Pedigree, female family, similar crosses for one sale horse. Physical stays blank."""
+    profiles = profiles or {}
+    year_s = _year_only(year)
+    tree = catalog_pedigree(name=name, year=year, sire=sire, dam=dam, damsire=damsire)
+    family = female_family(tree, name or "") if tree else []
+    crosses = similar_cross_rows(
+        sire,
+        reference_name=name,
+        reference_sire=sire,
+        reference_dam=dam,
+        limit=20,
+    ) if sire else []
+    sire_profile = _profile_for(sire, profiles)
+    return {
+        "year": year_s,
+        "pedigree": trim_pedigree(tree) if tree else None,
+        "female_family": family,
+        "similar_crosses": crosses,
+        "sire_class": _sire_class(sire, sire_profile),
+        "dam_class": family[0].get("status") if family else None,
+        # Sales Physical panel is intentionally a blank placeholder.
+        "physical": None,
+    }
 
 
 def list_farms(profiles=None):
@@ -223,6 +556,11 @@ def list_stallions(
     return rows
 
 
+def _index_id(clean, year):
+    year = str(year or "").strip()
+    return f"{clean} ({year})" if year else clean
+
+
 def build_search_index(profiles=None):
     global _SEARCH_INDEX
     profiles = profiles if profiles is not None else main.load_master_profiles()
@@ -231,10 +569,14 @@ def build_search_index(profiles=None):
         display = tree.get("Horse", key) if isinstance(tree, dict) else key
         parsed = parse_horse_label(display)
         ck = main.clean_horse_name(key)
-        entries[ck] = {
-            "key": ck,
-            "name": parsed["name"],
-            "year": parsed["year"],
+        year = parsed["year"] or main.foaling_year(key)
+        eid = _index_id(ck, year)
+        if eid in entries and entries[eid].get("has_pedigree"):
+            continue
+        entries[eid] = {
+            "key": eid,
+            "name": parsed["name"] or ck,
+            "year": year,
             "display": display,
             "has_pedigree": True,
             "has_profile": False,
@@ -242,21 +584,30 @@ def build_search_index(profiles=None):
     for key, data in profiles.items():
         ck = main.clean_horse_name(key)
         year = str(data.get("Year Born", "") or "")
-        if ck in entries:
-            entries[ck]["has_profile"] = True
-            entries[ck]["farm"] = str(data.get("Farm", "")).replace("_", " ").title()
-            if year and not entries[ck]["year"]:
-                entries[ck]["year"] = year
+        eid = _index_id(ck, year) if year else ck
+        if eid in entries:
+            entries[eid]["has_profile"] = True
+            entries[eid]["farm"] = str(data.get("Farm", "")).replace("_", " ").title()
+            if year and not entries[eid]["year"]:
+                entries[eid]["year"] = year
         else:
-            entries[ck] = {
-                "key": ck,
-                "name": key,
-                "year": year,
-                "display": key,
-                "has_pedigree": False,
-                "has_profile": True,
-                "farm": str(data.get("Farm", "")).replace("_", " ").title(),
-            }
+            same_name = [
+                k for k, item in entries.items()
+                if main.clean_horse_name(item.get("name", "")) == ck
+            ]
+            if len(same_name) == 1:
+                entries[same_name[0]]["has_profile"] = True
+                entries[same_name[0]]["farm"] = str(data.get("Farm", "")).replace("_", " ").title()
+            else:
+                entries[eid] = {
+                    "key": eid,
+                    "name": key,
+                    "year": year,
+                    "display": key,
+                    "has_pedigree": False,
+                    "has_profile": True,
+                    "farm": str(data.get("Farm", "")).replace("_", " ").title(),
+                }
     _SEARCH_INDEX = list(entries.values())
     return _SEARCH_INDEX
 
@@ -265,10 +616,13 @@ def search_horses(query, limit=15, profiles=None):
     q = main.clean_horse_name(query)
     if not q:
         return []
+    q_year = main.foaling_year(query)
     index = _SEARCH_INDEX if _SEARCH_INDEX is not None else build_search_index(profiles)
     scored = []
     for item in index:
-        key = item["key"]
+        if q_year and item.get("year") and item["year"] != q_year:
+            continue
+        key = main.clean_horse_name(item["key"])
         name = main.clean_horse_name(item["name"])
         if key == q or name == q:
             scored.append((0, item))
@@ -276,7 +630,7 @@ def search_horses(query, limit=15, profiles=None):
             scored.append((1, item))
         elif q in key or q in name:
             scored.append((2, item))
-    scored.sort(key=lambda x: (x[0], x[1]["name"]))
+    scored.sort(key=lambda x: (x[0], x[1]["name"], x[1].get("year") or ""))
     return [item for _, item in scored[:limit]]
 
 
@@ -302,6 +656,17 @@ def _intish(val):
         return int(digits)
     except ValueError:
         return None
+
+
+def _csv_earnings(row):
+    """Total progeny earnings column (not chief earner) from a ranking CSV row."""
+    for key, val in (row or {}).items():
+        label = re.sub(r"\s+", " ", str(key or "")).strip().lower()
+        if "chief" in label or "earner" in label:
+            continue
+        if "earnings" in label:
+            return _intish(val)
+    return None
 
 
 def load_book_stats():
@@ -373,12 +738,377 @@ def load_book_stats():
     return fees, mares
 
 
-def stud_book_history(stallion_name):
+def _csv_year(path):
+    year_m = re.search(r"(?:19|20)\d{2}", os.path.basename(path)) or re.search(
+        r"(?:19|20)\d{2}", os.path.dirname(path)
+    )
+    return int(year_m.group(0)) if year_m else None
+
+
+def _load_csv_rank_map(filename_glob):
+    """Parse BloodHorse ranking CSVs into {clean_name: {year: rank}} plus sorted years."""
+    ranks = {}
+    years = set()
+    pattern = os.path.join(ROOT, "stallion_rankings_data", "*", filename_glob)
+    for path in glob.glob(pattern):
+        year = _csv_year(path)
+        if not year:
+            continue
+        years.add(year)
+        with open(path, encoding="utf-8-sig", errors="ignore", newline="") as f:
+            for row in csv.DictReader(f):
+                raw_name = (row.get("Stallion") or "").strip()
+                if not raw_name:
+                    continue
+                first = raw_name.splitlines()[0].strip()
+                name = main.clean_horse_name(first)
+                rank = _intish(row.get("#") or row.get("Rank"))
+                if not name or not rank:
+                    continue
+                ranks.setdefault(name, {})[year] = rank
+    return ranks, sorted(years, reverse=True)
+
+
+def _assign_ranks(name_to_value):
+    items = [(n, v) for n, v in name_to_value.items() if v is not None]
+    items.sort(key=lambda kv: kv[1], reverse=True)
+    out = {}
+    last_val = object()
+    last_rank = 0
+    for i, (name, val) in enumerate(items, 1):
+        if val != last_val:
+            last_rank = i
+            last_val = val
+        out[name] = last_rank
+    return out
+
+
+def _fee_amount(raw):
+    text = str(raw or "").strip()
+    if not text or text.lower() == "private":
+        return None
+    if re.search(r"\b(JPY|EUR|GBP|AUD|HKD|IRE|NZD|CAD)\b", text, re.I):
+        return None
+    if not re.search(r"USD|\$", text, re.I) and re.search(r"[A-Za-z]", text):
+        return None
+    match = re.search(r"([\d,]+)", text)
+    if not match:
+        return None
+    try:
+        return int(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _rank_metric_maps(year_values):
+    """year_values: {year: {clean_name: number}} -> ({name: {year: rank}}, years desc)."""
+    ranks = {}
+    years = sorted(year_values, reverse=True)
+    for year, by_name in year_values.items():
+        for name, rank in _assign_ranks(by_name).items():
+            ranks.setdefault(name, {})[year] = rank
+    return ranks, years
+
+
+def load_broodmare_ranks():
+    """Year -> rank for each cleaned stallion name from Leading Broodmare Sires CSVs."""
+    global _BMS_RANKS
+    if _BMS_RANKS is not None:
+        return _BMS_RANKS
+    ranks, _years = _load_csv_rank_map("*Leading Broodmare Sires.csv")
+    _BMS_RANKS = ranks
+    return ranks
+
+
+_RANK_LIST_ORDER = [
+    "Leading Sire Rankings",
+    "Leading Sires by AEI",
+    "Leading First Crop Sires",
+    "Leading Second-Crop Sires",
+    "Leading Third-Crop Sires",
+    "Leading Two-Year-Old Sires",
+    "Leading Turf Sires",
+    "Leading Broodmare Sires",
+    "Leading International Sires",
+    "Leading International Sires — North America",
+    "Leading International Sires — Europe & Dubai",
+    "Leading International Sires — Japan & Hong Kong",
+    "Leading International First-Crop Sires",
+    "Leading International First-Crop Sires — North America",
+    "Leading International First-Crop Sires — Europe & Dubai",
+    "Leading International First-Crop Sires — Japan & Hong Kong",
+    "Leading International 2nd-Crop Sires",
+    "Leading International 2nd-Crop Sires — North America",
+    "Leading International 2nd-Crop Sires — Europe & Dubai",
+    "Leading International 2nd-Crop Sires — Japan & Hong Kong",
+    "Leading International 3rd-Crop Sires",
+    "Leading International 3rd-Crop Sires — North America",
+    "Leading International 3rd-Crop Sires — Europe & Dubai",
+    "Leading International 3rd-Crop Sires — Japan & Hong Kong",
+    "Leading International Two-Year-Old Sires",
+    "Leading International Two-Year-Old Sires — North America",
+    "Leading International Two-Year-Old Sires — Europe & Dubai",
+    "Leading International Two-Year-Old Sires — Japan & Hong Kong",
+]
+_FEE_RANK_MAX_YEAR = 2026
+
+
+def _norm_rank_key(text):
+    t = (text or "").lower().replace("&", "and")
+    t = t.replace("hong kong", "hongkong")
+    t = t.replace("north america", "northamerica")
+    t = t.replace("two-year-old", "twoyearold").replace("two year old", "twoyearold")
+    t = t.replace("first-crop", "firstcrop").replace("first crop", "firstcrop")
+    t = t.replace("second-crop", "secondcrop").replace("second crop", "secondcrop")
+    t = t.replace("2nd-crop", "2ndcrop").replace("2nd crop", "2ndcrop")
+    t = t.replace("third-crop", "thirdcrop").replace("third crop", "thirdcrop")
+    t = t.replace("3rd-crop", "3rdcrop").replace("3rd crop", "3rdcrop")
+    return re.sub(r"[^a-z0-9]", "", t)
+
+
+_RANK_LABEL_BY_KEY = {_norm_rank_key(label): label for label in _RANK_LIST_ORDER}
+
+
+def _ranking_file_label(filename):
+    name = os.path.basename(filename)
+    name = re.sub(r"^\d{4}StallionRankings\s*-\s*", "", name)
+    name = re.sub(r"\.csv$", "", name, flags=re.I)
+    return name.strip()
+
+
+def _pretty_rank_label(raw):
+    text = raw or ""
+    text = re.sub(r"LeadingInternational(?=\S)", "Leading International ", text)
+    text = text.replace("TwoYearOldSires", "Two-Year-Old Sires")
+    text = text.replace("FirstCropSires", "First-Crop Sires")
+    text = text.replace("First-CropSires", "First-Crop Sires")
+    text = text.replace("2ndCrop", "2nd-Crop")
+    text = text.replace("3rdCrop", "3rd-Crop")
+    for src, dst in (
+        ("-Japan&HongKong", " — Japan & Hong Kong"),
+        ("-Japan&Hong Kong", " — Japan & Hong Kong"),
+        ("-Europe&Dubai", " — Europe & Dubai"),
+        ("-NorthAmerica", " — North America"),
+        ("-North America", " — North America"),
+    ):
+        text = text.replace(src, dst)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _rank_list_id(label):
+    if _norm_rank_key(label) == _norm_rank_key("Leading Sire Rankings"):
+        return "leading_sire"
+    slug = label.lower().replace("&", " and ").replace("—", " ").replace("–", " ")
+    return re.sub(r"[^a-z0-9]+", "_", slug).strip("_")
+
+
+def _stud_start_year(entered_stud):
+    year = _intish(entered_stud)
+    return year if year and year > 1900 else None
+
+
+def _years_for_view(years, entered_stud=None, max_year=None):
+    start = _stud_start_year(entered_stud)
+    out = []
+    for year in years:
+        if start and year < start:
+            continue
+        if max_year is not None and year > max_year:
+            continue
+        out.append(year)
+    return out
+
+
+def load_stallion_ranking_tables():
+    """All BloodHorse ranking CSVs plus mares-bred / stud-fee yearly ranks."""
+    global _STALLION_RANK_TABLES
+    if _STALLION_RANK_TABLES is not None:
+        return _STALLION_RANK_TABLES
+
+    grouped = {}
+    data_root = os.path.join(ROOT, "stallion_rankings_data")
+    for year_name in os.listdir(data_root):
+        year_dir = os.path.join(data_root, year_name)
+        if not os.path.isdir(year_dir) or not re.fullmatch(r"(?:19|20)\d{2}", year_name):
+            continue
+        year = int(year_name)
+        for fname in os.listdir(year_dir):
+            if not fname.lower().endswith(".csv"):
+                continue
+            path = os.path.join(year_dir, fname)
+            raw_label = _ranking_file_label(fname)
+            norm = _norm_rank_key(raw_label)
+            if not norm:
+                continue
+            bucket = grouped.setdefault(
+                norm,
+                {
+                    "label": _RANK_LABEL_BY_KEY.get(norm) or _pretty_rank_label(raw_label),
+                    "ranks": {},
+                    "extras": {},
+                    "years": set(),
+                },
+            )
+            bucket["years"].add(year)
+            capture_earnings = norm == _norm_rank_key("Leading Sire Rankings")
+            try:
+                with open(path, encoding="utf-8-sig", errors="ignore", newline="") as f:
+                    for row in csv.DictReader(f):
+                        raw_name = (row.get("Stallion") or "").strip()
+                        if not raw_name:
+                            continue
+                        first = raw_name.splitlines()[0].strip()
+                        name = main.clean_horse_name(first)
+                        rank = _intish(row.get("#") or row.get("Rank"))
+                        if not name or not rank:
+                            continue
+                        bucket["ranks"].setdefault(name, {})[year] = rank
+                        if capture_earnings:
+                            earnings = _csv_earnings(row)
+                            if earnings is not None:
+                                bucket["extras"].setdefault(name, {})[year] = {"earnings": earnings}
+            except Exception:
+                continue
+
+    lists = []
+    tables = {}
+    seen = set()
+    ordered_keys = [_norm_rank_key(label) for label in _RANK_LIST_ORDER] + [
+        k for k in grouped if k not in _RANK_LABEL_BY_KEY
+    ]
+    for norm in ordered_keys:
+        bucket = grouped.get(norm)
+        if not bucket or norm in seen:
+            continue
+        seen.add(norm)
+        list_id = _rank_list_id(bucket["label"])
+        item = {"id": list_id, "label": bucket["label"], "group": "bloodhorse"}
+        if list_id == "leading_sire":
+            item["metric"] = "earnings"
+            item["metric_label"] = "Total Progeny Earnings"
+        lists.append(item)
+        tables[list_id] = {
+            "ranks": bucket["ranks"],
+            "years": sorted(bucket["years"], reverse=True),
+            "extras": bucket.get("extras") or {},
+        }
+
+    fees, mares = load_book_stats()
+    mares_by_year = {}
+    for name, by_year in mares.items():
+        for year, row in by_year.items():
+            count = row.get("mares_bred") if isinstance(row, dict) else None
+            if not count:
+                continue
+            mares_by_year.setdefault(year, {})[name] = count
+    mares_ranks, mares_years = _rank_metric_maps(mares_by_year)
+
+    fee_by_year = {}
+    fee_extras = {}
+    fee_path = os.path.join(ROOT, "stud_fee_database.csv")
+    if os.path.exists(fee_path):
+        with open(fee_path, encoding="utf-8-sig", errors="ignore") as f:
+            for row in csv.DictReader(f):
+                name = main.clean_horse_name(row.get("Stallion") or "")
+                year = _intish(row.get("Year"))
+                raw_fee = row.get("Stud Fee")
+                amount = _fee_amount(raw_fee)
+                if not name or not year or year > _FEE_RANK_MAX_YEAR or amount is None:
+                    continue
+                fee_by_year.setdefault(year, {})[name] = amount
+                fee_extras.setdefault(name, {})[year] = {
+                    "stud_fee": _format_stud_fee(raw_fee),
+                    "stud_fee_num": amount,
+                }
+    fee_ranks, fee_years = _rank_metric_maps(fee_by_year)
+
+    lists.append({"id": "mares_bred", "label": "Mares Bred Rankings", "group": "book"})
+    lists.append({
+        "id": "stud_fee",
+        "label": "Stud Fee Rankings",
+        "group": "book",
+        "metric": "stud_fee",
+        "metric_label": "Stud Fee",
+    })
+    tables["mares_bred"] = {"ranks": mares_ranks, "years": mares_years, "extras": {}}
+    tables["stud_fee"] = {"ranks": fee_ranks, "years": fee_years, "extras": fee_extras}
+
+    _STALLION_RANK_TABLES = {"lists": lists, "tables": tables}
+    return _STALLION_RANK_TABLES
+
+
+def stallion_ranking_history(stallion_name, entered_stud=None):
+    """Yearly ranks for lists this stallion actually appears on."""
+    key = main.clean_horse_name(stallion_name)
+    payload = load_stallion_ranking_tables()
+    lists = []
+    rows = {}
+    for item in payload["lists"]:
+        list_id = item["id"]
+        table = payload["tables"][list_id]
+        by_name = table["ranks"]
+        years = table["years"]
+        extras = (table.get("extras") or {}).get(key, {})
+        stallion_years = by_name.get(key, {})
+        max_year = _FEE_RANK_MAX_YEAR if list_id == "stud_fee" else None
+        view_years = _years_for_view(years, entered_stud=entered_stud, max_year=max_year)
+        ranked = []
+        for year in view_years:
+            rank = stallion_years.get(year)
+            if not rank:
+                continue
+            row = {"year": year, "rank": rank}
+            extra = extras.get(year) or {}
+            if extra.get("earnings") is not None:
+                row["earnings"] = extra["earnings"]
+            if extra.get("stud_fee"):
+                row["stud_fee"] = extra["stud_fee"]
+            if extra.get("stud_fee_num") is not None:
+                row["stud_fee_num"] = extra["stud_fee_num"]
+            ranked.append(row)
+        if not ranked:
+            continue
+        lists.append(item)
+        rows[list_id] = ranked
+    return {"lists": lists, "rows": rows}
+
+
+def broodmare_sire_history(stallion_name):
+    """Yearly BMS rank plus average sold yearling price for this damsire."""
+    key = main.clean_horse_name(stallion_name)
+    ranks = load_broodmare_ranks().get(key, {})
+    sales = {}
+    try:
+        from crossr_core.sales import damsire_yearling_averages
+
+        sales = damsire_yearling_averages(stallion_name) or {}
+    except Exception:
+        sales = {}
+    years = sorted(set(ranks) | set(sales), reverse=True)
+    rows = []
+    for year in years:
+        sold = sales.get(year) or {}
+        rows.append(
+            {
+                "year": year,
+                "rank": ranks.get(year),
+                "avg_yearling": sold.get("avg_price"),
+                "n_yearlings": sold.get("n"),
+            }
+        )
+    return rows
+
+
+def stud_book_history(stallion_name, entered_stud=None):
     fees, mares = load_book_stats()
     key = main.clean_horse_name(stallion_name)
     fee_years = fees.get(key, {})
     mare_years = mares.get(key, {})
-    years = sorted(set(fee_years) | set(mare_years), reverse=True)
+    years = _years_for_view(
+        sorted(set(fee_years) | set(mare_years), reverse=True),
+        entered_stud=entered_stud,
+        max_year=_FEE_RANK_MAX_YEAR,
+    )
     rows = []
     for year in years:
         mb = mare_years.get(year) or {}
@@ -416,7 +1146,7 @@ def _race_labels(records):
         name = str(rec.get("Race Name") or "").strip()
         if not name:
             continue
-        grade = str(rec.get("Grade") or "").strip().upper()
+        grade = str(rec.get("Grade") or rec.get("Group") or "").strip().upper()
         year = str(rec.get("Race Year") or "").strip()
         label = name
         if grade:
@@ -432,6 +1162,7 @@ def _race_labels(records):
 
 
 def load_stakes_index():
+    """Index of graded/group stakes *winners* (Place==1) from the IFHA CSV."""
     global _STAKES_BY_KEY
     if _STAKES_BY_KEY is not None:
         return _STAKES_BY_KEY
@@ -565,12 +1296,16 @@ def get_horse_profile(search_name, profiles=None):
             matched_key = key
             break
 
-    pedigree_data = main.PEDIGREE_DATABASE.get(clean_search)
-    if not pedigree_data:
-        for key, tree in main.PEDIGREE_DATABASE.items():
-            if main.clean_horse_name(key) == clean_search:
-                pedigree_data = tree
-                break
+    hit = main.lookup_pedigree(search_name)
+    if hit["ambiguous"]:
+        return {
+            "ambiguous": True,
+            "key": hit["clean_name"],
+            "name": hit["clean_name"],
+            "years": hit["years"],
+            "display": hit["clean_name"],
+        }
+    pedigree_data = hit["tree"]
 
     horse_name = matched_key.upper() if matched_key else search_name.strip().upper()
     if pedigree_data and isinstance(pedigree_data, dict) and pedigree_data.get("Horse"):
@@ -578,7 +1313,7 @@ def get_horse_profile(search_name, profiles=None):
 
     has_valid_pedigree = False
     if pedigree_data and isinstance(pedigree_data, dict):
-        db_lookup = main.PEDIGREE_DATABASE.get(clean_search, {})
+        db_lookup = pedigree_data
         if (
             pedigree_data.get("Sire")
             or db_lookup.get("Sire")
@@ -668,6 +1403,7 @@ def get_horse_profile(search_name, profiles=None):
             "major_wins": data.get("Major Wins", "N/A"),
             "career_highlight": data.get("Career Highlight", "N/A"),
             "rank": _stud_rank(matched_key or search_name),
+            "broodmare_rank": None,
             "progeny_racing": data.get("Progeny Racing Statistics"),
             "progeny_earnings": data.get("Progeny Earnings Statistics"),
             "legacy_progeny": data.get("Legacy Progeny Stats"),
@@ -692,7 +1428,14 @@ def get_horse_profile(search_name, profiles=None):
         payload_top = top_progeny_for_sire(clean_search)
     else:
         payload_top = []
-    parsed = parse_horse_label(horse_name)
+    entered_stud = data.get("Stud Duty Year") if data else None
+    bms_rows = broodmare_sire_history(matched_key or search_name)
+    try:
+        ranking_rows = stallion_ranking_history(matched_key or search_name, entered_stud=entered_stud)
+    except Exception:
+        ranking_rows = {"lists": [], "rows": {}}
+    if stallion:
+        stallion["broodmare_rank"] = next((row["rank"] for row in bms_rows if row.get("rank")), None)
     result = {
         "key": clean_search,
         "name": parsed["name"],
@@ -706,7 +1449,11 @@ def get_horse_profile(search_name, profiles=None):
         "pedigree": tree,
         "inbreeding": inbreeding,
         "top_progeny": payload_top,
-        "stud_book": stud_book_history(matched_key or search_name) if data else [],
+        "stud_book": stud_book_history(matched_key or search_name, entered_stud=entered_stud) if data else [],
+        "broodmare_sire": bms_rows,
+        "sire_rankings": ranking_rows,
         "female_family": female_family(pedigree_data, parsed["name"]) if pedigree_data else [],
+        "ambiguous": False,
+        "years": [parsed["year"]] if parsed.get("year") else hit.get("years") or [],
     }
     return result

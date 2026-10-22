@@ -1,239 +1,668 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { apiGet, horseHref } from "../../lib/api";
-import { saveAnalyzedSale } from "../../lib/barn";
+import { apiGet, apiPost, horseHref } from "../../lib/api";
+import { deskKey, loadDesk, saveDesk } from "../../lib/salesDesk";
+import PedigreeChart from "../../components/PedigreeChart";
+import FemaleFamily from "../../components/FemaleFamily";
+import MarketCurve from "../../components/MarketCurve";
 
-function Stats({ stats }) {
-  if (!stats) return null;
-  const lt = stats.lifetime || {};
-  const rc = stats.last_5_years;
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th>Metric</th>
-          <th>Lifetime</th>
-          {rc ? <th>Last 5 yrs</th> : null}
-        </tr>
-      </thead>
-      <tbody>
-        {["horses", "gross", "avg", "median", "sold_pct", "rna", "mil"].map((k) => (
-          <tr key={k}>
-            <td>{k.replace("_", " ")}</td>
-            <td>{lt[k]}</td>
-            {rc ? <td>{rc[k]}</td> : null}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
+function money(n) {
+  if (n == null || n === "") return "—";
+  const num = Number(n);
+  if (!num) return "—";
+  return `$${num.toLocaleString()}`;
+}
+
+function priceLabel(lot) {
+  if (!lot) return "—";
+  const raw = lot.price_raw == null ? "" : String(lot.price_raw).trim();
+  if (lot.is_rna) {
+    if (!raw || raw.toUpperCase() === "RNA") return "RNA";
+    return raw.toUpperCase().startsWith("RNA") ? raw : `RNA ${raw}`;
+  }
+  if (raw && lot.price_num) return raw;
+  if (lot.price_num) return money(lot.price_num);
+  return "—";
+}
+
+function shortClass(value) {
+  if (!value) return "";
+  return String(value).split(/\s+(?=G[1-3]\b)/)[0].trim();
+}
+
+function navId(mode, lot) {
+  if (!lot) return "";
+  return mode === "past" ? String(lot.id) : String(lot.hip ?? "");
+}
+
+function blank(value) {
+  return value == null ? "" : String(value).trim();
 }
 
 export default function SalesPage() {
-  const [tab, setTab] = useState("catalogs");
+  const [mode, setMode] = useState("");
   const [years, setYears] = useState([]);
   const [year, setYear] = useState("");
   const [catalogs, setCatalogs] = useState([]);
-  const [catalogId, setCatalogId] = useState("");
+  const [loadingCatalogs, setLoadingCatalogs] = useState(false);
+  const [catalog, setCatalog] = useState(null);
   const [lots, setLots] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [sex, setSex] = useState("");
-  const [sort, setSort] = useState("hip");
-  const [sire, setSire] = useState("");
-  const [horse, setHorse] = useState({ name: "", year: "", sire: "", dam: "" });
+  const [listError, setListError] = useState("");
+  const [loadingList, setLoadingList] = useState(false);
+  const [currentId, setCurrentId] = useState("");
   const [detail, setDetail] = useState(null);
-  const [clientsOpen, setClientsOpen] = useState(false);
-  const [error, setError] = useState("");
+  const [detailError, setDetailError] = useState("");
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [hipInput, setHipInput] = useState("");
+  const [jumpError, setJumpError] = useState("");
+  const [railOpen, setRailOpen] = useState(false);
+  const [desk, setDesk] = useState({ clients: [], dismissed: {}, notes: {}, stars: {} });
+  const [activeClient, setActiveClient] = useState("");
+  const [sex, setSex] = useState("");
+  const [color, setColor] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [height, setHeight] = useState("");
+  const [onlyDismissed, setOnlyDismissed] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteState, setNoteState] = useState("");
+  const [openAuction, setOpenAuction] = useState("");
+  const readyRef = useRef(false);
+  const draftRef = useRef("");
+  const loadedNote = useRef("");
 
   useEffect(() => {
-    apiGet("/api/sales/years").then((d) => {
-      setYears(d.years || []);
-      if (d.years?.length) setYear(String(d.years[0]));
-    }).catch((e) => setError(e.message));
+    setDesk(loadDesk());
   }, []);
 
   useEffect(() => {
-    if (!year) return;
-    apiGet(`/api/sales/catalogs?year=${year}`).then((d) => setCatalogs(d.catalogs || []));
-  }, [year]);
+    if (mode !== "past") return;
+    apiGet("/api/sales/years")
+      .then((d) => {
+        const list = d.years || [];
+        setYears(list);
+        setYear((prev) => prev || (list[0] != null ? String(list[0]) : ""));
+      })
+      .catch((e) => setListError(e.message));
+  }, [mode]);
 
-  async function loadCatalog(id) {
-    setCatalogId(id);
+  useEffect(() => {
+    if (mode !== "past" || !year) return;
+    setListError("");
+    setLoadingCatalogs(true);
+    apiGet(`/api/sales/catalogs?year=${year}`)
+      .then((d) => setCatalogs(d.catalogs || []))
+      .catch((e) => setListError(e.message))
+      .finally(() => setLoadingCatalogs(false));
+  }, [mode, year]);
+
+  useEffect(() => {
+    if (mode !== "upcoming") return;
+    setListError("");
+    setLoadingCatalogs(true);
+    apiGet("/api/sales/upcoming")
+      .then((d) => setCatalogs(d.catalogs || []))
+      .catch((e) => setListError(e.message))
+      .finally(() => setLoadingCatalogs(false));
+  }, [mode]);
+
+  useEffect(() => {
+    if (!catalog) return;
+    let cancel = false;
+    setLoadingList(true);
+    setListError("");
+    setLots([]);
+    setCurrentId("");
     setDetail(null);
-    const d = await apiGet(`/api/sales/lots?catalog_id=${id}&sort=${sort}&sex=${sex}`);
-    setLots(d.lots || []);
-    setStats(d.stats);
+    const path = mode === "upcoming"
+      ? `/api/sales/upcoming/${encodeURIComponent(catalog.id)}/lots`
+      : `/api/sales/catalogs/${catalog.id}/nav`;
+    apiGet(path)
+      .then((d) => {
+        if (cancel) return;
+        const rows = d.lots || [];
+        setLots(rows);
+        if (rows[0]) setCurrentId(navId(mode, rows[0]));
+      })
+      .catch((e) => {
+        if (!cancel) setListError(e.message);
+      })
+      .finally(() => {
+        if (!cancel) setLoadingList(false);
+      });
+    return () => { cancel = true; };
+  }, [catalog, mode]);
+
+  const dismissedSet = useMemo(() => {
+    if (!catalog) return new Set();
+    const list = (desk.dismissed || {})[deskKey(mode, catalog.id)] || [];
+    return new Set(list.map(String));
+  }, [desk, catalog, mode]);
+
+  const filtered = useMemo(() => {
+    return lots.filter((lot) => {
+      const id = navId(mode, lot);
+      const dismissed = dismissedSet.has(id);
+      if (onlyDismissed) return dismissed;
+      if (dismissed) return false;
+      const letter = (lot.sex_letter || lot.sex || "").toUpperCase().slice(0, 1);
+      if (sex && letter !== sex) return false;
+      if (color) {
+        const coat = (lot.color || "").toLowerCase();
+        if (!coat || !coat.includes(color.trim().toLowerCase())) return false;
+      }
+      if (maxPrice) {
+        const price = Number(lot.price_num) || 0;
+        if (!price || price > Number(maxPrice)) return false;
+      }
+      if (height) {
+        const hands = (lot.height || "").toLowerCase();
+        if (!hands || !hands.includes(height.trim().toLowerCase())) return false;
+      }
+      return true;
+    });
+  }, [lots, mode, dismissedSet, onlyDismissed, sex, color, maxPrice, height]);
+
+  useEffect(() => {
+    if (!catalog || !filtered.length) return;
+    if (!filtered.some((lot) => navId(mode, lot) === currentId)) {
+      setCurrentId(navId(mode, filtered[0]));
+    }
+  }, [filtered, currentId, catalog, mode]);
+
+  const current = filtered.find((lot) => navId(mode, lot) === currentId) || null;
+  const position = current ? filtered.findIndex((lot) => navId(mode, lot) === currentId) : -1;
+
+  useEffect(() => {
+    setHipInput(current?.hip != null ? String(current.hip) : "");
+    setJumpError("");
+    setOpenAuction("");
+    setNoteDraft("");
+    setNoteState("");
+  }, [currentId]);
+
+  useEffect(() => {
+    if (!catalog || !current) return;
+    let cancel = false;
+    setLoadingDetail(true);
+    setDetailError("");
+    const path = mode === "upcoming"
+      ? `/api/sales/upcoming/${encodeURIComponent(catalog.id)}/lots/${encodeURIComponent(current.hip)}`
+      : `/api/sales/lots/${current.id}`;
+    apiGet(path)
+      .then((d) => {
+        if (cancel) return;
+        setDetail(d);
+        const pastNote = (loadDesk().notes || {})[String(d.lot?.id)] || "";
+        const text = mode === "past" ? pastNote : (d.lot?.notes || "");
+        loadedNote.current = text;
+        setNoteDraft(text);
+      })
+      .catch((e) => {
+        if (!cancel) setDetailError(e.message);
+      })
+      .finally(() => {
+        if (!cancel) setLoadingDetail(false);
+      });
+    return () => { cancel = true; };
+  }, [catalog, mode, currentId]);
+
+  const ready = Boolean(detail && current && navId(mode, detail.lot) === currentId);
+  readyRef.current = ready;
+  draftRef.current = noteDraft;
+  const starred = current
+    ? (mode === "upcoming" ? Boolean(current.starred) : Boolean((desk.stars || {})[currentId]))
+    : false;
+
+  function chooseMode(next) {
+    setMode(next);
+    setCatalog(null);
+    setCatalogs([]);
+    setLoadingCatalogs(true);
+    setListError("");
+    setActiveClient("");
+    setOnlyDismissed(false);
   }
 
-  async function loadSire(ev) {
-    ev.preventDefault();
-    setDetail(null);
-    const d = await apiGet(`/api/sales/sire/${encodeURIComponent(sire)}?sort=${sort}&sex=${sex}`);
-    setLots(d.lots || []);
-    setStats(d.stats);
+  function openCatalog(item) {
+    setCatalog(item);
+    setRailOpen(false);
+    setOnlyDismissed(false);
+    setActiveClient("");
+    setSex("");
+    setColor("");
+    setMaxPrice("");
+    setHeight("");
   }
 
-  async function loadHorse(ev) {
-    ev.preventDefault();
-    setDetail(null);
-    const q = new URLSearchParams(horse).toString();
-    const d = await apiGet(`/api/sales/horse?${q}`);
-    setLots(d.lots || []);
-    setStats(d.stats);
+  function updateClient(id, patch) {
+    const next = {
+      ...desk,
+      clients: (desk.clients || []).map((client) => (client.id === id ? { ...client, ...patch } : client)),
+    };
+    setDesk(saveDesk(next));
   }
 
-  async function openLot(id) {
-    const d = await apiGet(`/api/sales/lots/${id}`);
-    setDetail(d);
-    saveAnalyzedSale({ id, name: d.lot?.name, sale: d.lot?.sale });
+  function applyFilter(patch) {
+    if (patch.sex !== undefined) setSex(patch.sex);
+    if (patch.color !== undefined) setColor(patch.color);
+    if (patch.maxPrice !== undefined) setMaxPrice(patch.maxPrice);
+    if (patch.height !== undefined) setHeight(patch.height);
+    if (activeClient) {
+      const clientPatch = {};
+      if (patch.sex !== undefined) clientPatch.sex = patch.sex;
+      if (patch.color !== undefined) clientPatch.color = patch.color;
+      if (patch.maxPrice !== undefined) clientPatch.maxPrice = patch.maxPrice;
+      if (patch.height !== undefined) clientPatch.height = patch.height;
+      updateClient(activeClient, clientPatch);
+    }
   }
 
-  const lot = detail?.lot;
-  const st = detail?.sire_stats?.lifetime || stats?.lifetime;
+  function selectClient(client) {
+    if (activeClient === client.id) {
+      setActiveClient("");
+      return;
+    }
+    setActiveClient(client.id);
+    setOnlyDismissed(false);
+    setSex(client.sex || "");
+    setColor(client.color || "");
+    setMaxPrice(client.maxPrice || "");
+    setHeight(client.height || "");
+  }
+
+  function viewFull() {
+    setSex("");
+    setColor("");
+    setMaxPrice("");
+    setHeight("");
+    setOnlyDismissed(false);
+    setActiveClient("");
+  }
+
+  function viewDismissed() {
+    setOnlyDismissed(true);
+    setSex("");
+    setColor("");
+    setMaxPrice("");
+    setHeight("");
+    setActiveClient("");
+    setRailOpen(true);
+  }
+
+  function jumpToHip(raw) {
+    const hip = String(raw || "").trim();
+    const found = filtered.find((lot) => String(lot.hip) === hip);
+    if (!found) {
+      setJumpError("That hip is not in this list.");
+      return;
+    }
+    setJumpError("");
+    setCurrentId(navId(mode, found));
+  }
+
+  function dismissCurrent() {
+    if (!catalog || !current) return;
+    const neighbor = filtered[position + 1] || filtered[position - 1] || null;
+    const key = deskKey(mode, catalog.id);
+    const list = new Set(((desk.dismissed || {})[key] || []).map(String));
+    list.add(currentId);
+    const next = { ...desk, dismissed: { ...desk.dismissed, [key]: Array.from(list) } };
+    setDesk(saveDesk(next));
+    if (neighbor) setCurrentId(navId(mode, neighbor));
+  }
+
+  async function toggleStar() {
+    if (!current) return;
+    try {
+    if (mode === "upcoming") {
+      const data = await apiPost(
+        `/api/sales/upcoming/${encodeURIComponent(catalog.id)}/lots/${encodeURIComponent(current.hip)}`,
+        { starred: !current.starred },
+      );
+      const on = Boolean(data.lot?.starred);
+      setLots((rows) => rows.map((lot) => (String(lot.hip) === String(current.hip) ? { ...lot, starred: on } : lot)));
+      setDetail((prev) => (prev && String(prev.lot?.hip) === String(current.hip)
+        ? { ...prev, lot: { ...prev.lot, starred: on } }
+        : prev));
+      return;
+    }
+    const next = { ...desk, stars: { ...desk.stars, [currentId]: !starred } };
+    setDesk(saveDesk(next));
+    } catch (e) {
+      setDetailError(e.message);
+    }
+  }
+
+  async function saveNotes() {
+    if (!current || !readyRef.current) return;
+    if (draftRef.current === loadedNote.current) return;
+    const text = draftRef.current;
+    setNoteState("Saving…");
+    try {
+      if (mode === "upcoming") {
+        const data = await apiPost(
+          `/api/sales/upcoming/${encodeURIComponent(catalog.id)}/lots/${encodeURIComponent(current.hip)}`,
+          { notes: text },
+        );
+        const notes = data.lot?.notes || "";
+        setLots((rows) => rows.map((lot) => (String(lot.hip) === String(current.hip) ? { ...lot, notes } : lot)));
+        setDetail((prev) => (prev ? { ...prev, lot: { ...prev.lot, notes } } : prev));
+        loadedNote.current = notes;
+      } else {
+        const next = { ...desk, notes: { ...desk.notes, [currentId]: text } };
+        setDesk(saveDesk(next));
+        loadedNote.current = text;
+      }
+      setNoteState("Saved");
+    } catch (e) {
+      setNoteState(e.message);
+    }
+  }
+
+  const active = (desk.clients || []).find((client) => client.id === activeClient) || null;
 
   return (
-    <div>
-      <div className="search-row">
-        {["catalogs", "stallion", "horse"].map((t) => (
-          <button key={t} className={tab === t ? "primary" : "ghost"} onClick={() => setTab(t)}>
-            {t === "catalogs" ? "Catalogs" : t === "stallion" ? "By stallion" : "By horse"}
+    <div className={`sales-root${catalog ? " workspace" : ""}`}>
+      {catalog ? (
+        <div className="maneuver">
+          <button className="ghost" type="button" onClick={() => position > 0 && setCurrentId(navId(mode, filtered[position - 1]))} disabled={position <= 0}>
+            ←
           </button>
-        ))}
-        <select className="ghost" value={sex} onChange={(e) => setSex(e.target.value)}>
-          <option value="">All sexes</option>
-          <option value="C">Colts</option>
-          <option value="F">Fillies</option>
-          <option value="G">Geldings</option>
-          <option value="M">Mares</option>
-        </select>
-        <select className="ghost" value={sort} onChange={(e) => setSort(e.target.value)}>
-          <option value="hip">Hip</option>
-          <option value="price_desc">Price high</option>
-          <option value="price_asc">Price low</option>
-          <option value="year_desc">Year</option>
-        </select>
-      </div>
-      {error ? <p className="error">{error}. Index sales with `python3 scripts/index_sales.py` if the hub is empty.</p> : null}
-
-      <div className="sales-layout">
-        <div className="panel">
-          {tab === "catalogs" ? (
-            <>
+          <label className="hip-jump">
+            Hip
+            <input
+              value={hipInput}
+              onChange={(e) => setHipInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") jumpToHip(hipInput);
+              }}
+            />
+          </label>
+          <button
+            className="ghost"
+            type="button"
+            onClick={() => position >= 0 && position < filtered.length - 1 && setCurrentId(navId(mode, filtered[position + 1]))}
+            disabled={position < 0 || position >= filtered.length - 1}
+          >
+            →
+          </button>
+          <div className="maneuver-title">{catalog.title}{catalog.year ? ` ${catalog.year}` : ""}</div>
+          <span className="maneuver-count">
+            {filtered.length ? `${position + 1} / ${filtered.length}` : "0"}
+          </span>
+          <button className="ghost" type="button" onClick={() => setCatalog(null)}>Sales</button>
+        </div>
+      ) : (
+        <div className="sales-entry">
+          <div className="mode-row">
+            <button className={mode === "past" ? "primary" : "ghost"} type="button" onClick={() => chooseMode("past")}>
+              Past results
+            </button>
+            <button className={mode === "upcoming" ? "primary" : "ghost"} type="button" onClick={() => chooseMode("upcoming")}>
+              Upcoming sales
+            </button>
+          </div>
+          {listError ? <p className="error">{listError}</p> : null}
+          {mode === "past" ? (
+            <div className="panel">
               <h4>YEAR</h4>
               <select value={year} onChange={(e) => setYear(e.target.value)}>
-                {years.map((y) => <option key={y} value={y}>{y}</option>)}
+                {years.map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
               <h4 style={{ marginTop: 12 }}>SALES</h4>
-              {catalogs.map((c) => (
-                <button key={c.id} className="ghost" style={{ width: "100%", marginBottom: 6, textAlign: "left" }} onClick={() => loadCatalog(c.id)}>
-                  {c.title}
+              {loadingCatalogs ? <p className="empty">Loading sales…</p> : catalogs.map((item) => (
+                <button key={item.id} className="ghost catalog-btn" type="button" onClick={() => openCatalog(item)}>
+                  {item.title}
                 </button>
               ))}
-            </>
+            </div>
           ) : null}
-          {tab === "stallion" ? (
-            <form onSubmit={loadSire}>
-              <h4>STALLION PROGENY</h4>
-              <input value={sire} onChange={(e) => setSire(e.target.value)} placeholder="Into Mischief" />
-              <button className="primary" style={{ marginTop: 8 }}>Search</button>
-            </form>
-          ) : null}
-          {tab === "horse" ? (
-            <form onSubmit={loadHorse}>
-              <h4>HORSE HISTORY</h4>
-              <input placeholder="Name" value={horse.name} onChange={(e) => setHorse({ ...horse, name: e.target.value })} />
-              <input placeholder="Foaling year" value={horse.year} onChange={(e) => setHorse({ ...horse, year: e.target.value })} />
-              <input placeholder="Sire" value={horse.sire} onChange={(e) => setHorse({ ...horse, sire: e.target.value })} />
-              <input placeholder="Dam" value={horse.dam} onChange={(e) => setHorse({ ...horse, dam: e.target.value })} />
-              <button className="primary" style={{ marginTop: 8 }}>Search</button>
-            </form>
+          {mode === "upcoming" ? (
+            <div className="panel">
+              <h4>UPCOMING SALES</h4>
+              {loadingCatalogs ? <p className="empty">Loading sales…</p> : catalogs.length === 0 ? (
+                <p className="empty">No upcoming catalogs yet. Import a sale into Upcoming Sales and run the analyzer.</p>
+              ) : catalogs.map((item) => (
+                <button key={item.id} className="ghost catalog-btn" type="button" onClick={() => openCatalog(item)}>
+                  {item.title}
+                  <span>{item.hips} hips</span>
+                </button>
+              ))}
+            </div>
           ) : null}
         </div>
+      )}
 
-        <div>
-          {detail ? (
-            <div className="lot-dash">
-              <div className="lot-head">
-                <div><div className="meta-label">Hip</div><b>{lot.hip}</b></div>
-                <div>
-                  <div className="meta-label">Consigned by</div>
-                  <b>{lot.consignor || "—"}</b>
-                  <div>{lot.name}</div>
-                </div>
-                <div><div className="meta-label">Color</div><b>{lot.color || "—"}</b></div>
-                <div><div className="meta-label">Sex</div><b>{lot.sex_letter || lot.sex}</b></div>
-                <div><div className="meta-label">Foaled</div><b>{lot.birth_year || "—"}</b></div>
-                <div><div className="meta-label">Barn</div><b>{lot.barn || "—"}</b></div>
-                <button className="ghost" onClick={() => setDetail(null)}>✕</button>
-              </div>
-              <div className="panel">
-                <h4>EXPECTED MARKET</h4>
-                <div className="market"><div className="bell" /></div>
-                <p>Bust {st?.avg || "—"} · Median {st?.median || "—"} · Boom {st?.gross ? "see sire stats" : "—"}</p>
-                <Stats stats={detail.sire_stats} />
-              </div>
-              <div className="panel">
-                <h4>SIMILAR SUCCESSFUL STALLION CROSSES</h4>
-                {(detail.similar_crosses || []).map((c) => (
-                  <div key={c.broodmare_sire} className="suggest-card">
-                    <div>
-                      {lot.sire} × {c.broodmare_sire}
-                      <div className="parents">{c.winners.map((w) => `${w.name} (${w.status})`).join(", ")}</div>
-                    </div>
+      {catalog ? (
+        <div className="sales-columns">
+          <div className="sales-col">
+            <div className="panel">
+              <h4>PEDIGREE</h4>
+              {ready ? <PedigreeChart tree={detail.pedigree} showSubject={false} /> : <p className="empty">Loading pedigree…</p>}
+            </div>
+            <div className="panel family-panel">
+              <h4>FEMALE FAMILY</h4>
+              {ready ? <FemaleFamily family={detail.female_family} /> : <p className="empty">Loading female family…</p>}
+            </div>
+            <div className="panel">
+              <h4>PHYSICAL</h4>
+              <div className="blank-value" aria-label="Physical" />
+            </div>
+            <div className="panel">
+              <h4>NOTES</h4>
+              <textarea
+                className="note-box"
+                value={noteDraft}
+                onChange={(e) => { setNoteDraft(e.target.value); setNoteState(""); }}
+                onBlur={saveNotes}
+                placeholder="Add a note"
+                disabled={!current}
+              />
+              {noteState ? <p className="note-state">{noteState}</p> : null}
+            </div>
+          </div>
+
+          <div className="sales-col">
+            {listError ? <p className="error">{listError}</p> : null}
+            {loadingList ? <p className="empty">Loading catalog…</p> : null}
+            {!loadingList && !current ? <p className="empty">No hips match this list.</p> : null}
+            {current ? (
+              <>
+                <div className="panel sale-identity">
+                  <h2>
+                    <Link href={horseHref(current.name)}>{current.name || current.raw_name || "Unnamed"}</Link>
+                    {current.sex_letter || current.sex ? <span className="sale-sex"> [{current.sex_letter || current.sex}]</span> : null}
+                  </h2>
+                  <p className="byline">
+                    by {current.sire || "Unknown"}
+                    {ready && detail.sire_class ? <span className="sale-class"> [{shortClass(detail.sire_class)}]</span> : null}
+                    {current.dam ? (
+                      <>
+                        {" "}(<Link href={horseHref(current.dam)}>{current.dam}</Link>
+                        {ready && detail.dam_class ? <span className="sale-class"> [{detail.dam_class}]</span> : null})
+                      </>
+                    ) : null}
+                    {current.birth_year ? ` ${current.birth_year}` : ""}
+                  </p>
+                  <div className="sale-meta">
+                    <div><span className="meta-label">Color</span><b>{blank(current.color) || "—"}</b></div>
+                    <div><span className="meta-label">Sex</span><b>{current.sex_letter || current.sex || "—"}</b></div>
+                    <div><span className="meta-label">Foaled</span><b>{current.birth_year || "—"}</b></div>
+                    <div><span className="meta-label">Consigned by</span><b>{blank(current.consignor) || "—"}</b></div>
+                    <div><span className="meta-label">Hip</span><b>{current.hip || "—"}</b></div>
+                    <div><span className="meta-label">Expected market</span><b>—</b></div>
+                    {mode === "past" ? (
+                      <div><span className="meta-label">Auction price</span><b className="money">{priceLabel(current)}</b></div>
+                    ) : null}
                   </div>
+                  {jumpError ? <p className="error">{jumpError}</p> : null}
+                </div>
+
+                <div className="panel">
+                  <h4>MARKET PREDICTION</h4>
+                  <MarketCurve />
+                </div>
+
+                <div className="panel">
+                  <h4>SUCCESSFUL SIMILAR CROSSES</h4>
+                  {detailError ? <p className="error">{detailError}</p> : null}
+                  {loadingDetail && !ready ? <p className="empty">Loading crosses…</p> : null}
+                  {ready && !(detail.similar_crosses || []).length ? (
+                    <p className="empty">No similar successful crosses on file for this sire yet.</p>
+                  ) : null}
+                  {ready && (detail.similar_crosses || []).length ? (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Horse</th>
+                          <th>Class</th>
+                          <th>Similarity</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.similar_crosses.map((row, index) => (
+                          <tr key={`${row.name}-${row.class}-${index}`}>
+                            <td><Link href={horseHref(row.name)}>{row.name}</Link></td>
+                            <td>{row.class || "—"}</td>
+                            <td>{row.similarity != null ? `${row.similarity}%` : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : null}
+                </div>
+
+                <div className="panel">
+                  <h4>SIMILAR CROSSES AUCTION HISTORY</h4>
+                  {ready && !(detail.auction_history || []).length ? (
+                    <p className="empty">No auction history on file for these crosses yet.</p>
+                  ) : null}
+                  {ready && (detail.auction_history || []).length ? (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Horse</th>
+                          <th>Similarity</th>
+                          <th>Sale</th>
+                          <th>Price</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.auction_history.map((row, index) => {
+                          const key = `${row.name}-${row.sale}-${row.hip}-${index}`;
+                          const open = openAuction === key;
+                          return (
+                            <Fragment key={key}>
+                              <tr className="auction-row" role="button" tabIndex={0} onClick={() => setOpenAuction(open ? "" : key)}>
+                                <td><Link href={horseHref(row.name)} onClick={(e) => e.stopPropagation()}>{row.name}</Link></td>
+                                <td>{row.similarity != null ? `${row.similarity}%` : "—"}</td>
+                                <td>{row.sale}{row.year ? ` ${row.year}` : ""}</td>
+                                <td className="money">{priceLabel(row)}</td>
+                              </tr>
+                              {open ? (
+                                <tr className="auction-more">
+                                  <td colSpan={4}>
+                                    Hip {row.hip || "—"}
+                                    {row.is_rna ? " · RNA" : ""}
+                                    {row.purchaser ? ` · Purchaser ${row.purchaser}` : ""}
+                                  </td>
+                                </tr>
+                              ) : null}
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+          </div>
+
+          <aside className={`sales-rail${railOpen ? " open" : ""}`}>
+            <button className={`rail-btn${starred ? " on" : ""}`} type="button" onClick={toggleStar} title="Star">
+              {starred ? "★" : "☆"}
+            </button>
+            <button className="rail-btn" type="button" onClick={dismissCurrent} title="Dismiss">✕</button>
+            <button className="rail-btn" type="button" onClick={() => setRailOpen((open) => !open)} title={railOpen ? "Collapse" : "Expand"}>
+              {railOpen ? "»" : "«"}
+            </button>
+            {railOpen ? (
+              <div className="rail-body">
+                <h4>CLIENTS</h4>
+                {(desk.clients || []).map((client) => (
+                  <button
+                    key={client.id}
+                    className={activeClient === client.id ? "primary" : "ghost"}
+                    type="button"
+                    onClick={() => selectClient(client)}
+                  >
+                    {client.name}
+                  </button>
                 ))}
-                <h4>DAM FAMILY</h4>
-                {lot.damsire ? <p>Damsire: {lot.damsire}</p> : null}
-                {lot.dam ? <Link href={horseHref(lot.dam)}>See {lot.dam} pedigree</Link> : null}
-              </div>
-              <div className="panel">
-                <h4>PHYSICAL / NOTES</h4>
-                <p className="notes">
-                  {lot.sire} × {lot.dam}
-                  {lot.foaled_location ? `\nFoaled: ${lot.foaled_location}` : ""}
-                  {`\nPrice: ${lot.price_raw}`}
-                  {lot.purchaser ? `\nPurchaser: ${lot.purchaser}` : ""}
-                </p>
-                <button className="ghost" onClick={() => setClientsOpen((v) => !v)}>Clients</button>
-                {clientsOpen ? (
-                  <div className="clients">
-                    <div className="client">Client 1 — saved locally in My Barn</div>
-                    <div className="client">Client 2</div>
-                    <div className="client">Client 3</div>
+                {active ? (
+                  <div className="client-prefs">
+                    <label>
+                      Name
+                      <input value={active.name} onChange={(e) => updateClient(active.id, { name: e.target.value })} />
+                    </label>
+                    <label>
+                      Sex
+                      <select value={active.sex || ""} onChange={(e) => { updateClient(active.id, { sex: e.target.value }); setSex(e.target.value); }}>
+                        <option value="">Any</option>
+                        <option value="C">Colt</option>
+                        <option value="F">Filly</option>
+                        <option value="G">Gelding</option>
+                        <option value="M">Mare</option>
+                      </select>
+                    </label>
+                    <label>
+                      Color
+                      <input value={active.color || ""} onChange={(e) => { updateClient(active.id, { color: e.target.value }); setColor(e.target.value); }} />
+                    </label>
+                    <label>
+                      Price ceiling
+                      <input value={active.maxPrice || ""} onChange={(e) => { updateClient(active.id, { maxPrice: e.target.value }); setMaxPrice(e.target.value); }} />
+                    </label>
+                    <label>
+                      Height
+                      <input value={active.height || ""} onChange={(e) => { updateClient(active.id, { height: e.target.value }); setHeight(e.target.value); }} placeholder="16.1" />
+                    </label>
                   </div>
                 ) : null}
+
+                <h4>FILTER</h4>
+                <label>
+                  Height
+                  <input value={height} onChange={(e) => applyFilter({ height: e.target.value })} placeholder="16.1" />
+                </label>
+                <label>
+                  Sex
+                  <select value={sex} onChange={(e) => applyFilter({ sex: e.target.value })}>
+                    <option value="">Any</option>
+                    <option value="C">Colt</option>
+                    <option value="F">Filly</option>
+                    <option value="G">Gelding</option>
+                    <option value="M">Mare</option>
+                  </select>
+                </label>
+                <label>
+                  Color
+                  <input value={color} onChange={(e) => applyFilter({ color: e.target.value })} />
+                </label>
+                <label>
+                  Price
+                  <input value={maxPrice} onChange={(e) => applyFilter({ maxPrice: e.target.value })} placeholder="Max" />
+                </label>
+                <button className="ghost" type="button" onClick={viewFull}>View full</button>
+                <button className={onlyDismissed ? "primary" : "ghost"} type="button" onClick={viewDismissed}>X&apos;d list</button>
               </div>
-            </div>
-          ) : (
-            <div className="panel">
-              <Stats stats={stats} />
-              <table>
-                <thead>
-                  <tr>
-                    <th>Hip</th><th>Horse</th><th>Sex</th><th>Color</th><th>Sire</th><th>Dam</th><th>Price</th><th>Sale</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lots.map((l) => (
-                    <tr key={l.id} onClick={() => openLot(l.id)} style={{ cursor: "pointer" }}>
-                      <td>{l.hip}</td>
-                      <td>{l.name}</td>
-                      <td>{l.sex_letter}</td>
-                      <td>{l.color}</td>
-                      <td>{l.sire}</td>
-                      <td>{l.dam}</td>
-                      <td className="money">{l.price_raw}</td>
-                      <td>{l.sale}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+            ) : null}
+          </aside>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }

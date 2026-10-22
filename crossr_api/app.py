@@ -14,6 +14,7 @@ import main
 import hypomating_engine
 from crossr_core import horses as horse_svc
 from crossr_core import sales as sales_svc
+from crossr_core import upcoming as upcoming_svc
 from crossr_core import auth as auth_svc
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -130,6 +131,11 @@ class PreferencesBody(BaseModel):
     analyzed: Optional[list] = None
 
 
+class UpcomingLotBody(BaseModel):
+    starred: Optional[bool] = None
+    notes: Optional[str] = None
+
+
 COOKIE_NAME = "crossr_session"
 
 
@@ -231,6 +237,28 @@ def stallion_farms():
     return {"farms": horse_svc.list_farms(profiles())}
 
 
+@app.get("/api/similarity")
+def pedigree_similarity(
+    a: str = "",
+    b: str = "",
+    a_sire: str = "",
+    a_dam: str = "",
+    b_sire: str = "",
+    b_dam: str = "",
+):
+    result = horse_svc.pedigree_similarity(
+        a=a or None,
+        b=b or None,
+        a_sire=a_sire or None,
+        a_dam=a_dam or None,
+        b_sire=b_sire or None,
+        b_dam=b_dam or None,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Could not compare pedigrees")
+    return result
+
+
 @app.get("/api/horses/{name}")
 def horse_profile(name: str):
     payload = horse_svc.get_horse_profile(name, profiles=profiles())
@@ -249,6 +277,15 @@ def hypomating_suggest(body: SuggestBody):
         min_fee=body.min_fee,
         max_fee=body.max_fee,
     )
+    if result.get("error") == "ambiguous_year":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "ambiguous_year",
+                "name": result.get("mare"),
+                "years": result.get("years") or [],
+            },
+        )
     if result.get("error") == "not_found":
         raise HTTPException(
             status_code=404,
@@ -284,6 +321,15 @@ def hypomating_report(body: ReportBody):
         body.dam,
         persist=False,
     )
+    if result.get("error") == "ambiguous_year":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "ambiguous_year",
+                "name": result.get("mare"),
+                "years": result.get("years") or [],
+            },
+        )
     if result.get("error") == "not_found":
         raise HTTPException(status_code=404, detail="Broodmare not found")
     result["pedigree"] = horse_svc.trim_pedigree(result["pedigree"])
@@ -311,24 +357,111 @@ def sales_lots(
     return sales_svc.catalog_lots(catalog_id, sort=sort, sex=sex, limit=limit, offset=offset)
 
 
+def _split_hips(raw):
+    if not raw:
+        return []
+    return [part.strip() for part in str(raw).split(",") if part.strip()]
+
+
+def _attach_heights(lots, lookup):
+    for lot in lots:
+        lot["height"] = horse_svc.sire_height(lot.get("sire"), lookup)
+    return lots
+
+
+def _workspace(lot, book):
+    ctx = horse_svc.sale_workspace(
+        name=lot.get("name") or lot.get("raw_name"),
+        sire=lot.get("sire"),
+        dam=lot.get("dam"),
+        year=lot.get("birth_year"),
+        sex=lot.get("sex_letter") or lot.get("sex"),
+        color=lot.get("color"),
+        foaled=lot.get("foaled") or lot.get("foaled_location"),
+        sold_as=lot.get("sold_as"),
+        covering_sire=lot.get("covering_sire"),
+        damsire=lot.get("damsire") or lot.get("sire_of_dam"),
+        profiles=book,
+    )
+    ctx["auction_history"] = sales_svc.auctions_for_horses(ctx.get("similar_crosses") or [])
+    return ctx
+
+
+@app.get("/api/sales/catalogs/{catalog_id}/nav")
+def sales_catalog_nav(catalog_id: int):
+    payload = sales_svc.catalog_nav(catalog_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Catalog not found")
+    lookup = horse_svc.profile_lookup(profiles())
+    _attach_heights(payload["lots"], lookup)
+    return payload
+
+
 @app.get("/api/sales/lots/{lot_id}")
 def sales_lot_detail(lot_id: int):
     payload = sales_svc.get_lot(lot_id)
     if not payload:
         raise HTTPException(status_code=404, detail="Lot not found")
-    sire = (payload.get("lot") or {}).get("sire")
-    if sire:
-        payload["similar_crosses"] = hypomating_engine.top_crosses_payload(
-            main.PEDIGREE_DATABASE, sire, limit=8
-        ).get("crosses", [])
-        dam = (payload.get("lot") or {}).get("dam")
-        if dam:
-            dam_profile = horse_svc.get_horse_profile(dam, profiles=profiles())
-            payload["dam_family"] = dam_profile.get("pedigree") if dam_profile else None
-    else:
-        payload["similar_crosses"] = []
-        payload["dam_family"] = None
+    payload.update(_workspace(payload.get("lot") or {}, profiles()))
     return payload
+
+
+@app.get("/api/sales/upcoming")
+def sales_upcoming():
+    catalogs = [
+        row for row in upcoming_svc.list_catalogs()
+        if row.get("source") == "upcoming" or not str(row.get("id") or "").lower().startswith("analyzed_")
+    ]
+    # Prefer raw Upcoming Sales/ entries; fall back to full list if none yet.
+    upcoming_only = [row for row in catalogs if row.get("source") == "upcoming"]
+    return {"catalogs": upcoming_only or catalogs}
+
+
+@app.get("/api/sales/upcoming/{catalog_id}/lots")
+def sales_upcoming_lots(
+    catalog_id: str,
+    sex: Optional[str] = None,
+    color: Optional[str] = None,
+    max_price: Optional[float] = None,
+    height: Optional[str] = None,
+    starred: Optional[bool] = None,
+    exclude_hips: Optional[str] = None,
+    only_hips: Optional[str] = None,
+):
+    lots = upcoming_svc.list_lots(catalog_id)
+    if lots is None:
+        raise HTTPException(status_code=404, detail="Catalog not found")
+    lookup = horse_svc.profile_lookup(profiles())
+    _attach_heights(lots, lookup)
+    filtered = upcoming_svc.filter_lots(
+        lots,
+        sex=sex,
+        color=color,
+        max_price=max_price,
+        height=height,
+        starred=starred,
+        exclude_hips=_split_hips(exclude_hips),
+        only_hips=_split_hips(only_hips),
+    )
+    return {"lots": filtered, "total": len(filtered)}
+
+
+@app.get("/api/sales/upcoming/{catalog_id}/lots/{hip}")
+def sales_upcoming_lot(catalog_id: str, hip: str):
+    lot = upcoming_svc.get_lot(catalog_id, hip)
+    if not lot:
+        raise HTTPException(status_code=404, detail="Hip not found")
+    book = profiles()
+    lot["height"] = horse_svc.sire_height(lot.get("sire"), horse_svc.profile_lookup(book))
+    return {"lot": lot, **_workspace(lot, book)}
+
+
+@app.post("/api/sales/upcoming/{catalog_id}/lots/{hip}")
+def sales_upcoming_update(catalog_id: str, hip: str, body: UpcomingLotBody):
+    lot = upcoming_svc.update_lot(catalog_id, hip, starred=body.starred, notes=body.notes)
+    if not lot:
+        raise HTTPException(status_code=404, detail="Hip not found")
+    return {"lot": lot}
 
 
 @app.get("/api/sales/sire/{name}")
