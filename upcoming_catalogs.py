@@ -23,10 +23,11 @@ SEX_KEYS = ("SEX",)
 COLOR_KEYS = ("COLOR", "COLOUR")
 YOB_KEYS = ("YEAR OF BIRTH", "YOB", "DOB", "YEAR OF BIRTH / AGE", "FOALING YEAR")
 FOALED_KEYS = ("FOALED", "STATE", "STATE FOALED", "BRED")
-SOLD_AS_KEYS = ("SOLD AS", "SOLD AS DESCRIPTION", "DESCRIPTION")
+SOLD_AS_KEYS = ("SOLD AS", "SOLD AS DESCRIPTION", "DESCRIPTION", "SOLD AS CODE")
 COVER_KEYS = ("COVERING SIRE",)
 CONSIGNOR_KEYS = ("CONSIGNOR", "PROPERTY LINE", "PROPERTYLINE1", "CONSIGNED BY")
 NOTES_KEYS = ("NOTES",)
+TITLE_KEYS = ("SALE TITLE", "SALE", "TITLE")
 CROSS_KEYS = ("CROSS SUCCESS",)
 DAM_RACER_KEYS = ("DAM SUCCESS (RACER)", "DAM SUCCESS RACER")
 DAM_PROD_KEYS = ("DAM SUCCESS (PRODUCER)", "DAM SUCCESS PRODUCER")
@@ -118,13 +119,15 @@ def load_catalog_rows(filename: str = "", source_file: str = "") -> list[dict]:
         reader = csv.DictReader(handle)
         if not reader.fieldnames:
             return []
-        field_map = {_norm_header(name): name for name in reader.fieldnames if name is not None}
 
         def mapped(raw_row: dict) -> dict:
             return {_norm_header(key): (value or "") for key, value in raw_row.items() if key is not None}
 
         for index, raw in enumerate(reader, 1):
             row = mapped(raw)
+            file_title = _pick(row, TITLE_KEYS)
+            if file_title:
+                sale_title = file_title
             hip = _hip_text(_pick(row, HIP_KEYS))
             if not hip:
                 continue
@@ -133,12 +136,33 @@ def load_catalog_rows(filename: str = "", source_file: str = "") -> list[dict]:
             horse_name = _pick(row, NAME_KEYS)
             sire = _pick(row, SIRE_KEYS)
             dam = _pick(row, DAM_KEYS)
-            if not horse_name or re.match(r"^hip\s*\d+$", horse_name, re.I):
+            # Fasig upcoming often stores placeholders like "2025-RAVER" or "Hip 12".
+            placeholder = (
+                not horse_name
+                or re.match(r"^hip\s*\d+$", horse_name, re.I)
+                or re.match(r"^\d{4}-", horse_name)
+            )
+            if placeholder:
                 yr = (year_match.group(0)[2:] if year_match else "00")
                 if sire or dam:
                     horse_name = f"{sire} x {dam} '{yr}".strip()
                 else:
                     horse_name = f"Hip {hip}"
+            sold_as = _pick(row, ("SOLD AS", "SOLD AS DESCRIPTION", "DESCRIPTION"))
+            code = _pick(row, ("SOLD AS CODE",))
+            if sold_as.upper() in {"NAN", "NONE", "NULL"}:
+                sold_as = ""
+            if not sold_as:
+                sold_as = {
+                    "Y": "Yearling",
+                    "W": "Weanling",
+                    "B": "Broodmare",
+                    "H": "Horse of Racing Age",
+                    "2": "Two-Year-Old",
+                    "3": "Three-Year-Old",
+                }.get(code.upper(), code)
+            if not sold_as and "yearling" in path.name.lower():
+                sold_as = "Yearling"
             rows.append({
                 "hip_id": str(index),
                 "sale_title": sale_title,
@@ -152,7 +176,7 @@ def load_catalog_rows(filename: str = "", source_file: str = "") -> list[dict]:
                 "sire_of_dam": _pick(row, BMS_KEYS),
                 "year_of_birth": year_match.group(0) if year_match else birth,
                 "foaled": _pick(row, FOALED_KEYS).upper(),
-                "sold_as": _pick(row, SOLD_AS_KEYS),
+                "sold_as": sold_as,
                 "covering_sire": _pick(row, COVER_KEYS),
                 "consignor": _pick(row, CONSIGNOR_KEYS),
                 "barn": _pick(row, BARN_KEYS),
