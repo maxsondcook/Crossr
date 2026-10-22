@@ -4,9 +4,9 @@ Stallion Analytics and Ranking Engine - Core Database Synced
 import re
 import sys
 
-# Explicitly import local database modules
-import stallion_profiles
-import broodmare_sire_data
+# Profiles and broodmare-sire rows come from the stallion_stats and
+# broodmare_sire_stats tables (placeholderdatabase CSVs, or Postgres).
+import placeholder_store
 import main  # Assumes main.py handles the master layout printing and pedigree tools
 
 # Prescribed 1-to-1 ordering of sire ranks matching the master spreadsheet exactly
@@ -171,7 +171,7 @@ def view_stallion_profile_by_rank(rank_num):
         return
 
     sire_name = RAW_RANKING_ORDER[idx]
-    all_profiles = stallion_profiles.stallion_profiles
+    all_profiles = placeholder_store.load_stallion_profiles()
     main.display_stallion_profile(sire_name, all_profiles)
     input("\nPress Enter to return to rankings...")
 
@@ -220,9 +220,9 @@ def execute_stallion_rankings_flow():
 
 def execute_broodmare_sire_flow():
     """Handles Option 2 Tiered Navigation Flow for Broodmare Sire Data."""
-    raw_data = getattr(broodmare_sire_data, "broodmare_sire_raw", [])
+    raw_data = placeholder_store.load_broodmare_sire_rows()
     if not raw_data:
-        print("\n⚠️ No broodmare records located inside broodmare_sire_data.py.")
+        print("\n⚠️ No broodmare records located in broodmare_sire_stats.")
         return
 
     tiers = [30, 50, 100, 150]
@@ -300,7 +300,7 @@ def execute_broodmare_sire_flow():
 def safe_display_profile(stallion_name):
     """Safely triggers profile rendering with proper capitalization matching."""
     try:
-        profiles = stallion_profiles.stallion_profiles
+        profiles = placeholder_store.load_stallion_profiles()
         # Try exact match first
         if stallion_name in profiles:
             main.display_stallion_profile(stallion_name, profiles)
@@ -320,7 +320,7 @@ def display_best_value_sires():
     """Ranks stallions by Difference (Earnings Per Runner - Stud Fee). 
     Skips if Stud Fee is 0 OR if Earnings Per Runner is 0. Displays paginated results.
     """
-    profiles = stallion_profiles.stallion_profiles
+    profiles = placeholder_store.load_stallion_profiles()
     value_list = []
 
     for name, data in profiles.items():
@@ -447,7 +447,7 @@ def display_best_value_sires():
 
 def display_by_crop_years():
     """Presents a custom sub-selection menu for crop categories, resetting numbering schemes to [1]."""
-    profiles = stallion_profiles.stallion_profiles
+    profiles = placeholder_store.load_stallion_profiles()
 
     # Map keys directly matching your desired title configuration layout
     menu_map = {

@@ -247,6 +247,50 @@ def load_and_process_csv(file_path: Path, gender_filter=None, sort_choice="3", h
         
     return results
 
+def compute_metrics(dataset):
+    """Sale-engine totals. Withdrawn hips are not offered. RNA and zero prices are not sold."""
+    offered = [r for r in dataset if not r.get('is_out', False)]
+    sold_records = [r for r in offered if not r.get('is_rna', False) and r.get('price_num', 0) > 0]
+    rna_records = [r for r in offered if r.get('is_rna', False)]
+    valid_sales = [r['price_num'] for r in sold_records]
+
+    total_offered = len(offered)
+    total_sold = len(valid_sales)
+    rna_count = len(rna_records)
+    gross = sum(valid_sales)
+    avg = gross / total_sold if total_sold > 0 else 0
+
+    sorted_sales = sorted(valid_sales)
+    n = len(sorted_sales)
+    if n == 0:
+        median = 0
+    elif n % 2 == 1:
+        median = sorted_sales[n // 2]
+    else:
+        median = (sorted_sales[(n // 2) - 1] + sorted_sales[n // 2]) / 2.0
+
+    sold_pct = (total_sold / total_offered * 100) if total_offered > 0 else 0
+    million_plus = sum(1 for p in valid_sales if p >= 1000000)
+
+    return {
+        'offered_n': total_offered,
+        'sold_n': total_sold,
+        'rna_n': rna_count,
+        'gross_n': gross,
+        'avg_n': avg,
+        'median_n': median,
+        'sold_pct_n': sold_pct,
+        'mil_n': million_plus,
+        'horses': str(total_offered),
+        'gross': f"${int(gross):,}",
+        'avg': f"${int(avg):,}",
+        'median': f"${int(median):,}",
+        'sold_pct': f"{sold_pct:.1f}%",
+        'rna': str(rna_count),
+        'mil': str(million_plus),
+    }
+
+
 def calculate_and_print_stats(records, target_stallion=None):
     """Calculates sales summary statistics and displays them cleanly above results."""
     if not records:
@@ -255,46 +299,6 @@ def calculate_and_print_stats(records, target_stallion=None):
     sale_years = sorted(list(set(int(r['year']) for r in records if r.get('year') and str(r['year']).isdigit())))
     split_view = target_stallion is not None and len(sale_years) > 5
     last_5_years_cutoff = max(sale_years) - 4 if sale_years else 0
-
-    def compute_metrics(dataset):
-        # 1. Filter out 'WITHDRAWN' (OUT) entries to represent offered horses accurately
-        offered = [r for r in dataset if not r.get('is_out', False)]
-        
-        # 2. Separate sold horses from RNA horses
-        sold_records = [r for r in offered if not r.get('is_rna', False) and r.get('price_num', 0) > 0]
-        rna_records = [r for r in offered if r.get('is_rna', False)]
-        
-        valid_sales = [r['price_num'] for r in sold_records]
-        
-        total_offered = len(offered)
-        total_sold = len(valid_sales)
-        rna_count = len(rna_records)
-        
-        # 3. Calculate financial metrics using ONLY completed sales
-        gross = sum(valid_sales)
-        avg = gross / total_sold if total_sold > 0 else 0
-        
-        sorted_sales = sorted(valid_sales)
-        n = len(sorted_sales)
-        if n == 0:
-            median = 0
-        elif n % 2 == 1:
-            median = sorted_sales[n // 2]
-        else:
-            median = (sorted_sales[(n // 2) - 1] + sorted_sales[n // 2]) / 2.0
-            
-        sold_pct = (total_sold / total_offered * 100) if total_offered > 0 else 0
-        million_plus = sum(1 for p in valid_sales if p >= 1000000)
-        
-        return {
-            'horses': str(total_offered),
-            'gross': f"${int(gross):,}",
-            'avg': f"${int(avg):,}",
-            'median': f"${int(median):,}",
-            'sold_pct': f"{sold_pct:.1f}%",
-            'rna': str(rna_count),
-            'mil': str(million_plus)
-        }
 
     print("\n=======================================================")
     print("                  SALES PERFORMANCE SUMMARY            ")

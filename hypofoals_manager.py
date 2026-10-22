@@ -1,6 +1,6 @@
-import os
+import json
 
-HYPO_FILE = "hypofoals.py"
+import placeholder_store
 
 def clean_hypo_key(sire_name: str, dam_name: str) -> str:
     """Normalizes the cross key names accurately for consistent dictionary mappings."""
@@ -10,30 +10,49 @@ def clean_hypo_key(sire_name: str, dam_name: str) -> str:
     return " ".join(cleaned.split()).strip()
 
 def load_hypo_database() -> dict:
-    """Safely retrieves the HYPO_FOALS map using dedicated script evaluations."""
-    if not os.path.exists(HYPO_FILE) or os.path.getsize(HYPO_FILE) == 0:
-        return {}
+    """Load hypothetical matings from the hypothetical_matings table."""
+    foals = {}
     try:
-        namespace = {}
-        with open(HYPO_FILE, "r", encoding="utf-8") as f:
-            exec(f.read(), namespace)
-        return namespace.get("HYPO_FOALS", {})
-    except Exception as e:
-        print(f"⚠️ Warning loading hypothetical database ({e}). Starting fresh.")
+        for row in placeholder_store.load_table("hypothetical_matings"):
+            key = row.get("mating_key") or ""
+            if not key:
+                continue
+            raw = row.get("pedigree_json") or ""
+            try:
+                foals[key] = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                foals[key] = {}
+    except Exception as exc:
+        print(f"⚠️ Warning loading hypothetical database ({exc}). Starting fresh.")
         return {}
+    return foals
 
 def save_hypo_database(hypo_foals_map: dict):
-    """Saves the map back to the flat file structure matching your main registry formats."""
+    """Saves matings back to the hypothetical_matings table."""
     try:
-        with open(HYPO_FILE, "w", encoding="utf-8") as f:
-            f.write('"""\nAutomatically compiled hypothetical foal mating database\n"""\n\n')
-            f.write("HYPO_FOALS = {\n")
-            for cross_key, tree in sorted(hypo_foals_map.items()):
-                f.write(f"    {repr(cross_key)}: {repr(tree)},\n")
-            f.write("}\n")
-        print("💾 Success! Hypothetical mating saved successfully to hypofoals.py.")
-    except Exception as e:
-        print(f"❌ Error saving hypothetical foal entry: {e}")
+        rows = []
+        for cross_key, tree in sorted(hypo_foals_map.items()):
+            horse = tree.get("Horse", "") if isinstance(tree, dict) else ""
+            sire_name = ""
+            dam_name = ""
+            if isinstance(tree, dict):
+                sire_node = tree.get("Sire")
+                dam_node = tree.get("Dam")
+                if isinstance(sire_node, dict):
+                    sire_name = sire_node.get("Horse", "")
+                if isinstance(dam_node, dict):
+                    dam_name = dam_node.get("Horse", "")
+            rows.append({
+                "mating_key": cross_key,
+                "horse_name": horse,
+                "sire_name": sire_name,
+                "dam_name": dam_name,
+                "pedigree_json": json.dumps(tree),
+            })
+        placeholder_store.write_table("hypothetical_matings", rows)
+        print("💾 Success! Hypothetical mating saved to the hypothetical_matings table.")
+    except Exception as exc:
+        print(f"❌ Error saving hypothetical foal entry: {exc}")
 
 def register_new_hypo_foal(sire_name: str, dam_name: str, combined_tree: dict):
     """High-level registration pipeline hook."""

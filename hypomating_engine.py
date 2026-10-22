@@ -10,10 +10,16 @@ import hypofoals_manager
 # BROODMARE SIRE INTEGRATION FIXES
 # ==============================================================================
 try:
-    from broodmare_sire_data import BROODMARE_DATABASE, clean_horse_name
-except ImportError:
-    print("❌ Error: Could not find 'broodmare_sire_data.py'. Ensure it is in the same directory.")
-    sys.exit(1)
+    from placeholder_store import load_broodmare_database, broodmare_clean_horse_name as clean_horse_name
+    BROODMARE_DATABASE = load_broodmare_database()
+    if not BROODMARE_DATABASE:
+        raise RuntimeError("broodmare_sire_stats table is empty")
+except Exception:
+    try:
+        from broodmare_sire_data import BROODMARE_DATABASE, clean_horse_name
+    except ImportError:
+        print("❌ Error: Could not load broodmare sire stats.")
+        sys.exit(1)
 
 RAW_RANKING_ORDER = [
     "Not This Time",       # 1

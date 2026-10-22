@@ -1,0 +1,418 @@
+sale_id,sale_company,sale_title,sale_year,sale_kind,month_index,source_file
+1,Fasig-Tipton,Fasig Tipton Adena Springs Annual Broodmare,2005,results,3,sales_data/Fasig-Tipton_Adena_Springs_Annual_Broodmare(2005).csv
+2,Fasig-Tipton,Fasig Tipton Adena Springs Mixed,2004,results,13,sales_data/Fasig-Tipton_Adena_Springs_Mixed(2004).csv
+3,Fasig-Tipton,Fasig Tipton Adena Springs Mixed,2006,results,13,sales_data/Fasig-Tipton_Adena_Springs_Mixed(2006).csv
+4,Fasig-Tipton,Fasig Tipton Adena Springs Mixed,2007,results,13,sales_data/Fasig-Tipton_Adena_Springs_Mixed(2007).csv
+5,Fasig-Tipton,Fasig Tipton Calder Selected Two Year Olds In Training,2010,results,13,sales_data/Fasig-Tipton_Calder Selected Two-Year-Olds in Training (2010).csv
+6,Fasig-Tipton,Fasig Tipton Calder Selected Two Year Olds In Training(,2004,results,13,sales_data/Fasig-Tipton_Calder_Selected_Two-Year-Olds_In_Training(2004.csv
+7,Fasig-Tipton,Fasig Tipton Calder Selected Two Year Olds In Training,2005,results,13,sales_data/Fasig-Tipton_Calder_Selected_Two-Year-Olds_In_Training(2005).csv
+8,Fasig-Tipton,Fasig Tipton Calder Selected Two Year Olds In Training,2007,results,13,sales_data/Fasig-Tipton_Calder_Selected_Two-Year-Olds_In_Training(2007).csv
+9,Fasig-Tipton,Fasig Tipton Calder Selected Two Year Olds In Training,2008,results,13,sales_data/Fasig-Tipton_Calder_Selected_Two-Year-Olds_in_Training(2008).csv
+10,Fasig-Tipton,Fasig Tipton California Fall Yearlings,2019,results,13,sales_data/Fasig-Tipton_California Fall Yearlings (2019).csv
+11,Fasig-Tipton,Fasig Tipton California Fall Yearlings,2020,results,13,sales_data/Fasig-Tipton_California Fall Yearlings (2020).csv
+12,Fasig-Tipton,Fasig Tipton California Fall Yearlings,2024,results,13,sales_data/Fasig-Tipton_California Fall Yearlings (2024).csv
+13,Fasig-Tipton,Fasig Tipton California Fall Yearlings,2025,results,13,sales_data/Fasig-Tipton_California Fall Yearlings (2025).csv
+14,Fasig-Tipton,Fasig Tipton California Fall Yearlings And Horses Of All Ages,2021,results,13,sales_data/Fasig-Tipton_California Fall Yearlings and Horses of All Ages (2021).csv
+15,Fasig-Tipton,Fasig Tipton California Fall Yearlings And Horses Of Racing Age,2022,results,13,sales_data/Fasig-Tipton_California Fall Yearlings and Horses of Racing Age (2022).csv
+16,Fasig-Tipton,Fasig Tipton California Fall Yearlings And Horses Of Racing Age,2023,results,13,sales_data/Fasig-Tipton_California Fall Yearlings and Horses of Racing Age (2023).csv
+17,Fasig-Tipton,Fasig Tipton Eastern Fall Yearlings,2009,results,13,sales_data/Fasig-Tipton_Eastern Fall Yearlings (2009).csv
+18,Fasig-Tipton,Fasig Tipton Eastern Fall Yearlings,2010,results,13,sales_data/Fasig-Tipton_Eastern Fall Yearlings (2010).csv
+19,Fasig-Tipton,Fasig Tipton Eastern Fall Yearlings,2011,results,13,sales_data/Fasig-Tipton_Eastern Fall Yearlings (2011).csv
+20,Fasig-Tipton,Fasig Tipton Eastern Fall Yearlings,2012,results,13,sales_data/Fasig-Tipton_Eastern Fall Yearlings (2012).csv
+21,Fasig-Tipton,Fasig Tipton Eastern Fall Yearlings,2004,results,13,sales_data/Fasig-Tipton_Eastern_Fall_Yearlings(2004).csv
+22,Fasig-Tipton,Fasig Tipton Eastern Fall Yearlings,2005,results,13,sales_data/Fasig-Tipton_Eastern_Fall_Yearlings(2005).csv
+23,Fasig-Tipton,Fasig Tipton Eastern Fall Yearlings,2006,results,13,sales_data/Fasig-Tipton_Eastern_Fall_Yearlings(2006).csv
+24,Fasig-Tipton,Fasig Tipton Eastern Fall Yearlings,2007,results,13,sales_data/Fasig-Tipton_Eastern_Fall_Yearlings(2007).csv
+25,Fasig-Tipton,Fasig Tipton Eastern Fall Yearlings,2008,results,13,sales_data/Fasig-Tipton_Eastern_Fall_Yearlings(2008).csv
+26,Fasig-Tipton,Fasig Tipton Flying Zee Dispersal Phase I,2011,results,13,sales_data/Fasig-Tipton_Flying Zee Dispersal Phase I (2011).csv
+27,Fasig-Tipton,Fasig Tipton Heiligbrodt Racing Stable Dispersal Phase I,2011,results,13,sales_data/Fasig-Tipton_Heiligbrodt Racing Stable Dispersal Phase I (2011).csv
+28,Fasig-Tipton,Fasig Tipton Heiligbrodt Racing Stable Dispersal Phase Iii,2011,results,13,sales_data/Fasig-Tipton_Heiligbrodt Racing Stable Dispersal Phase III (2011).csv
+29,Fasig-Tipton,Fasig Tipton July Breeding Stock,2021,results,7,sales_data/Fasig-Tipton_July Breeding Stock (2021).csv
+30,Fasig-Tipton,Fasig Tipton July Horses Of Racing Age,2020,results,7,sales_data/Fasig-Tipton_July Horses of Racing Age (2020).csv
+31,Fasig-Tipton,Fasig Tipton July Selected Horses Of All Ages,2022,results,7,sales_data/Fasig-Tipton_July Selected Horses of All Ages (2022).csv
+32,Fasig-Tipton,Fasig Tipton July Selected Horses Of Racing Age,2016,results,7,sales_data/Fasig-Tipton_July Selected Horses of Racing Age (2016).csv
+33,Fasig-Tipton,Fasig Tipton July Selected Horses Of Racing Age,2017,results,7,sales_data/Fasig-Tipton_July Selected Horses of Racing Age (2017).csv
+34,Fasig-Tipton,Fasig Tipton July Selected Horses Of Racing Age,2018,results,7,sales_data/Fasig-Tipton_July Selected Horses of Racing Age (2018).csv
+35,Fasig-Tipton,Fasig Tipton July Selected Horses Of Racing Age,2019,results,7,sales_data/Fasig-Tipton_July Selected Horses of Racing Age (2019).csv
+36,Fasig-Tipton,Fasig Tipton July Selected Horses Of Racing Age,2021,results,7,sales_data/Fasig-Tipton_July Selected Horses of Racing Age (2021).csv
+37,Fasig-Tipton,Fasig Tipton July Selected Horses Of Racing Age,2023,results,7,sales_data/Fasig-Tipton_July Selected Horses of Racing Age (2023).csv
+38,Fasig-Tipton,Fasig Tipton July Selected Horses Of Racing Age,2024,results,7,sales_data/Fasig-Tipton_July Selected Horses of Racing Age (2024).csv
+39,Fasig-Tipton,Fasig Tipton July Selected Horses Of Racing Age,2025,results,7,sales_data/Fasig-Tipton_July Selected Horses of Racing Age (2025).csv
+40,Fasig-Tipton,Fasig Tipton July Selected Horses Of Racing Age,2026,results,7,sales_data/Fasig-Tipton_July_Selected_Horses_of_Racing_Age(2026).csv
+41,Fasig-Tipton,Fasig Tipton Kentucky Fall Yearlings,2009,results,13,sales_data/Fasig-Tipton_Kentucky Fall Yearlings (2009).csv
+42,Fasig-Tipton,Fasig Tipton Kentucky Fall Yearlings,2010,results,13,sales_data/Fasig-Tipton_Kentucky Fall Yearlings (2010).csv
+43,Fasig-Tipton,Fasig Tipton Kentucky Fall Yearlings,2011,results,13,sales_data/Fasig-Tipton_Kentucky Fall Yearlings (2011).csv
+44,Fasig-Tipton,Fasig Tipton Kentucky July Selected Yearlings,2010,results,7,sales_data/Fasig-Tipton_Kentucky July Selected Yearlings (2010).csv
+45,Fasig-Tipton,Fasig Tipton Kentucky October Yearlings,2019,results,10,sales_data/Fasig-Tipton_Kentucky October Yearlings (2019).csv
+46,Fasig-Tipton,Fasig Tipton Kentucky October Yearlings,2020,results,10,sales_data/Fasig-Tipton_Kentucky October Yearlings (2020).csv
+47,Fasig-Tipton,Fasig Tipton Kentucky October Yearlings,2021,results,10,sales_data/Fasig-Tipton_Kentucky October Yearlings (2021).csv
+48,Fasig-Tipton,Fasig Tipton Kentucky October Yearlings,2022,results,10,sales_data/Fasig-Tipton_Kentucky October Yearlings (2022).csv
+49,Fasig-Tipton,Fasig Tipton Kentucky October Yearlings,2023,results,10,sales_data/Fasig-Tipton_Kentucky October Yearlings (2023).csv
+50,Fasig-Tipton,Fasig Tipton Kentucky October Yearlings,2024,results,10,sales_data/Fasig-Tipton_Kentucky October Yearlings (2024).csv
+51,Fasig-Tipton,Fasig Tipton Kentucky October Yearlings,2025,results,10,sales_data/Fasig-Tipton_Kentucky October Yearlings (2025).csv
+52,Fasig-Tipton,Fasig Tipton Kentucky Selected November Mixed,2009,results,11,sales_data/Fasig-Tipton_Kentucky Selected November Mixed (2009).csv
+53,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2010,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2010).csv
+54,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2011,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2011).csv
+55,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2012,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2012).csv
+56,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2013,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2013).csv
+57,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2015,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2015).csv
+58,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2016,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2016).csv
+59,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2017,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2017).csv
+60,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2018,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2018).csv
+61,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2019,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2019).csv
+62,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2020,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2020).csv
+63,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2021,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2021).csv
+64,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2022,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2022).csv
+65,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2023,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2023).csv
+66,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2024,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2024).csv
+67,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2025,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2025).csv
+68,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2026,results,13,sales_data/Fasig-Tipton_Kentucky Winter Mixed (2026).csv
+69,Fasig-Tipton,Fasig Tipton Kentucky Fall Yearlings,2004,results,13,sales_data/Fasig-Tipton_Kentucky_Fall_Yearlings(2004).csv
+70,Fasig-Tipton,Fasig Tipton Kentucky Fall Yearlings,2005,results,13,sales_data/Fasig-Tipton_Kentucky_Fall_Yearlings(2005).csv
+71,Fasig-Tipton,Fasig Tipton Kentucky Fall Yearlings,2006,results,13,sales_data/Fasig-Tipton_Kentucky_Fall_Yearlings(2006).csv
+72,Fasig-Tipton,Fasig Tipton Kentucky Fall Yearlings,2007,results,13,sales_data/Fasig-Tipton_Kentucky_Fall_Yearlings(2007).csv
+73,Fasig-Tipton,Fasig Tipton Kentucky Fall Yearlings,2008,results,13,sales_data/Fasig-Tipton_Kentucky_Fall_Yearlings(2008).csv
+74,Fasig-Tipton,Fasig Tipton Kentucky July Selected Yearlings,2005,results,7,sales_data/Fasig-Tipton_Kentucky_July_Selected_Yearlings(2005).csv
+75,Fasig-Tipton,Fasig Tipton Kentucky July Selected Yearlings,2006,results,7,sales_data/Fasig-Tipton_Kentucky_July_Selected_Yearlings(2006).csv
+76,Fasig-Tipton,Fasig Tipton Kentucky July Yearlings,2007,results,7,sales_data/Fasig-Tipton_Kentucky_July_Yearlings(2007).csv
+77,Fasig-Tipton,Fasig Tipton Kentucky July Yearlings,2008,results,7,sales_data/Fasig-Tipton_Kentucky_July_Yearlings(2008).csv
+78,Fasig-Tipton,Fasig Tipton Kentucky Midlantic Winter Mixed,2006,results,13,sales_data/Fasig-Tipton_Kentucky_Midlantic_Winter_Mixed(2006).csv
+79,Fasig-Tipton,Fasig Tipton Kentucky Selected Fall Mixed,2004,results,13,sales_data/Fasig-Tipton_Kentucky_Selected_Fall_Mixed(2004).csv
+80,Fasig-Tipton,Fasig Tipton Kentucky Selected Fall Mixed,2005,results,13,sales_data/Fasig-Tipton_Kentucky_Selected_Fall_Mixed(2005).csv
+81,Fasig-Tipton,Fasig Tipton Kentucky Selected Fall Mixed,2007,results,13,sales_data/Fasig-Tipton_Kentucky_Selected_Fall_Mixed(2007).csv
+82,Fasig-Tipton,Fasig Tipton Kentucky Selected Fall Mixed,2008,results,13,sales_data/Fasig-Tipton_Kentucky_Selected_Fall_Mixed(2008).csv
+83,Fasig-Tipton,Fasig Tipton Kentucky Selected Yearlings,2004,results,13,sales_data/Fasig-Tipton_Kentucky_Selected_Yearlings(2004).csv
+84,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2004,results,13,sales_data/Fasig-Tipton_Kentucky_Winter_Mixed(2004).csv
+85,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2006,results,13,sales_data/Fasig-Tipton_Kentucky_Winter_Mixed(2006).csv
+86,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2007,results,13,sales_data/Fasig-Tipton_Kentucky_Winter_Mixed(2007).csv
+87,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2008,results,13,sales_data/Fasig-Tipton_Kentucky_Winter_Mixed(2008).csv
+88,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2009,results,13,sales_data/Fasig-Tipton_Kentucky_Winter_Mixed(2009).csv
+89,Fasig-Tipton,Fasig Tipton Melnyk Racing Mares And Weanlings,2014,results,3,sales_data/Fasig-Tipton_Melnyk Racing Mares And Weanlings (2014).csv
+90,Fasig-Tipton,Fasig Tipton Midlantic December Mixed & Horses Of Racing Age,2018,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed & Horses of Racing Age (2018).csv
+91,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2009,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed (2009).csv
+92,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2010,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed (2010).csv
+93,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2011,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed (2011).csv
+94,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2012,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed (2012).csv
+95,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2013,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed (2013).csv
+96,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2014,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed (2014).csv
+97,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2017,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed (2017).csv
+98,Fasig-Tipton,Fasig Tipton Midlantic December Mixed And Horses Of Racing Age,2019,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed and Horses of Racing Age (2019).csv
+99,Fasig-Tipton,Fasig Tipton Midlantic December Mixed And Horses Of Racing Age,2020,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed and Horses of Racing Age (2020).csv
+100,Fasig-Tipton,Fasig Tipton Midlantic December Mixed And Horses Of Racing Age,2021,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed and Horses of Racing Age (2021).csv
+101,Fasig-Tipton,Fasig Tipton Midlantic December Mixed And Horses Of Racing Age,2022,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed and Horses of Racing Age (2022).csv
+102,Fasig-Tipton,Fasig Tipton Midlantic December Mixed And Horses Of Racing Age,2023,results,12,sales_data/Fasig-Tipton_Midlantic December Mixed and Horses of Racing Age (2023).csv
+103,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2013,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2013).csv
+104,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2014,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2014).csv
+105,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2015,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2015).csv
+106,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2016,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2016).csv
+107,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2017,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2017).csv
+108,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2018,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2018).csv
+109,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2019,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2019).csv
+110,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2020,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2020).csv
+111,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2021,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2021).csv
+112,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2022,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2022).csv
+113,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2023,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2023).csv
+114,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2024,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2024).csv
+115,Fasig-Tipton,Fasig Tipton Midlantic Fall Yearlings,2025,results,13,sales_data/Fasig-Tipton_Midlantic Fall Yearlings (2025).csv
+116,Fasig-Tipton,Fasig Tipton Midlantic June Two Year Olds In Training,2023,results,6,sales_data/Fasig-Tipton_Midlantic June Two-Year-Olds in Training (2023).csv
+117,Fasig-Tipton,Fasig Tipton Midlantic June Two Year Olds In Training,2024,results,6,sales_data/Fasig-Tipton_Midlantic June Two-Year-Olds in Training (2024).csv
+118,Fasig-Tipton,Fasig Tipton Midlantic May Two Year Olds In Training,2023,results,5,sales_data/Fasig-Tipton_Midlantic May Two-Year-Olds in Training (2023).csv
+119,Fasig-Tipton,Fasig Tipton Midlantic May Two Year Olds In Training,2024,results,5,sales_data/Fasig-Tipton_Midlantic May Two-Year-Olds in Training (2024).csv
+120,Fasig-Tipton,Fasig Tipton Midlantic May Two Year Olds In Training,2025,results,5,sales_data/Fasig-Tipton_Midlantic May Two-Year-Olds in Training (2025).csv
+121,Fasig-Tipton,Fasig Tipton Midlantic May Two Year Olds In Training,2026,results,5,sales_data/Fasig-Tipton_Midlantic May Two-Year-Olds in Training (2026).csv
+122,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2014,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year Olds In Training (2014).csv
+123,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2010,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds In Training (2010).csv
+124,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2012,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds In Training (2012).csv
+125,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2013,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds In Training (2013).csv
+126,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2015,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds In Training (2015).csv
+127,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2016,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds In Training (2016).csv
+128,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2017,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds In Training (2017).csv
+129,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2011,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds in Training (2011).csv
+130,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2018,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds in Training (2018).csv
+131,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2019,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds in Training (2019).csv
+132,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2020,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds in Training (2020).csv
+133,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2021,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds in Training (2021).csv
+134,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2022,results,13,sales_data/Fasig-Tipton_Midlantic Two-Year-Olds in Training (2022).csv
+135,Fasig-Tipton,Fasig Tipton Midlantic Winter Mixed,2016,results,13,sales_data/Fasig-Tipton_Midlantic Winter Mixed (2016).csv
+136,Fasig-Tipton,Fasig Tipton Midlantic Winter Mixed,2017,results,13,sales_data/Fasig-Tipton_Midlantic Winter Mixed (2017).csv
+137,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2004,results,12,sales_data/Fasig-Tipton_Midlantic_December_Mixed(2004).csv
+138,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2005,results,12,sales_data/Fasig-Tipton_Midlantic_December_Mixed(2005).csv
+139,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2006,results,12,sales_data/Fasig-Tipton_Midlantic_December_Mixed(2006).csv
+140,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2007,results,12,sales_data/Fasig-Tipton_Midlantic_December_Mixed(2007).csv
+141,Fasig-Tipton,Fasig Tipton Midlantic December Mixed,2008,results,12,sales_data/Fasig-Tipton_Midlantic_December_Mixed(2008).csv
+142,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2004,results,13,sales_data/Fasig-Tipton_Midlantic_Two-Year-Olds_In_Training(2004).csv
+143,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2005,results,13,sales_data/Fasig-Tipton_Midlantic_Two-Year-Olds_In_Training(2005).csv
+144,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2007,results,13,sales_data/Fasig-Tipton_Midlantic_Two-Year-Olds_In_Training(2007).csv
+145,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2008,results,13,sales_data/Fasig-Tipton_Midlantic_Two-Year-Olds_In_Training(2008).csv
+146,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training & Horses Of Racing Age,2005,results,13,sales_data/Fasig-Tipton_Midlantic_Two-Year-Olds_In_Training_&_Horses_Of_Racing_Age(2005).csv
+147,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training & Horses Of Racing Age,2006,results,13,sales_data/Fasig-Tipton_Midlantic_Two-Year-Olds_In_Training_&_Horses_Of_Racing_Age(2006).csv
+148,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training & Horses Of Racing Age,2007,results,13,sales_data/Fasig-Tipton_Midlantic_Two-Year-Olds_In_Training_&_Horses_Of_Racing_Age(2007).csv
+149,Fasig-Tipton,Fasig Tipton Midlantic Two Year Olds In Training,2009,results,13,sales_data/Fasig-Tipton_Midlantic_Two_Year_Olds_In_Training(2009).csv
+150,Fasig-Tipton,Fasig Tipton Midlantic Winter Mixed,2004,results,13,sales_data/Fasig-Tipton_Midlantic_Winter_Mixed(2004).csv
+151,Fasig-Tipton,Fasig Tipton Midlantic Winter Mixed,2005,results,13,sales_data/Fasig-Tipton_Midlantic_Winter_Mixed(2005).csv
+152,Fasig-Tipton,Fasig Tipton Midlantic Winter Mixed,2007,results,13,sales_data/Fasig-Tipton_Midlantic_Winter_Mixed(2007).csv
+153,Fasig-Tipton,Fasig Tipton Midlantic Winter Mixed,2008,results,13,sales_data/Fasig-Tipton_Midlantic_Winter_Mixed(2008).csv
+154,Fasig-Tipton,Fasig Tipton New York Bred Preferred Yearlings,2009,results,13,sales_data/Fasig-Tipton_New York Bred Preferred Yearlings (2009).csv
+155,Fasig-Tipton,Fasig Tipton New York Bred Preferred Yearlings,2010,results,13,sales_data/Fasig-Tipton_New York Bred Preferred Yearlings (2010).csv
+156,Fasig-Tipton,Fasig Tipton New York Bred Preferred Yearlings,2011,results,13,sales_data/Fasig-Tipton_New York Bred Preferred Yearlings (2011).csv
+157,Fasig-Tipton,Fasig Tipton New York Bred Preferred Yearlings,2012,results,13,sales_data/Fasig-Tipton_New York Bred Preferred Yearlings (2012).csv
+158,Fasig-Tipton,Fasig Tipton New York Bred Preferred Yearlings,2013,results,13,sales_data/Fasig-Tipton_New York Bred Preferred Yearlings (2013).csv
+159,Fasig-Tipton,Fasig Tipton New York Bred Yearlings,2014,results,13,sales_data/Fasig-Tipton_New York Bred Yearlings (2014).csv
+160,Fasig-Tipton,Fasig Tipton New York Bred Yearlings,2015,results,13,sales_data/Fasig-Tipton_New York Bred Yearlings (2015).csv
+161,Fasig-Tipton,Fasig Tipton New York Bred Yearlings,2016,results,13,sales_data/Fasig-Tipton_New York Bred Yearlings (2016).csv
+162,Fasig-Tipton,Fasig Tipton New York Bred Yearlings,2017,results,13,sales_data/Fasig-Tipton_New York Bred Yearlings (2017).csv
+163,Fasig-Tipton,Fasig Tipton New York Bred Yearlings,2018,results,13,sales_data/Fasig-Tipton_New York Bred Yearlings (2018).csv
+164,Fasig-Tipton,Fasig Tipton New York Bred Yearlings,2019,results,13,sales_data/Fasig-Tipton_New York Bred Yearlings (2019).csv
+165,Fasig-Tipton,Fasig Tipton New York Bred Yearlings,2021,results,13,sales_data/Fasig-Tipton_New York Bred Yearlings (2021).csv
+166,Fasig-Tipton,Fasig Tipton New York Bred Yearlings,2022,results,13,sales_data/Fasig-Tipton_New York Bred Yearlings (2022).csv
+167,Fasig-Tipton,Fasig Tipton New York Bred Yearlings,2023,results,13,sales_data/Fasig-Tipton_New York Bred Yearlings (2023).csv
+168,Fasig-Tipton,Fasig Tipton New York Bred Yearlings,2024,results,13,sales_data/Fasig-Tipton_New York Bred Yearlings (2024).csv
+169,Fasig-Tipton,Fasig Tipton New York Bred Yearlings,2025,results,13,sales_data/Fasig-Tipton_New York Bred Yearlings (2025).csv
+170,Fasig-Tipton,Fasig Tipton New York Bred Preferred Yearlings,2005,results,13,sales_data/Fasig-Tipton_New_York_Bred_Preferred_Yearlings(2005).csv
+171,Fasig-Tipton,Fasig Tipton New York Bred Preferred Yearlings,2006,results,13,sales_data/Fasig-Tipton_New_York_Bred_Preferred_Yearlings(2006).csv
+172,Fasig-Tipton,Fasig Tipton New York Bred Preferred Yearlings,2007,results,13,sales_data/Fasig-Tipton_New_York_Bred_Preferred_Yearlings(2007).csv
+173,Fasig-Tipton,Fasig Tipton New York Horses Of Racing Age,2004,results,13,sales_data/Fasig-Tipton_New_York_Horses_Of_Racing_Age(2004).csv
+174,Fasig-Tipton,Fasig Tipton New York Preferred Yearlings,2004,results,13,sales_data/Fasig-Tipton_New_York_Preferred_Yearlings(2004).csv
+175,Fasig-Tipton,Fasig Tipton New York Preferred Yearlings,2008,results,13,sales_data/Fasig-Tipton_New_York_Preferred_Yearlings(2008).csv
+176,Fasig-Tipton,Fasig Tipton Santa Anita Two Year Olds In Training,2019,results,13,sales_data/Fasig-Tipton_Santa Anita Two-Year-Olds in Training (2019).csv
+177,Fasig-Tipton,Fasig Tipton Santa Anita Two Year Olds In Training,2021,results,13,sales_data/Fasig-Tipton_Santa Anita Two-Year-Olds in Training (2021).csv
+178,Fasig-Tipton,Fasig Tipton Saratoga Fall Mixed & Horses Of Racing Age,2012,results,13,sales_data/Fasig-Tipton_Saratoga Fall Mixed & Horses of Racing Age (2012).csv
+179,Fasig-Tipton,Fasig Tipton Saratoga Fall Mixed & Horses Of Racing Age,2013,results,13,sales_data/Fasig-Tipton_Saratoga Fall Mixed & Horses of Racing Age (2013).csv
+180,Fasig-Tipton,Fasig Tipton Saratoga Fall Mixed,2023,results,13,sales_data/Fasig-Tipton_Saratoga Fall Mixed (2023).csv
+181,Fasig-Tipton,Fasig Tipton Saratoga Fall Mixed,2024,results,13,sales_data/Fasig-Tipton_Saratoga Fall Mixed (2024).csv
+182,Fasig-Tipton,Fasig Tipton Saratoga Fall Mixed,2025,results,13,sales_data/Fasig-Tipton_Saratoga Fall Mixed (2025).csv
+183,Fasig-Tipton,Fasig Tipton Saratoga Selected Yearlings,2009,results,13,sales_data/Fasig-Tipton_Saratoga Selected Yearlings (2009).csv
+184,Fasig-Tipton,Fasig Tipton Saratoga Selected Yearlings,2010,results,13,sales_data/Fasig-Tipton_Saratoga Selected Yearlings (2010).csv
+185,Fasig-Tipton,Fasig Tipton Saratoga Open Yearlings,2006,results,13,sales_data/Fasig-Tipton_Saratoga_Open_Yearlings(2006).csv
+186,Fasig-Tipton,Fasig Tipton Saratoga Open Yearlings,2007,results,13,sales_data/Fasig-Tipton_Saratoga_Open_Yearlings(2007).csv
+187,Fasig-Tipton,Fasig Tipton Saratoga Open Yearlings,2008,results,13,sales_data/Fasig-Tipton_Saratoga_Open_Yearlings(2008).csv
+188,Fasig-Tipton,Fasig Tipton Saratoga Selected Yearlings,2004,results,13,sales_data/Fasig-Tipton_Saratoga_Selected_Yearlings(2004).csv
+189,Fasig-Tipton,Fasig Tipton Saratoga Selected Yearlings,2005,results,13,sales_data/Fasig-Tipton_Saratoga_Selected_Yearlings(2005).csv
+190,Fasig-Tipton,Fasig Tipton Saratoga Selected Yearlings,2007,results,13,sales_data/Fasig-Tipton_Saratoga_Selected_Yearlings(2007).csv
+191,Fasig-Tipton,Fasig Tipton Saratoga Selected Yearlings,2008,results,13,sales_data/Fasig-Tipton_Saratoga_Selected_Yearlings(2008).csv
+192,Fasig-Tipton,Fasig Tipton Selected Yearlings Showcase,2020,results,13,sales_data/Fasig-Tipton_Selected Yearlings Showcase (2020).csv
+193,Fasig-Tipton,Fasig Tipton Summer Selected Horses Of Racing Age,2013,results,13,sales_data/Fasig-Tipton_Summer Selected Horses of Racing Age (2013).csv
+194,Fasig-Tipton,Fasig Tipton Summer Selected Horses Of Racing Age,2014,results,13,sales_data/Fasig-Tipton_Summer Selected Horses of Racing Age (2014).csv
+195,Fasig-Tipton,Fasig Tipton Summer Selected Horses Of Racing Age,2015,results,13,sales_data/Fasig-Tipton_Summer Selected Horses of Racing Age (2015).csv
+196,Fasig-Tipton,Fasig Tipton Texas December Mixed,2009,results,12,sales_data/Fasig-Tipton_Texas December Mixed (2009).csv
+197,Fasig-Tipton,Fasig Tipton Texas December Mixed,2010,results,12,sales_data/Fasig-Tipton_Texas December Mixed (2010).csv
+198,Fasig-Tipton,Fasig Tipton Texas December Mixed,2011,results,12,sales_data/Fasig-Tipton_Texas December Mixed (2011).csv
+199,Fasig-Tipton,Fasig Tipton Texas Summer Yearlings,2009,results,13,sales_data/Fasig-Tipton_Texas Summer Yearlings (2009).csv
+200,Fasig-Tipton,Fasig Tipton Texas Summer Yearlings,2010,results,13,sales_data/Fasig-Tipton_Texas Summer Yearlings (2010).csv
+201,Fasig-Tipton,Fasig Tipton Texas Summer Yearlings,2011,results,13,sales_data/Fasig-Tipton_Texas Summer Yearlings (2011).csv
+202,Fasig-Tipton,Fasig Tipton Texas Summer Yearlings,2012,results,13,sales_data/Fasig-Tipton_Texas Summer Yearlings (2012).csv
+203,Fasig-Tipton,Fasig Tipton Texas Summer Yearlings,2013,results,13,sales_data/Fasig-Tipton_Texas Summer Yearlings (2013).csv
+204,Fasig-Tipton,Fasig Tipton Texas Two Year Olds In Training,2010,results,13,sales_data/Fasig-Tipton_Texas Two-Year-Olds In Training (2010).csv
+205,Fasig-Tipton,Fasig Tipton Texas Two Year Olds In Training,2011,results,13,sales_data/Fasig-Tipton_Texas Two-Year-Olds In Training (2011).csv
+206,Fasig-Tipton,Fasig Tipton Texas Two Year Olds In Training,2012,results,13,sales_data/Fasig-Tipton_Texas Two-Year-Olds In Training (2012).csv
+207,Fasig-Tipton,Fasig Tipton Texas Two Year Olds In Training,2013,results,13,sales_data/Fasig-Tipton_Texas Two-Year-Olds In Training (2013).csv
+208,Fasig-Tipton,Fasig Tipton Texas Two Year Olds In Training,2014,results,13,sales_data/Fasig-Tipton_Texas Two-Year-Olds In Training (2014).csv
+209,Fasig-Tipton,Fasig Tipton Texas Two Year Olds In Training,2015,results,13,sales_data/Fasig-Tipton_Texas Two-Year-Olds In Training (2015).csv
+210,Fasig-Tipton,Fasig Tipton Texas Yearlings & Fall Mixed,2014,results,13,sales_data/Fasig-Tipton_Texas Yearlings & Fall Mixed (2014).csv
+211,Fasig-Tipton,Fasig Tipton Texas December Mixed,2005,results,12,sales_data/Fasig-Tipton_Texas_December_Mixed(2005).csv
+212,Fasig-Tipton,Fasig Tipton Texas December Mixed,2006,results,12,sales_data/Fasig-Tipton_Texas_December_Mixed(2006).csv
+213,Fasig-Tipton,Fasig Tipton Texas Fall Mixed,2004,results,13,sales_data/Fasig-Tipton_Texas_Fall_Mixed(2004).csv
+214,Fasig-Tipton,Fasig Tipton Texas Fall Mixed,2007,results,13,sales_data/Fasig-Tipton_Texas_Fall_Mixed(2007).csv
+215,Fasig-Tipton,Fasig Tipton Texas Fall Mixed,2008,results,13,sales_data/Fasig-Tipton_Texas_Fall_Mixed(2008).csv
+216,Fasig-Tipton,Fasig Tipton Texas Summer Yearlings,2004,results,13,sales_data/Fasig-Tipton_Texas_Summer_Yearlings(2004).csv
+217,Fasig-Tipton,Fasig Tipton Texas Summer Yearlings,2005,results,13,sales_data/Fasig-Tipton_Texas_Summer_Yearlings(2005).csv
+218,Fasig-Tipton,Fasig Tipton Texas Summer Yearlings,2007,results,13,sales_data/Fasig-Tipton_Texas_Summer_Yearlings(2007).csv
+219,Fasig-Tipton,Fasig Tipton Texas Summer Yearlings,2008,results,13,sales_data/Fasig-Tipton_Texas_Summer_Yearlings(2008).csv
+220,Fasig-Tipton,Fasig Tipton Texas Two Year Olds In Training,2004,results,13,sales_data/Fasig-Tipton_Texas_Two-Year-Olds_In_Training(2004).csv
+221,Fasig-Tipton,Fasig Tipton Texas Two Year Olds In Training,2005,results,13,sales_data/Fasig-Tipton_Texas_Two-Year-Olds_In_Training(2005).csv
+222,Fasig-Tipton,Fasig Tipton Texas Two Year Olds In Training,2007,results,13,sales_data/Fasig-Tipton_Texas_Two-Year-Olds_In_Training(2007).csv
+223,Fasig-Tipton,Fasig Tipton Texas Two Year Olds In Training,2008,results,13,sales_data/Fasig-Tipton_Texas_Two-Year-Olds_In_Training(2008).csv
+224,Fasig-Tipton,Fasig Tipton Texas Two Year Olds In Training,2009,results,13,sales_data/Fasig-Tipton_Texas_Two-Year-Olds_in_Training(2009).csv
+225,Fasig-Tipton,Fasig Tipton The Florida Sale,2011,results,13,sales_data/Fasig-Tipton_The Florida Sale (2011).csv
+226,Fasig-Tipton,Fasig Tipton The Florida Sale,2012,results,13,sales_data/Fasig-Tipton_The Florida Sale (2012).csv
+227,Fasig-Tipton,Fasig Tipton The Florida Sale,2013,results,13,sales_data/Fasig-Tipton_The Florida Sale (2013).csv
+228,Fasig-Tipton,Fasig Tipton The Florida Sale,2014,results,13,sales_data/Fasig-Tipton_The Florida Sale (2014).csv
+229,Fasig-Tipton,Fasig Tipton The Florida Sale,2015,results,13,sales_data/Fasig-Tipton_The Florida Sale (2015).csv
+230,Fasig-Tipton,Fasig Tipton The Florida Sale,2016,results,13,sales_data/Fasig-Tipton_The Florida Sale (2016).csv
+231,Fasig-Tipton,Fasig Tipton The Gulfstream Sale,2017,results,13,sales_data/Fasig-Tipton_The Gulfstream Sale (2017).csv
+232,Fasig-Tipton,Fasig Tipton The Gulfstream Sale,2018,results,13,sales_data/Fasig-Tipton_The Gulfstream Sale (2018).csv
+233,Fasig-Tipton,Fasig Tipton The Gulfstream Sale,2019,results,13,sales_data/Fasig-Tipton_The Gulfstream Sale (2019).csv
+234,Fasig-Tipton,Fasig Tipton The Gulfstream Sale,2021,results,13,sales_data/Fasig-Tipton_The Gulfstream Sale (2021).csv
+235,Fasig-Tipton,Fasig Tipton The Gulfstream Sale,2022,results,13,sales_data/Fasig-Tipton_The Gulfstream Sale (2022).csv
+236,Fasig-Tipton,Fasig Tipton The July Sale,2009,results,7,sales_data/Fasig-Tipton_The July Sale (2009).csv
+237,Fasig-Tipton,Fasig Tipton The July Sale,2011,results,7,sales_data/Fasig-Tipton_The July Sale (2011).csv
+238,Fasig-Tipton,Fasig Tipton The July Sale,2012,results,7,sales_data/Fasig-Tipton_The July Sale (2012).csv
+239,Fasig-Tipton,Fasig Tipton The July Sale,2013,results,7,sales_data/Fasig-Tipton_The July Sale (2013).csv
+240,Fasig-Tipton,Fasig Tipton The July Sale,2014,results,7,sales_data/Fasig-Tipton_The July Sale (2014).csv
+241,Fasig-Tipton,Fasig Tipton The July Sale,2015,results,7,sales_data/Fasig-Tipton_The July Sale (2015).csv
+242,Fasig-Tipton,Fasig Tipton The July Sale,2016,results,7,sales_data/Fasig-Tipton_The July Sale (2016).csv
+243,Fasig-Tipton,Fasig Tipton The July Sale,2017,results,7,sales_data/Fasig-Tipton_The July Sale (2017).csv
+244,Fasig-Tipton,Fasig Tipton The July Sale,2018,results,7,sales_data/Fasig-Tipton_The July Sale (2018).csv
+245,Fasig-Tipton,Fasig Tipton The July Sale,2019,results,7,sales_data/Fasig-Tipton_The July Sale (2019).csv
+246,Fasig-Tipton,Fasig Tipton The July Sale,2021,results,7,sales_data/Fasig-Tipton_The July Sale (2021).csv
+247,Fasig-Tipton,Fasig Tipton The July Sale,2022,results,7,sales_data/Fasig-Tipton_The July Sale (2022).csv
+248,Fasig-Tipton,Fasig Tipton The July Sale,2023,results,7,sales_data/Fasig-Tipton_The July Sale (2023).csv
+249,Fasig-Tipton,Fasig Tipton The July Sale,2024,results,7,sales_data/Fasig-Tipton_The July Sale (2024).csv
+250,Fasig-Tipton,Fasig Tipton The July Sale,2025,results,7,sales_data/Fasig-Tipton_The July Sale (2025).csv
+251,Fasig-Tipton,Fasig Tipton The November Sale,2010,results,11,sales_data/Fasig-Tipton_The November Sale (2010).csv
+252,Fasig-Tipton,Fasig Tipton The November Sale,2011,results,11,sales_data/Fasig-Tipton_The November Sale (2011).csv
+253,Fasig-Tipton,Fasig Tipton The November Sale,2012,results,11,sales_data/Fasig-Tipton_The November Sale (2012).csv
+254,Fasig-Tipton,Fasig Tipton The November Sale,2013,results,11,sales_data/Fasig-Tipton_The November Sale (2013).csv
+255,Fasig-Tipton,Fasig Tipton The November Sale,2014,results,11,sales_data/Fasig-Tipton_The November Sale (2014).csv
+256,Fasig-Tipton,Fasig Tipton The November Sale,2015,results,11,sales_data/Fasig-Tipton_The November Sale (2015).csv
+257,Fasig-Tipton,Fasig Tipton The November Sale,2016,results,11,sales_data/Fasig-Tipton_The November Sale (2016).csv
+258,Fasig-Tipton,Fasig Tipton The November Sale,2017,results,11,sales_data/Fasig-Tipton_The November Sale (2017).csv
+259,Fasig-Tipton,Fasig Tipton The November Sale,2018,results,11,sales_data/Fasig-Tipton_The November Sale (2018).csv
+260,Fasig-Tipton,Fasig Tipton The November Sale,2019,results,11,sales_data/Fasig-Tipton_The November Sale (2019).csv
+261,Fasig-Tipton,Fasig Tipton The November Sale,2020,results,11,sales_data/Fasig-Tipton_The November Sale (2020).csv
+262,Fasig-Tipton,Fasig Tipton The November Sale,2021,results,11,sales_data/Fasig-Tipton_The November Sale (2021).csv
+263,Fasig-Tipton,Fasig Tipton The November Sale,2022,results,11,sales_data/Fasig-Tipton_The November Sale (2022).csv
+264,Fasig-Tipton,Fasig Tipton The November Sale,2023,results,11,sales_data/Fasig-Tipton_The November Sale (2023).csv
+265,Fasig-Tipton,Fasig Tipton The November Sale,2024,results,11,sales_data/Fasig-Tipton_The November Sale (2024).csv
+266,Fasig-Tipton,Fasig Tipton The November Sale,2025,results,11,sales_data/Fasig-Tipton_The November Sale (2025).csv
+267,Fasig-Tipton,Fasig Tipton The October Sale,2012,results,10,sales_data/Fasig-Tipton_The October Sale (2012).csv
+268,Fasig-Tipton,Fasig Tipton The October Sale,2013,results,10,sales_data/Fasig-Tipton_The October Sale (2013).csv
+269,Fasig-Tipton,Fasig Tipton The October Sale,2014,results,10,sales_data/Fasig-Tipton_The October Sale (2014).csv
+270,Fasig-Tipton,Fasig Tipton The October Sale,2015,results,10,sales_data/Fasig-Tipton_The October Sale (2015).csv
+271,Fasig-Tipton,Fasig Tipton The October Sale,2016,results,10,sales_data/Fasig-Tipton_The October Sale (2016).csv
+272,Fasig-Tipton,Fasig Tipton The October Sale,2017,results,10,sales_data/Fasig-Tipton_The October Sale (2017).csv
+273,Fasig-Tipton,Fasig Tipton The October Sale,2018,results,10,sales_data/Fasig-Tipton_The October Sale (2018).csv
+274,Fasig-Tipton,Fasig Tipton The Pin Oak Stud Sale,2021,results,13,sales_data/Fasig-Tipton_The Pin Oak Stud Sale (2021).csv
+275,Fasig-Tipton,Fasig Tipton The Saratoga Fall Sale,2014,results,13,sales_data/Fasig-Tipton_The Saratoga Fall Sale (2014).csv
+276,Fasig-Tipton,Fasig Tipton The Saratoga Fall Sale,2015,results,13,sales_data/Fasig-Tipton_The Saratoga Fall Sale (2015).csv
+277,Fasig-Tipton,Fasig Tipton The Saratoga Fall Sale,2016,results,13,sales_data/Fasig-Tipton_The Saratoga Fall Sale (2016).csv
+278,Fasig-Tipton,Fasig Tipton The Saratoga Fall Sale,2017,results,13,sales_data/Fasig-Tipton_The Saratoga Fall Sale (2017).csv
+279,Fasig-Tipton,Fasig Tipton The Saratoga Fall Sale,2018,results,13,sales_data/Fasig-Tipton_The Saratoga Fall Sale (2018).csv
+280,Fasig-Tipton,Fasig Tipton The Saratoga Fall Sale,2019,results,13,sales_data/Fasig-Tipton_The Saratoga Fall Sale (2019).csv
+281,Fasig-Tipton,Fasig Tipton The Saratoga Fall Sale,2021,results,13,sales_data/Fasig-Tipton_The Saratoga Fall Sale (2021).csv
+282,Fasig-Tipton,Fasig Tipton The Saratoga Fall Sale,2022,results,13,sales_data/Fasig-Tipton_The Saratoga Fall Sale (2022).csv
+283,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2011,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2011).csv
+284,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2012,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2012).csv
+285,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2013,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2013).csv
+286,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2014,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2014).csv
+287,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2015,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2015).csv
+288,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2016,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2016).csv
+289,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2017,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2017).csv
+290,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2018,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2018).csv
+291,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2019,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2019).csv
+292,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2021,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2021).csv
+293,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2022,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2022).csv
+294,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2023,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2023).csv
+295,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2024,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2024).csv
+296,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2025,results,13,sales_data/Fasig-Tipton_The Saratoga Sale (2025).csv
+297,Fasig-Tipton,Fasig Tipton The Turf Showcase,2017,results,13,sales_data/Fasig-Tipton_The Turf Showcase (2017).csv
+298,Fasig-Tipton,Fasig Tipton The Calder Sale,2009,results,13,sales_data/Fasig-Tipton_The_Calder_Sale(2009).csv
+299,Fasig-Tipton,Fasig Tipton The July Sale,2026,results,7,sales_data/Fasig-Tipton_The_July_Sale(2026).csv
+300,Fasig-Tipton,Fasig Tipton The Saratoga Sale,2026,results,13,sales_data/Fasig-Tipton_The_Saratoga_Sale(2026).csv
+301,Fasig-Tipton,Fasig Tipton Kentucky Winter Mixed,2014,results,13,sales_data/Fasig_Tipton_Kentucky Winter Mixed (2014).csv
+302,Keeneland,Keeneland July Selected Yearling Sale,1999,results,7,sales_data/keeneland_1999_july_selected_yearling_sale.csv
+303,Keeneland,Keeneland November Breeding Stock Sale,1999,results,11,sales_data/keeneland_1999_november_breeding_stock_sale.csv
+304,Keeneland,Keeneland September Yearling Sale,1999,results,9,sales_data/keeneland_1999_september_yearling_sale.csv
+305,Keeneland,Keeneland April Two Year Olds In Training Sale,2000,results,4,sales_data/keeneland_2000_april_two_year_olds_in_training_sale.csv
+306,Keeneland,Keeneland January Horses Of All Ages Sale,2000,results,1,sales_data/keeneland_2000_january_horses_of_all_ages_sale.csv
+307,Keeneland,Keeneland July Selected Yearling Sale,2000,results,7,sales_data/keeneland_2000_july_selected_yearling_sale.csv
+308,Keeneland,Keeneland November Breeding Stock Sale,2000,results,11,sales_data/keeneland_2000_november_breeding_stock_sale.csv
+309,Keeneland,Keeneland Yearling Sale,2000,results,13,sales_data/keeneland_2000_yearling_sale.csv
+310,Keeneland,Keeneland April Two Year Olds In Training,2001,results,4,sales_data/keeneland_2001_april_two_year_olds_in_training.csv
+311,Keeneland,Keeneland January Horses Of All Ages Sale,2001,results,1,sales_data/keeneland_2001_january_horses_of_all_ages_sale.csv
+312,Keeneland,Keeneland July Selected Yearling Sale,2001,results,7,sales_data/keeneland_2001_july_selected_yearling_sale.csv
+313,Keeneland,Keeneland November Breeding Stock Sale,2001,results,11,sales_data/keeneland_2001_november_breeding_stock_sale.csv
+314,Keeneland,Keeneland October Yearling Sale,2001,results,10,sales_data/keeneland_2001_october_yearling_sale.csv
+315,Keeneland,Keeneland September Yearling Sale,2001,results,9,sales_data/keeneland_2001_september_yearling_sale.csv
+316,Keeneland,Keeneland April Two Year Olds In Training,2002,results,4,sales_data/keeneland_2002_april_two_year_olds_in_training.csv
+317,Keeneland,Keeneland January Horses Of All Ages Sale,2002,results,1,sales_data/keeneland_2002_january_horses_of_all_ages_sale.csv
+318,Keeneland,Keeneland July Selected Yearling Sale,2002,results,7,sales_data/keeneland_2002_july_selected_yearling_sale.csv
+319,Keeneland,Keeneland November Breeding Stock Sale,2002,results,11,sales_data/keeneland_2002_november_breeding_stock_sale.csv
+320,Keeneland,Keeneland October Yearling Sale,2002,results,10,sales_data/keeneland_2002_october_yearling_sale.csv
+321,Keeneland,Keeneland September Yearling Sale,2002,results,9,sales_data/keeneland_2002_september_yearling_sale.csv
+322,Keeneland,Keeneland April Two Year Olds In Training,2003,results,4,sales_data/keeneland_2003_april_two_year_olds_in_training.csv
+323,Keeneland,Keeneland January Horses Of All Ages Sale,2003,results,1,sales_data/keeneland_2003_january_horses_of_all_ages_sale.csv
+324,Keeneland,Keeneland November Breeding Stock Sale,2003,results,11,sales_data/keeneland_2003_november_breeding_stock_sale.csv
+325,Keeneland,Keeneland September Yearling Sale,2003,results,9,sales_data/keeneland_2003_september_yearling_sale.csv
+326,Keeneland,Keeneland April Two Year Olds In Training,2004,results,4,sales_data/keeneland_2004_april_two_year_olds_in_training.csv
+327,Keeneland,Keeneland January Horses Of All Ages Sale,2004,results,1,sales_data/keeneland_2004_january_horses_of_all_ages_sale.csv
+328,Keeneland,Keeneland November Breeding Stock Sale,2004,results,11,sales_data/keeneland_2004_november_breeding_stock_sale.csv
+329,Keeneland,Keeneland September Yearling Sale,2004,results,9,sales_data/keeneland_2004_september_yearling_sale.csv
+330,Keeneland,Keeneland April Two Year Olds In Training,2005,results,4,sales_data/keeneland_2005_april_two_year_olds_in_training.csv
+331,Keeneland,Keeneland January Horses Of All Ages Sale,2005,results,1,sales_data/keeneland_2005_january_horses_of_all_ages_sale.csv
+332,Keeneland,Keeneland November Breeding Stock Sale,2005,results,11,sales_data/keeneland_2005_november_breeding_stock_sale.csv
+333,Keeneland,Keeneland September Yearling Sale,2005,results,9,sales_data/keeneland_2005_september_yearling_sale.csv
+334,Keeneland,Keeneland April Two Year Olds In Training,2006,results,4,sales_data/keeneland_2006_april_two_year_olds_in_training.csv
+335,Keeneland,Keeneland January Horses Of All Ages Sale,2006,results,1,sales_data/keeneland_2006_january_horses_of_all_ages_sale.csv
+336,Keeneland,Keeneland November Breeding Stock Sale,2006,results,11,sales_data/keeneland_2006_november_breeding_stock_sale.csv
+337,Keeneland,Keeneland September Yearling Sale,2006,results,9,sales_data/keeneland_2006_september_yearling_sale.csv
+338,Keeneland,Keeneland April Two Year Olds In Training,2007,results,4,sales_data/keeneland_2007_april_two_year_olds_in_training.csv
+339,Keeneland,Keeneland January Horses Of All Ages Sale,2007,results,1,sales_data/keeneland_2007_january_horses_of_all_ages_sale.csv
+340,Keeneland,Keeneland November Breeding Stock Sale,2007,results,11,sales_data/keeneland_2007_november_breeding_stock_sale.csv
+341,Keeneland,Keeneland September Yearling Sale,2007,results,9,sales_data/keeneland_2007_september_yearling_sale.csv
+342,Keeneland,Keeneland April Two Year Olds In Training,2008,results,4,sales_data/keeneland_2008_april_two_year_olds_in_training.csv
+343,Keeneland,Keeneland January Horses Of All Ages Sale,2008,results,1,sales_data/keeneland_2008_january_horses_of_all_ages_sale.csv
+344,Keeneland,Keeneland November Breeding Stock Sale,2008,results,11,sales_data/keeneland_2008_november_breeding_stock_sale.csv
+345,Keeneland,Keeneland September Yearling Sale,2008,results,9,sales_data/keeneland_2008_september_yearling_sale.csv
+346,Keeneland,Keeneland April Two Year Olds In Training,2009,results,4,sales_data/keeneland_2009_april_two_year_olds_in_training.csv
+347,Keeneland,Keeneland January Horses Of All Ages Sale,2009,results,1,sales_data/keeneland_2009_january_horses_of_all_ages_sale.csv
+348,Keeneland,Keeneland November Breeding Stock Sale,2009,results,11,sales_data/keeneland_2009_november_breeding_stock_sale.csv
+349,Keeneland,Keeneland September Yearling Sale,2009,results,9,sales_data/keeneland_2009_september_yearling_sale.csv
+350,Keeneland,Keeneland April Two Year Olds In Training,2010,results,4,sales_data/keeneland_2010_april_two_year_olds_in_training.csv
+351,Keeneland,Keeneland January Horses Of All Ages Sale,2010,results,1,sales_data/keeneland_2010_january_horses_of_all_ages_sale.csv
+352,Keeneland,Keeneland November Breeding Stock Sale,2010,results,11,sales_data/keeneland_2010_november_breeding_stock_sale.csv
+353,Keeneland,Keeneland September Yearling Sale,2010,results,9,sales_data/keeneland_2010_september_yearling_sale.csv
+354,Keeneland,Keeneland April Two Year Olds In Training,2011,results,4,sales_data/keeneland_2011_april_two_year_olds_in_training.csv
+355,Keeneland,Keeneland January Horses Of All Ages Sale,2011,results,1,sales_data/keeneland_2011_january_horses_of_all_ages_sale.csv
+356,Keeneland,Keeneland November Breeding Stock Sale,2011,results,11,sales_data/keeneland_2011_november_breeding_stock_sale.csv
+357,Keeneland,Keeneland September Yearling Sale,2011,results,9,sales_data/keeneland_2011_september_yearling_sale.csv
+358,Keeneland,Keeneland April Two Year Olds In Training,2012,results,4,sales_data/keeneland_2012_april_two_year_olds_in_training.csv
+359,Keeneland,Keeneland January Horses Of All Ages Sale,2012,results,1,sales_data/keeneland_2012_january_horses_of_all_ages_sale.csv
+360,Keeneland,Keeneland November Breeding Stock Sale,2012,results,11,sales_data/keeneland_2012_november_breeding_stock_sale.csv
+361,Keeneland,Keeneland September Yearling Sale,2012,results,9,sales_data/keeneland_2012_september_yearling_sale.csv
+362,Keeneland,Keeneland April Two Year Olds In Training,2013,results,4,sales_data/keeneland_2013_april_two_year_olds_in_training.csv
+363,Keeneland,Keeneland January Horses Of All Ages Sale,2013,results,1,sales_data/keeneland_2013_january_horses_of_all_ages_sale.csv
+364,Keeneland,Keeneland November Breeding Stock Sale,2013,results,11,sales_data/keeneland_2013_november_breeding_stock_sale.csv
+365,Keeneland,Keeneland September Yearling Sale,2013,results,9,sales_data/keeneland_2013_september_yearling_sale.csv
+366,Keeneland,Keeneland April Two Year Olds In Training,2014,results,4,sales_data/keeneland_2014_april_two_year_olds_in_training.csv
+367,Keeneland,Keeneland Breeding Stock Sale,2014,results,13,sales_data/keeneland_2014_breeding_stock_sale.csv
+368,Keeneland,Keeneland January Horses Of All Ages Sale,2014,results,1,sales_data/keeneland_2014_january_horses_of_all_ages_sale.csv
+369,Keeneland,Keeneland September Yearling Sale,2014,results,9,sales_data/keeneland_2014_september_yearling_sale.csv
+370,Keeneland,Keeneland Breeding Stock Sale,2015,results,13,sales_data/keeneland_2015_breeding_stock_sale.csv
+371,Keeneland,Keeneland January Horses Of All Ages Sale,2015,results,1,sales_data/keeneland_2015_january_horses_of_all_ages_sale.csv
+372,Keeneland,Keeneland September Yearling Sale,2015,results,9,sales_data/keeneland_2015_september_yearling_sale.csv
+373,Keeneland,Keeneland January,2016,results,1,sales_data/keeneland_2016_january.csv
+374,Keeneland,Keeneland November Breeding Stock Sale,2016,results,11,sales_data/keeneland_2016_november_breeding_stock_sale.csv
+375,Keeneland,Keeneland September Yearling Sale,2016,results,9,sales_data/keeneland_2016_september_yearling_sale.csv
+376,Keeneland,Keeneland January Horses Of All Ages Sale,2017,results,1,sales_data/keeneland_2017_january_horses_of_all_ages_sale.csv
+377,Keeneland,Keeneland November Breeding Stock Sale,2017,results,11,sales_data/keeneland_2017_november_breeding_stock_sale.csv
+378,Keeneland,Keeneland September Yearling Sale,2017,results,9,sales_data/keeneland_2017_september_yearling_sale.csv
+379,Keeneland,Keeneland January Horses Of All Ages Sale,2018,results,1,sales_data/keeneland_2018_january_horses_of_all_ages_sale.csv
+380,Keeneland,Keeneland November Breeding Stock Sale,2018,results,11,sales_data/keeneland_2018_november_breeding_stock_sale.csv
+381,Keeneland,Keeneland September Yearling Sale,2018,results,9,sales_data/keeneland_2018_september_yearling_sale.csv
+382,Keeneland,Keeneland April Two Year Olds In Training,2019,results,4,sales_data/keeneland_2019_april_two_year_olds_in_training.csv
+383,Keeneland,Keeneland Horses Of All Ages Sale,2019,results,13,sales_data/keeneland_2019_horses_of_all_ages_sale.csv
+384,Keeneland,Keeneland November Breeding Stock Sale,2019,results,11,sales_data/keeneland_2019_november_breeding_stock_sale.csv
+385,Keeneland,Keeneland September Yearling Sale,2019,results,9,sales_data/keeneland_2019_september_yearling_sale.csv
+386,Keeneland,Keeneland January Horses Of All Ages Sale,2020,results,1,sales_data/keeneland_2020_january_horses_of_all_ages_sale.csv
+387,Keeneland,Keeneland November Breeding Stock Sale,2020,results,11,sales_data/keeneland_2020_november_breeding_stock_sale.csv
+388,Keeneland,Keeneland September Yearling Sale,2020,results,9,sales_data/keeneland_2020_september_yearling_sale.csv
+389,Keeneland,Keeneland April Horses Of Racing Age Sale,2021,results,4,sales_data/keeneland_2021_april_horses_of_racing_age_sale.csv
+390,Keeneland,Keeneland January Horses Of All Ages Sale,2021,results,1,sales_data/keeneland_2021_january_horses_of_all_ages_sale.csv
+391,Keeneland,Keeneland November Breeding Stock Sale,2021,results,11,sales_data/keeneland_2021_november_breeding_stock_sale.csv
+392,Keeneland,Keeneland September Yearling Sale,2021,results,9,sales_data/keeneland_2021_september_yearling_sale.csv
+393,Keeneland,Keeneland April Horses Of Racing Age Sale,2022,results,4,sales_data/keeneland_2022_april_horses_of_racing_age_sale.csv
+394,Keeneland,Keeneland January Horses Of All Ages Sale,2022,results,1,sales_data/keeneland_2022_january_horses_of_all_ages_sale.csv
+395,Keeneland,Keeneland November Breeding Stock Sale,2022,results,11,sales_data/keeneland_2022_november_breeding_stock_sale.csv
+396,Keeneland,Keeneland November Horses Of Racing Age Sale,2022,results,11,sales_data/keeneland_2022_november_horses_of_racing_age_sale.csv
+397,Keeneland,Keeneland September Yearling Sale,2022,results,9,sales_data/keeneland_2022_september_yearling_sale.csv
+398,Keeneland,Keeneland April Selected Horses Of Racing Age Sale,2023,results,4,sales_data/keeneland_2023_april_selected_horses_of_racing_age_sale.csv
+399,Keeneland,Keeneland January Horses Of All Ages Sale,2023,results,1,sales_data/keeneland_2023_january_horses_of_all_ages_sale.csv
+400,Keeneland,Keeneland November Breeding Stock Sale,2023,results,11,sales_data/keeneland_2023_november_breeding_stock_sale.csv
+401,Keeneland,Keeneland November Horses Of Racing Age,2023,results,11,sales_data/keeneland_2023_november_horses_of_racing_age.csv
+402,Keeneland,Keeneland September Yearling Sale,2023,results,9,sales_data/keeneland_2023_september_yearling_sale.csv
+403,Keeneland,Keeneland April Selected Horses Of Racing Age Sale,2024,results,4,sales_data/keeneland_2024_april_selected_horses_of_racing_age_sale.csv
+404,Keeneland,Keeneland January Horses Of All Ages Sale,2024,results,1,sales_data/keeneland_2024_january_horses_of_all_ages_sale.csv
+405,Keeneland,Keeneland November Breeding Stock Sale,2024,results,11,sales_data/keeneland_2024_november_breeding_stock_sale.csv
+406,Keeneland,Keeneland November Horses Of Racing Age Sale,2024,results,11,sales_data/keeneland_2024_november_horses_of_racing_age_sale.csv
+407,Keeneland,Keeneland September Yearling Sale,2024,results,9,sales_data/keeneland_2024_september_yearling_sale.csv
+408,Keeneland,Keeneland The Keeneland Championship Sale,2024,results,13,sales_data/keeneland_2024_the_keeneland_championship_sale.csv
+409,Keeneland,Keeneland April Selected Horses Of Racing Age Sale,2025,results,4,sales_data/keeneland_2025_april_selected_horses_of_racing_age_sale.csv
+410,Keeneland,Keeneland Breeding Stock Sale,2025,results,13,sales_data/keeneland_2025_breeding_stock_sale.csv
+411,Keeneland,Keeneland January Horses Of All Ages Sale,2025,results,1,sales_data/keeneland_2025_january_horses_of_all_ages_sale.csv
+412,Keeneland,Keeneland November Horses Of Racing Age Sale,2025,results,11,sales_data/keeneland_2025_november_horses_of_racing_age_sale.csv
+413,Keeneland,Keeneland September Yearling Sale,2025,results,9,sales_data/keeneland_2025_september_yearling_sale.csv
+414,Keeneland,Keeneland The Championship Sale,2025,results,13,sales_data/keeneland_2025_the_championship_sale.csv
+415,Keeneland,Keeneland April Selected Horses Of Racing Age Sale,2026,results,4,sales_data/keeneland_2026_april_selected_horses_of_racing_age_sale.csv
+416,Keeneland,Keeneland January Horses Of All Ages Sale,2026,results,1,sales_data/keeneland_2026_january_horses_of_all_ages_sale.csv
+417,,Eastern Fall Yearlings (2026),2026,upcoming,,Upcoming Sales/Eastern Fall Yearlings (2026).csv

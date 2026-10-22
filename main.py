@@ -104,68 +104,11 @@ def save_database_to_file():
 
 
 def save_profiles_to_file(master_profiles):
-    """Writes the updated stallion_profiles map back to stallion_profiles.py cleanly."""
+    """Writes stallion profile cards to the stallion_stats table."""
     try:
-        try:
-            import stallion_profiles as sp
-            profile_path = sp.__file__
-            if profile_path.endswith('.pyc'):
-                profile_path = profile_path[:-1]
-        except Exception:
-            profile_path = "stallion_profiles.py"
-
-        with open(profile_path, "w", encoding="utf-8") as f:
-            f.write('"""\nMaster Centralized Stallion Profiles Database\n"""\n\n')
-            f.write("stallion_profiles = {\n")
-            
-            for k_idx, (name, data) in enumerate(master_profiles.items()):
-                f.write(f'    "{name}": {{\n')
-                f.write(f'        "Farm": "{data.get("Farm", "")}",\n')
-                f.write(f'        "Year Born": {data.get("Year Born", datetime.datetime.now().year)},\n')
-                f.write(f'        "Stud Duty Year": {data.get("Stud Duty Year", datetime.datetime.now().year)},\n')
-                f.write(f'        "Stud Fee": {data.get("Stud Fee", 0)},\n')
-                f.write(f'        "Status": "{data.get("Status", "active")}",\n')
-                f.write(f'        "Surface": "{data.get("Surface", "Both")}",\n')
-                f.write(f'        "Height": "{data.get("Height", "N/A")}",\n')
-                f.write(f'        "Conformation & Physical Profile": "{data.get("Conformation & Physical Profile", "Information unavailable.")}",\n')
-                
-                mw_lines = "".join([f'            "{line}\\n"\n' for line in data.get("Major Wins", "").split('\n') if line])
-                f.write(f'        "Major Wins": (\n{mw_lines}        ),\n')
-                
-                ch_lines = "".join([f'            "{line}\\n"\n' for line in data.get("Career Highlight", "").split('\n') if line])
-                f.write(f'        "Career Highlight": (\n{ch_lines}        ),\n')
-                
-                f.write('        "Race Record": {\n')
-                rr_items = []
-                for age, s in data.get("Race Record", {}).items():
-                    rr_items.append(f'            "{age}": {{"Season": "{s.get("Season", "")}", "Starts": {s.get("Starts", 0)}, "1sts": {s.get("1sts", 0)}, "2nds": {s.get("2nds", 0)}, "3rds": {s.get("3rds", 0)}, "Earnings": {s.get("Earnings", 0)}, "Major Accomplishments": "{s.get("Major Accomplishments", "n/a")}"}}')
-                f.write(",\n".join(rr_items) + "\n        },\n")
-                
-                if "Progeny Racing Statistics" in data:
-                    f.write('        "Progeny Racing Statistics": {\n')
-                    prs_items = [f'            "{stat_k}": {repr(stat_v)}' for stat_k, stat_v in data["Progeny Racing Statistics"].items()]
-                    f.write(",\n".join(prs_items) + "\n        },\n")
-                    
-                if "Progeny Earnings Statistics" in data:
-                    f.write('        "Progeny Earnings Statistics": {\n')
-                    pes_items = [f'            "{stat_k}": {repr(stat_v)}' for stat_k, stat_v in data["Progeny Earnings Statistics"].items()]
-                    f.write(",\n".join(pes_items) + "\n        },\n")
-
-                if "Legacy Progeny Stats" in data:
-                    f.write('        "Legacy Progeny Stats": {\n')
-                    f.write(f'            "Total Earnings": "{data.get("Legacy Progeny Stats", {}).get("Total Earnings", "N/A")}",\n')
-                    f.write(f'            "Average Progeny Win Distance": "{data.get("Legacy Progeny Stats", {}).get("Average Progeny Win Distance", "N/A")}",\n')
-                    f.write(f'            "GSW / G1W Ratio": "{data.get("Legacy Progeny Stats", {}).get("GSW / G1W Ratio", "N/A")}"\n')
-                    f.write('        },\n')
-                
-                ped_var_name = clean_horse_name(name).replace(" ", "_") + "_pedigree"
-                f.write(f'        "Pedigree": "{ped_var_name}"\n')
-                
-                comma = "," if k_idx < len(master_profiles) - 1 else ""
-                f.write(f"    }}{comma}\n")
-                
-            f.write("}\n")
-        print("📊 Stallion profiles data file successfully compiled and saved to disk!")
+        import placeholder_store
+        placeholder_store.save_stallion_profiles(master_profiles)
+        print("📊 Stallion profiles saved to the stallion_stats table.")
     except Exception as e:
         print(f"⚠️  Warning: Could not save stallion stats profile to disk: {e}")
 
@@ -401,12 +344,10 @@ def analyze_inbreeding(horse_dict):
 # 6. PROFILE INTERFACE RUNTIME VIEWERS & GRID RENDERER
 # ==============================================================================
 def load_master_profiles():
-    """Loads display cards from stallion_profiles database if available."""
+    """Loads display cards from the stallion_stats table."""
     try:
-        import stallion_profiles as sp
-        if "stallion_profiles" in sys.modules:
-            importlib.reload(sys.modules["stallion_profiles"])
-        return getattr(sp, "stallion_profiles", {})
+        import placeholder_store
+        return placeholder_store.load_stallion_profiles()
     except Exception:
         return {}
 
@@ -730,27 +671,25 @@ def display_stallion_profile(search_name, all_profiles):
         lf_2024_val = None
 
         try:
-            import mares_bred_2025_by_stallion as mb_data
-            for s in mb_data.mares_bred_database.get("North American Stallions", []):
-                if clean_horse_name(s.get("stallion", "")) == clean_search:
-                    mares_bred_val = s.get("mares_bred_2025")
-                    
-                    def format_ratio(ratio_str):
-                        if not ratio_str or "/" not in str(ratio_str):
-                            return None
-                        try:
-                            parts = str(ratio_str).split("/")
-                            pct = (int(parts[1]) / int(parts[0])) * 100
-                            return f"{pct:.1f}% ({parts[1]} foals from {parts[0]} mares)"
-                        except Exception:
-                            return str(ratio_str)
+            import placeholder_store
+            s = placeholder_store.mares_bred_for(clean_search)
+            if s:
+                mares_bred_val = s.get("mares_bred_2025")
 
-                    lf_2025_raw = s.get("live_foal_percentage_for_2025_foals")
-                    lf_2024_raw = s.get("live_foal_percentage_for_2024_foals")
-                    
-                    lf_2025_val = format_ratio(lf_2025_raw) if lf_2025_raw else None
-                    lf_2024_val = format_ratio(lf_2024_raw) if lf_2024_raw else None
-                    break
+                def format_ratio(ratio_str):
+                    if not ratio_str or "/" not in str(ratio_str):
+                        return None
+                    try:
+                        parts = str(ratio_str).split("/")
+                        pct = (int(parts[1]) / int(parts[0])) * 100
+                        return f"{pct:.1f}% ({parts[1]} foals from {parts[0]} mares)"
+                    except Exception:
+                        return str(ratio_str)
+
+                lf_2025_raw = s.get("live_foal_percentage_for_2025_foals")
+                lf_2024_raw = s.get("live_foal_percentage_for_2024_foals")
+                lf_2025_val = format_ratio(lf_2025_raw) if lf_2025_raw else None
+                lf_2024_val = format_ratio(lf_2024_raw) if lf_2024_raw else None
         except Exception:
             pass
 
