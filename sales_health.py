@@ -1,6 +1,5 @@
 import sqlite3
 from pathlib import Path
-import matplotlib.pyplot as plt
 import sales_history
 
 DB_PATH = Path("sales_database.db")
@@ -100,7 +99,123 @@ def sync_csvs_to_sql():
     conn.commit()
     conn.close()
 
+def _as_engine_row(row):
+    """Map a sale_results table row onto the record shape compute_metrics expects."""
+    def flag(value):
+        return str(value).strip().lower() in {"1", "true", "t", "yes"}
+
+    try:
+        price = float(row.get("price_num") or 0)
+    except (TypeError, ValueError):
+        price = 0.0
+    return {
+        "is_out": flag(row.get("is_out")),
+        "is_rna": flag(row.get("is_rna")),
+        "price_num": price,
+        "year": row.get("sale_year"),
+    }
+
+
+def build_sale_health_report(selected_sale_title):
+    """Year-over-year sale stats from the sale_results table (placeholder CSV or Postgres)."""
+    try:
+        import placeholder_store
+        rows = placeholder_store.sale_results_matching(selected_sale_title)
+    except Exception:
+        return None
+    if not rows:
+        return None
+
+    by_year = {}
+    for row in rows:
+        try:
+            year = int(row.get("sale_year"))
+        except (TypeError, ValueError):
+            continue
+        by_year.setdefault(year, []).append(_as_engine_row(row))
+
+    years = []
+    report_rows = []
+    previous = None
+    for year in sorted(by_year):
+        metrics = sales_history.compute_metrics(by_year[year])
+        entry = {
+            "year": str(year),
+            "offered": metrics["offered_n"],
+            "gross": metrics["gross_n"],
+            "average": metrics["avg_n"],
+            "median": metrics["median_n"],
+            "millionaires": metrics["mil_n"],
+            "sold": metrics["sold_n"],
+            "sold_pct": metrics["sold_pct_n"],
+            "rna": metrics["rna_n"],
+            "offered_display": metrics["horses"],
+            "gross_display": metrics["gross"],
+            "average_display": metrics["avg"],
+            "median_display": metrics["median"],
+            "sold_pct_display": metrics["sold_pct"],
+            "rna_display": metrics["rna"],
+            "millionaires_display": metrics["mil"],
+        }
+        if previous:
+            def growth(current, prior):
+                if not prior:
+                    return None
+                return ((current - prior) / prior) * 100
+
+            entry["offered_yoy"] = growth(entry["offered"], previous["offered"])
+            entry["gross_yoy"] = growth(entry["gross"], previous["gross"])
+            entry["average_yoy"] = growth(entry["average"], previous["average"])
+            entry["median_yoy"] = growth(entry["median"], previous["median"])
+            entry["millionaires_yoy"] = growth(entry["millionaires"], previous["millionaires"])
+        else:
+            entry["offered_yoy"] = None
+            entry["gross_yoy"] = None
+            entry["average_yoy"] = None
+            entry["median_yoy"] = None
+            entry["millionaires_yoy"] = None
+        years.append(str(year))
+        report_rows.append(entry)
+        previous = entry
+
+    if not report_rows:
+        return None
+
+    def peak(key):
+        best = max(report_rows, key=lambda item: item[key])
+        return {"value": best[key], "year": best["year"]}
+
+    latest = report_rows[-1]
+    return {
+        "sale_title": selected_sale_title,
+        "years": years,
+        "rows": report_rows,
+        "latest": latest,
+        "previous_year": report_rows[-2]["year"] if len(report_rows) > 1 else None,
+        "growth_vs_previous": latest.get("average_yoy"),
+        "highs": {
+            "most_offered": peak("offered"),
+            "highest_gross": peak("gross"),
+            "highest_average": peak("average"),
+            "highest_median": peak("median"),
+            "most_millionaires": peak("millionaires"),
+        },
+    }
+
+
 def get_sale_year_by_year_metrics(selected_sale_title):
+    report = build_sale_health_report(selected_sale_title)
+    if report:
+        years = [row["year"] for row in report["rows"]]
+        return (
+            years,
+            [row["gross"] for row in report["rows"]],
+            [row["offered"] for row in report["rows"]],
+            [row["average"] for row in report["rows"]],
+            [row["median"] for row in report["rows"]],
+            [row["millionaires"] for row in report["rows"]],
+        )
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
@@ -168,8 +283,12 @@ def display_sales_health_dashboard():
 
     selected_sale = ALL_SALES[choice_idx]
 
-    print(f"\n⏳ Syncing CSV dataset and running SQL queries for '{selected_sale}'...")
-    sync_csvs_to_sql()
+    placeholder_report = build_sale_health_report(selected_sale)
+    if placeholder_report:
+        print(f"\n⏳ Reading sale_results for '{selected_sale}'...")
+    else:
+        print(f"\n⏳ Syncing CSV dataset and running SQL queries for '{selected_sale}'...")
+        sync_csvs_to_sql()
     
     years, gross, totals, avgs, medians, millionaires = get_sale_year_by_year_metrics(selected_sale)
 
@@ -230,6 +349,7 @@ def display_sales_health_dashboard():
     years_2d = [f"'{y[-2:]}" for y in years]
 
     # Render clean 2x2 Grid Layout (Gross, Offered, Average, Median)
+    import matplotlib.pyplot as plt
     plt.style.use('seaborn-v0_8-darkgrid' if 'seaborn-v0_8-darkgrid' in plt.style.available else 'default')
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
     fig.suptitle(f'SALES HEALTH TRENDS: {selected_sale.upper()}', fontsize=14, fontweight='bold')
