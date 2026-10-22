@@ -137,17 +137,20 @@ def load_catalog_rows(filename: str = "", source_file: str = "") -> list[dict]:
             sire = _pick(row, SIRE_KEYS)
             dam = _pick(row, DAM_KEYS)
             # Fasig upcoming often stores placeholders like "2025-RAVER" or "Hip 12".
+            # Display those as "Sire x Dam" (never the year-dam token).
             placeholder = (
                 not horse_name
                 or re.match(r"^hip\s*\d+$", horse_name, re.I)
                 or re.match(r"^\d{4}-", horse_name)
             )
             if placeholder:
-                yr = (year_match.group(0)[2:] if year_match else "00")
                 if sire or dam:
-                    horse_name = f"{sire} x {dam} '{yr}".strip()
+                    horse_name = f"{sire} x {dam}".strip(" x")
                 else:
                     horse_name = f"Hip {hip}"
+            elif re.search(r"\s+x\s+", horse_name, re.I) and re.search(r"'\d{2}\s*$", horse_name):
+                # Drop a trailing 'YY from an earlier Sire x Dam 'YY synthesis.
+                horse_name = re.sub(r"\s*'\d{2}\s*$", "", horse_name).strip()
             sold_as = _pick(row, ("SOLD AS", "SOLD AS DESCRIPTION", "DESCRIPTION"))
             code = _pick(row, ("SOLD AS CODE",))
             if sold_as.upper() in {"NAN", "NONE", "NULL"}:

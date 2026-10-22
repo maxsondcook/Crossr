@@ -344,49 +344,79 @@ def _node_for(name: str):
 
 
 def _pedigree_from_parents(sire_name: str, dam_name: str, sire_of_dam: str = ""):
-    """Build sire/dam lines live from pedigrees_database when cache lines are missing."""
+    """Build sire/dam lines from pedigrees_database, always seeding from the catalog row.
+
+    Even when the yearling itself is missing from pedigrees_database, the Upcoming
+    Sales CSV supplies SIRE, DAM, and SIRE OF DAM so the pedigree panel is usable.
+    """
     sire_line = []
-    node = _node_for(sire_name) or ({"Horse": sire_name} if sire_name else None)
-    generation = 1
-    while isinstance(node, dict) and generation <= 5:
-        name, year = _split_horse_label(node.get("Horse", ""))
-        if not name and generation == 1 and sire_name:
-            name, year = sire_name, ""
-        if not name:
-            break
+    # Always start with the catalog sire, then walk his sire line when known.
+    if sire_name:
+        sire_node = _node_for(sire_name)
+        sire_year = ""
+        if isinstance(sire_node, dict):
+            _, sire_year = _split_horse_label(sire_node.get("Horse", ""))
         sire_line.append({
-            "name": name,
-            "year": year,
-            "class_label": _class_of(name),
-            "generation": generation,
+            "name": sire_name,
+            "year": sire_year,
+            "class_label": _class_of(sire_name),
+            "generation": 1,
         })
-        node = node.get("Sire") if isinstance(node.get("Sire"), dict) else None
-        generation += 1
+        node = sire_node.get("Sire") if isinstance(sire_node, dict) and isinstance(sire_node.get("Sire"), dict) else None
+        generation = 2
+        while isinstance(node, dict) and generation <= 5:
+            name, year = _split_horse_label(node.get("Horse", ""))
+            if not name:
+                break
+            sire_line.append({
+                "name": name,
+                "year": year,
+                "class_label": _class_of(name),
+                "generation": generation,
+            })
+            node = node.get("Sire") if isinstance(node.get("Sire"), dict) else None
+            generation += 1
 
     dams = []
-    node = _node_for(dam_name) or ({"Horse": dam_name, "Sire": {"Horse": sire_of_dam} if sire_of_dam else None} if dam_name else None)
-    generation = 1
-    while isinstance(node, dict) and generation <= 6:
-        name, year = _split_horse_label(node.get("Horse", ""))
-        if not name and generation == 1 and dam_name:
-            name, year = dam_name, ""
-        if not name:
-            break
-        sire_node = node.get("Sire") if isinstance(node.get("Sire"), dict) else None
-        damsire_name, _ = _split_horse_label((sire_node or {}).get("Horse", ""))
-        if generation == 1 and not damsire_name and sire_of_dam:
-            damsire_name = sire_of_dam
+    if dam_name:
+        dam_node = _node_for(dam_name)
+        dam_year = ""
+        damsire_name = sire_of_dam or ""
+        if isinstance(dam_node, dict):
+            _, dam_year = _split_horse_label(dam_node.get("Horse", ""))
+            sire_node = dam_node.get("Sire") if isinstance(dam_node.get("Sire"), dict) else None
+            if sire_node:
+                from_db, _ = _split_horse_label(sire_node.get("Horse", ""))
+                if from_db:
+                    damsire_name = from_db
         dams.append({
-            "generation": generation,
-            "relation": DAM_RELATIONS[generation - 1],
-            "name": name,
-            "year": year,
-            "class_label": _class_of(name),
+            "generation": 1,
+            "relation": DAM_RELATIONS[0],
+            "name": dam_name,
+            "year": dam_year,
+            "class_label": _class_of(dam_name),
             "damsire": damsire_name,
             "damsire_class": _class_of(damsire_name) if damsire_name else "",
         })
-        node = node.get("Dam") if isinstance(node.get("Dam"), dict) else None
-        generation += 1
+        node = dam_node.get("Dam") if isinstance(dam_node, dict) and isinstance(dam_node.get("Dam"), dict) else None
+        generation = 2
+        while isinstance(node, dict) and generation <= 6:
+            name, year = _split_horse_label(node.get("Horse", ""))
+            if not name:
+                break
+            sire_node = node.get("Sire") if isinstance(node.get("Sire"), dict) else None
+            next_damsire, _ = _split_horse_label((sire_node or {}).get("Horse", ""))
+            dams.append({
+                "generation": generation,
+                "relation": DAM_RELATIONS[generation - 1],
+                "name": name,
+                "year": year,
+                "class_label": _class_of(name),
+                "damsire": next_damsire,
+                "damsire_class": _class_of(next_damsire) if next_damsire else "",
+            })
+            node = node.get("Dam") if isinstance(node.get("Dam"), dict) else None
+            generation += 1
     return {"sire_line": sire_line, "dams": dams}
 
 
@@ -428,9 +458,18 @@ def _pedigree_block(subject_key: str, sire_name: str = "", dam_name: str = "", s
         ],
         "dams": dams,
     }
-    if packed["sire_line"] or packed["dams"]:
-        return packed
-    return _pedigree_from_parents(sire_name, dam_name, sire_of_dam)
+    # Prefer live catalog parents whenever the CSV supplies them so yearlings
+    # missing from pedigrees_database still show sire, dam, and broodmare sire.
+    if sire_name or dam_name:
+        live = _pedigree_from_parents(sire_name, dam_name, sire_of_dam)
+        if live["sire_line"] or live["dams"]:
+            # Keep deeper cached dam generations when the live walk is short.
+            if len(live["dams"]) < len(packed["dams"]):
+                live["dams"] = packed["dams"]
+            if len(live["sire_line"]) < len(packed["sire_line"]) and not sire_name:
+                live["sire_line"] = packed["sire_line"]
+            return live
+    return packed
 
 
 def _family_more(hip: dict, dams: list[dict]):
@@ -704,8 +743,6 @@ def hip_detail(
         dam_name=match.get("dam") or "",
         sire_of_dam=match.get("sire_of_dam") or "",
     )
-    stallions = placeholder_store.stallion_index()
-    sire = stallions.get(placeholder_store.name_key(match.get("sire") or ""), {})
     note = _note_for(account_id, match.get("sale_title") or "", match.get("hip") or "")
     return {
         "hip": match.get("hip"),
@@ -736,14 +773,7 @@ def hip_detail(
         "dam_success_racer": match.get("dam_success_racer") or "",
         "crosses": _crosses(match),
         "projected_value": None,
-        "physical": {
-            "hip_height": "",
-            "hip_conformation": "",
-            "sire_height": sire.get("height") or "",
-            "sire_conformation": sire.get("conformation") or "",
-            "sire_surface": sire.get("surface") or "",
-            "sire_name": match.get("sire") or "",
-        },
+        "physical": None,
         "catalog_note": match.get("notes") or "",
         "note": note,
         "source_file": match.get("source_file") or "",
