@@ -320,15 +320,43 @@ def mares_bred_for(clean_search: str) -> dict | None:
     return None
 
 
-def sale_results_matching(sale_title: str) -> list[dict]:
+def clear_cache(table: str | None = None) -> None:
+    with _LOCK:
+        if table:
+            _CACHE.pop(table, None)
+        else:
+            _CACHE.clear()
+
+
+def sale_results_matching(sale_title: str, sale_year: str | int | None = None) -> list[dict]:
     needle = (sale_title or "").strip().lower()
     if not needle:
         return []
     rows = load_table("sale_results")
     exact = [row for row in rows if (row.get("sale_title") or "").strip().lower() == needle]
-    if exact:
-        return exact
-    return [row for row in rows if needle in (row.get("sale_title") or "").lower()]
+    matched = exact if exact else [row for row in rows if needle in (row.get("sale_title") or "").lower()]
+    if sale_year is None or sale_year == "":
+        return matched
+    year = str(sale_year)
+    return [row for row in matched if str(row.get("sale_year") or "") == year]
+
+
+def result_sale_editions() -> list[dict]:
+    """One row per sale title + year from the sales table (results only)."""
+    editions = []
+    for row in load_table("sales"):
+        if row.get("sale_kind") != "results":
+            continue
+        editions.append({
+            "sale_title": row.get("sale_title") or "",
+            "sale_year": str(row.get("sale_year") or ""),
+            "sale_company": row.get("sale_company") or "",
+            "source_file": row.get("source_file") or "",
+            "month_index": row.get("month_index") or "",
+        })
+    editions.sort(key=lambda item: (item["sale_title"].lower(), item["sale_year"]), reverse=False)
+    editions.sort(key=lambda item: item["sale_year"], reverse=True)
+    return editions
 
 
 def stallion_index() -> dict:

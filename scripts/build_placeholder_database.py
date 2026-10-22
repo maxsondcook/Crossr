@@ -25,10 +25,23 @@ import placeholder_store
 import sales_history
 
 DATA = ROOT / "placeholderdatabase"
-CATALOG_FILE = ROOT / "Analyzed Sales" / "analyzed_the_saratoga_sale_(2026).csv"
+UPCOMING_DIR = ROOT / "Upcoming Sales"
+# Primary upcoming catalogs live in Upcoming Sales/. Analyzed Sales is only a
+# last-resort seed when that folder is empty on a fresh checkout.
+FALLBACK_CATALOG = ROOT / "Analyzed Sales" / "analyzed_the_saratoga_sale_(2026).csv"
 SALE_TITLE = "Fasig Tipton The Saratoga Sale"
 SALE_COMPANY = "Fasig-Tipton"
 DEMO_GLOB = "Fasig-Tipton_The Saratoga Sale (*).csv"
+
+
+def choose_catalog_files():
+    if UPCOMING_DIR.is_dir():
+        files = sorted(UPCOMING_DIR.glob("*.csv"))
+        if files:
+            return files
+    if FALLBACK_CATALOG.is_file():
+        return [FALLBACK_CATALOG]
+    return []
 
 SIRE_RANK = [
     "Not This Time", "Into Mischief", "Gun Runner", "Nyquist", "Curlin", "Constitution",
@@ -230,9 +243,21 @@ def build_sale_rows(all_sales: bool):
     return sale_rows, result_rows, sale_id
 
 
-def read_catalog():
-    with CATALOG_FILE.open(encoding="utf-8-sig", newline="") as handle:
+def read_catalog(path: Path):
+    with path.open(encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def catalog_meta(path: Path):
+    year_match = re.search(r"\b(20\d{2}|19\d{2})\b", path.name)
+    year = int(year_match.group(1)) if year_match else 2026
+    if path.parent.name == "Upcoming Sales":
+        title = re.sub(r"\.csv$", "", path.name, flags=re.IGNORECASE)
+        title = re.sub(r"^analyzed_", "", title, flags=re.IGNORECASE)
+        title = re.sub(r"[_\-]+", " ", title).strip()
+        company = "Fasig-Tipton" if "fasig" in path.name.lower() else "Keeneland" if "keeneland" in path.name.lower() else ""
+        return title or SALE_TITLE, year, company
+    return SALE_TITLE, year, SALE_COMPANY
 
 
 def build_profiles(mares_by_key):
@@ -515,45 +540,53 @@ def main():
 
     print("Reading Saratoga results..." if not args.all_sales else "Reading every sales file...")
     sale_rows, result_rows, next_sale_id = build_sale_rows(args.all_sales)
-    sale_rows.append({
-        "sale_id": next_sale_id,
-        "sale_company": SALE_COMPANY,
-        "sale_title": SALE_TITLE,
-        "sale_year": 2026,
-        "sale_kind": "upcoming",
-        "month_index": 8,
-        "source_file": str(CATALOG_FILE.relative_to(ROOT)),
-    })
 
-    catalog = read_catalog()
+    catalog_files = choose_catalog_files()
     catalog_rows = []
-    for index, raw in enumerate(catalog, 1):
-        birth = raw.get("YEAR OF BIRTH") or ""
-        year_match = re.search(r"\d{4}", birth)
-        catalog_rows.append({
-            "hip_id": index,
-            "sale_title": SALE_TITLE,
-            "sale_year": 2026,
-            "hip": (raw.get("HIP") or "").strip(),
-            "horse_name": (raw.get("HORSE NAME") or "").strip(),
-            "sex": (raw.get("SEX") or "").strip(),
-            "color": "",
-            "sire": (raw.get("SIRE") or "").strip(),
-            "dam": (raw.get("DAM") or "").strip(),
-            "sire_of_dam": (raw.get("SIRE OF DAM") or "").strip(),
-            "year_of_birth": year_match.group(0) if year_match else birth,
-            "foaled": (raw.get("FOALED") or "").strip(),
-            "sold_as": (raw.get("SOLD AS") or "").strip(),
-            "covering_sire": (raw.get("COVERING SIRE") or "").strip(),
-            "consignor": "",
-            "notes": (raw.get("NOTES") or "").strip(),
-            "cross_success": (raw.get("CROSS SUCCESS") or "").strip(),
-            "dam_success_racer": (raw.get("DAM SUCCESS (RACER)") or "").strip(),
-            "dam_success_producer": (raw.get("DAM SUCCESS (PRODUCER)") or "").strip(),
-            "racing_success": (raw.get("RACING SUCCESS") or "").strip(),
-            "starred": (raw.get("STARRED") or "").strip(),
-            "source_file": str(CATALOG_FILE.relative_to(ROOT)),
+    hip_id = 1
+    if not catalog_files:
+        print("Upcoming Sales/ has no CSV files; catalog_hips will be empty.")
+    for catalog_path in catalog_files:
+        title, year, company = catalog_meta(catalog_path)
+        sale_rows.append({
+            "sale_id": next_sale_id,
+            "sale_company": company or SALE_COMPANY,
+            "sale_title": title,
+            "sale_year": year,
+            "sale_kind": "upcoming",
+            "month_index": sales_history.get_sale_month_index(title),
+            "source_file": str(catalog_path.relative_to(ROOT)),
         })
+        next_sale_id += 1
+        catalog = read_catalog(catalog_path)
+        for raw in catalog:
+            birth = raw.get("YEAR OF BIRTH") or raw.get("YOB") or raw.get("DOB") or ""
+            year_match = re.search(r"\d{4}", birth)
+            catalog_rows.append({
+                "hip_id": hip_id,
+                "sale_title": title,
+                "sale_year": year,
+                "hip": (raw.get("HIP") or raw.get("Hip Number") or raw.get("Hip") or "").strip(),
+                "horse_name": (raw.get("HORSE NAME") or raw.get("Horse Name") or raw.get("Horse") or "").strip(),
+                "sex": (raw.get("SEX") or raw.get("Sex") or "").strip(),
+                "color": (raw.get("COLOR") or raw.get("Color") or "").strip(),
+                "sire": (raw.get("SIRE") or raw.get("Sire") or "").strip(),
+                "dam": (raw.get("DAM") or raw.get("Dam") or "").strip(),
+                "sire_of_dam": (raw.get("SIRE OF DAM") or raw.get("Sire of Dam") or "").strip(),
+                "year_of_birth": year_match.group(0) if year_match else birth,
+                "foaled": (raw.get("FOALED") or raw.get("Foaled") or "").strip(),
+                "sold_as": (raw.get("SOLD AS") or raw.get("Sold As") or "").strip(),
+                "covering_sire": (raw.get("COVERING SIRE") or "").strip(),
+                "consignor": (raw.get("CONSIGNOR") or raw.get("PROPERTY LINE") or "").strip(),
+                "notes": (raw.get("NOTES") or raw.get("Notes") or "").strip(),
+                "cross_success": (raw.get("CROSS SUCCESS") or "").strip(),
+                "dam_success_racer": (raw.get("DAM SUCCESS (RACER)") or "").strip(),
+                "dam_success_producer": (raw.get("DAM SUCCESS (PRODUCER)") or "").strip(),
+                "racing_success": (raw.get("RACING SUCCESS") or "").strip(),
+                "starred": (raw.get("STARRED") or "").strip(),
+                "source_file": str(catalog_path.relative_to(ROOT)),
+            })
+            hip_id += 1
 
     print("Walking pedigrees for the catalog and stakes winners by those sires...")
     writer = PedigreeWriter(pedigree_index, class_map, profile_class)
@@ -632,7 +665,15 @@ def main():
         placeholder_store.write_table(table, rows)
         print(f"  {table}.csv  {len(rows)} rows")
     print(f"Catalog dams found in pedigrees_database: {dam_hits}/{len(catalog_rows)}")
-    print(f"Demo catalog: {CATALOG_FILE.relative_to(ROOT)}")
+    if catalog_files:
+        print("Catalog sources:")
+        for path in catalog_files:
+            print(f"  {path.relative_to(ROOT)}")
+        if catalog_files[0].parent.name != "Upcoming Sales":
+            print("Note: Upcoming Sales/ was empty; seeded catalog_hips from Analyzed Sales fallback.")
+            print("The running app still lists only files present in Upcoming Sales/.")
+    else:
+        print("No upcoming catalog files found.")
     if not args.all_sales:
         print("sale_results holds every edition of Fasig-Tipton The Saratoga Sale in sales_data.")
         print("Re-run with --all-sales to load the rest of sales_data (large).")

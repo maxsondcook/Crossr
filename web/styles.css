@@ -304,6 +304,81 @@ th { font-weight: 640; font-size: 0.75rem; letter-spacing: 0.04em; text-transfor
   margin-top: 10px;
   font-family: var(--sans);
 }
+.sale-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.sale-grid .sale-card { margin-top: 0; }
+.results-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  align-items: end;
+  margin-top: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.results-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.results-toolbar select,
+.results-toolbar input {
+  min-width: 180px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 8px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+.year-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 4px;
+}
+.year-chip-row .year-chip {
+  width: auto;
+  margin-top: 0;
+  padding: 6px 10px;
+}
+.year-chip.active {
+  background: var(--ink);
+  color: var(--panel);
+  border-color: var(--ink);
+}
+tr.focus-year td { background: #f4ebe0; }
+.section-label {
+  margin: 18px 0 8px;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.hip-price-wrap {
+  overflow: auto;
+  max-height: 520px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.hip-price-table { margin: 0; }
+.hip-price-table th { position: sticky; top: 0; background: #f3eadc; }
+.price-cell { font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowrap; }
+.empty-catalog { margin-top: 16px; padding: 20px; }
+.empty-catalog code {
+  font-family: var(--sans);
+  background: #fff;
+  border: 1px solid var(--line);
+  padding: 1px 6px;
+}
 .pos { color: #2f6b3a; }
 .neg { color: var(--rust); }
 .status { min-height: 1.2em; margin-top: 6px; }

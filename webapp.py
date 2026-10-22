@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 import placeholder_store
 import sales_health
+import upcoming_catalogs
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
@@ -88,11 +89,29 @@ def hip_matches_preference(hip: dict, preference: dict, stallions: dict) -> bool
     return True
 
 
-def _catalog_rows(sale_year: str = ""):
-    rows = placeholder_store.load_table("catalog_hips")
-    if sale_year:
-        rows = [row for row in rows if str(row.get("sale_year")) == str(sale_year)]
-    return rows
+def _hip_key(value: str) -> str:
+    digits = re.sub(r"\D", "", str(value or ""))
+    if not digits:
+        return str(value or "").strip()
+    try:
+        return str(int(digits))
+    except ValueError:
+        return digits
+
+
+def _catalog_rows(sale_year: str = "", filename: str = "", source_file: str = ""):
+    """Upcoming catalogs come from Upcoming Sales/. Placeholder catalog_hips is not the primary source."""
+    if filename or source_file:
+        rows = upcoming_catalogs.load_catalog_rows(filename=filename, source_file=source_file)
+        if sale_year:
+            rows = [row for row in rows if str(row.get("sale_year")) == str(sale_year)]
+        return rows
+    live = []
+    for entry in upcoming_catalogs.list_catalog_files():
+        if sale_year and str(entry.get("sale_year")) != str(sale_year):
+            continue
+        live.extend(upcoming_catalogs.load_catalog_rows(filename=entry["filename"]))
+    return live
 
 
 def _lines_for(subject_key: str):
@@ -359,33 +378,63 @@ def index():
 def bootstrap(account_id: str = "1"):
     accounts = placeholder_store.load_table("accounts")
     account = next((row for row in accounts if str(row.get("account_id")) == str(account_id)), accounts[0] if accounts else None)
-    sales = placeholder_store.load_table("sales")
-    upcoming = [row for row in sales if row.get("sale_kind") == "upcoming"]
-    result_titles = []
-    seen = set()
-    for row in sales:
-        if row.get("sale_kind") != "results":
-            continue
-        if row.get("sale_title") in seen:
-            continue
-        seen.add(row.get("sale_title"))
-        result_titles.append({
-            "sale_title": row.get("sale_title"),
-            "sale_company": row.get("sale_company"),
-            "source_file": row.get("source_file"),
-        })
+    editions = placeholder_store.result_sale_editions()
+    years = sorted({row["sale_year"] for row in editions if row["sale_year"]}, reverse=True)
+    upcoming = upcoming_catalogs.catalog_summary()
     return {
         "roles": placeholder_store.load_table("industry_roles"),
         "account": account,
         "clients": _clients_for(account.get("account_id") if account else account_id),
         "upcoming": upcoming,
-        "result_sales": result_titles,
-        "catalog_source": str(upcoming[0].get("source_file")) if upcoming else "",
+        "upcoming_folder": "Upcoming Sales/",
+        "upcoming_empty": len(upcoming) == 0,
+        "result_sales": editions,
+        "result_years": years,
+        "result_sale_count": len(editions),
+        "catalog_source": "Upcoming Sales/",
     }
 
 
+@app.get("/api/result-sales")
+def result_sales(year: str = "", q: str = "", company: str = ""):
+    editions = placeholder_store.result_sale_editions()
+    needle = (q or "").strip().lower()
+    company_needle = (company or "").strip().lower()
+    filtered = []
+    for row in editions:
+        if year and str(row.get("sale_year")) != str(year):
+            continue
+        if company_needle and company_needle not in (row.get("sale_company") or "").lower():
+            continue
+        if needle and needle not in (row.get("sale_title") or "").lower():
+            continue
+        filtered.append(row)
+    years = sorted({row["sale_year"] for row in editions if row["sale_year"]}, reverse=True)
+    return {
+        "sales": filtered,
+        "count": len(filtered),
+        "total": len(editions),
+        "years": years,
+    }
+
+
+def _price_display(row: dict) -> str:
+    if str(row.get("is_out") or "").strip() in {"1", "true", "True"}:
+        return "OUT"
+    if str(row.get("is_rna") or "").strip() in {"1", "true", "True"}:
+        return "RNA"
+    raw = (row.get("price_raw") or "").strip()
+    try:
+        price = float(row.get("price_num") or 0)
+    except (TypeError, ValueError):
+        price = 0.0
+    if price > 0:
+        return _money(price)
+    return raw or "—"
+
+
 @app.get("/api/stats")
-def stats(sale_title: str):
+def stats(sale_title: str, sale_year: str = ""):
     report = sales_health.build_sale_health_report(sale_title)
     if not report:
         raise HTTPException(status_code=404, detail="No sale_results for that sale")
@@ -403,7 +452,16 @@ def stats(sale_title: str):
         return packed
 
     rows = [round_row(row) for row in report["rows"]]
-    latest = rows[-1]
+    selected = None
+    if sale_year:
+        selected = next((row for row in rows if str(row["year"]) == str(sale_year)), None)
+    focus = selected or rows[-1]
+    # Growth vs prior edition for the focused year (not always the latest year).
+    growth = focus.get("average_yoy")
+    previous_year = None
+    focus_index = next((index for index, row in enumerate(rows) if str(row["year"]) == str(focus["year"])), len(rows) - 1)
+    if focus_index > 0:
+        previous_year = rows[focus_index - 1]["year"]
     highs = {}
     for name, peak in report["highs"].items():
         value = peak["value"]
@@ -414,17 +472,54 @@ def stats(sale_title: str):
         highs[name] = {"year": peak["year"], "display": display}
     return {
         "sale_title": report["sale_title"],
-        "latest": latest,
-        "previous_year": report["previous_year"],
-        "growth_vs_previous": None if report["growth_vs_previous"] is None else round(report["growth_vs_previous"], 1),
+        "sale_year": str(focus["year"]),
+        "latest": focus,
+        "previous_year": previous_year,
+        "growth_vs_previous": None if growth is None else round(growth, 1),
         "rows": rows,
         "highs": highs,
     }
 
 
+@app.get("/api/sale-hips")
+def sale_hips(sale_title: str, sale_year: str):
+    if not sale_title or not sale_year:
+        raise HTTPException(status_code=400, detail="sale_title and sale_year are required")
+    rows = placeholder_store.sale_results_matching(sale_title, sale_year)
+    if not rows:
+        raise HTTPException(status_code=404, detail="No hips for that sale year")
+    hips = []
+    for row in rows:
+        hips.append({
+            "hip": row.get("hip") or "",
+            "horse_name": row.get("horse_name") or "",
+            "sex": _sex_word(row.get("sex") or ""),
+            "sire": row.get("sire") or "",
+            "dam": row.get("dam") or "",
+            "color": row.get("color") or "",
+            "consignor": row.get("consignor") or "",
+            "purchaser": row.get("purchaser") or "",
+            "price_num": row.get("price_num") or "",
+            "price_display": _price_display(row),
+            "is_rna": str(row.get("is_rna") or ""),
+            "is_out": str(row.get("is_out") or ""),
+            "foaled": row.get("foaled") or "",
+            "sold_as": row.get("sold_as") or "",
+        })
+    hips.sort(key=lambda item: _int(re.sub(r"\D", "", item["hip"]) or 0))
+    return {
+        "sale_title": sale_title,
+        "sale_year": str(sale_year),
+        "hips": hips,
+        "count": len(hips),
+    }
+
+
 @app.get("/api/catalog")
 def catalog(
-    sale_year: str = "2026",
+    sale_year: str = "",
+    filename: str = "",
+    source_file: str = "",
     account_id: str = "1",
     client_id: str = "",
     sex: str = "",
@@ -443,7 +538,7 @@ def catalog(
         "min_stud_fee": min_fee, "max_stud_fee": max_fee,
     }
     hips = []
-    for hip in _catalog_rows(sale_year):
+    for hip in _catalog_rows(sale_year=sale_year, filename=filename, source_file=source_file):
         fits = [hip_matches_preference(hip, preference, stallions) for preference in preferences]
         fits_any = any(fits) if fits else False
         fits_selected = True if not selected else hip_matches_preference(hip, selected, stallions)
@@ -467,19 +562,33 @@ def catalog(
             "starred": hip.get("starred"),
             "fits_any_client": fits_any,
             "sold_as": hip.get("sold_as"),
+            "filename": hip.get("filename") or filename,
+            "source_file": hip.get("source_file") or source_file,
         })
     hips.sort(key=lambda item: _int(item["hip"]))
-    return {"hips": hips, "count": len(hips)}
+    return {
+        "hips": hips,
+        "count": len(hips),
+        "source": "Upcoming Sales/",
+        "empty_folder": len(upcoming_catalogs.list_catalog_files()) == 0,
+    }
 
 
 @app.get("/api/hip")
-def hip_detail(sale_year: str = "2026", hip: str = "", account_id: str = "1"):
+def hip_detail(
+    sale_year: str = "",
+    hip: str = "",
+    account_id: str = "1",
+    filename: str = "",
+    source_file: str = "",
+):
+    target = _hip_key(hip)
     match = next((
-        row for row in _catalog_rows(sale_year)
-        if str(row.get("hip")) == str(hip)
+        row for row in _catalog_rows(sale_year=sale_year, filename=filename, source_file=source_file)
+        if _hip_key(row.get("hip") or "") == target
     ), None)
     if not match:
-        raise HTTPException(status_code=404, detail="Hip not in catalog")
+        raise HTTPException(status_code=404, detail="Hip not in catalog. Drop a CSV into Upcoming Sales/.")
     subject_key = placeholder_store.name_key(match.get("horse_name") or "")
     pedigree = _pedigree_block(subject_key)
     stallions = placeholder_store.stallion_index()
@@ -490,6 +599,8 @@ def hip_detail(sale_year: str = "2026", hip: str = "", account_id: str = "1"):
         "sale_title": match.get("sale_title"),
         "sale_year": match.get("sale_year"),
         "horse_name": match.get("horse_name"),
+        "filename": match.get("filename") or filename,
+        "source_file": match.get("source_file") or source_file,
         "header": {
             "foaled": match.get("foaled") or "",
             "color": match.get("color") or "",
@@ -497,6 +608,7 @@ def hip_detail(sale_year: str = "2026", hip: str = "", account_id: str = "1"):
             "year": _year_text(match.get("year_of_birth") or ""),
             "hip": match.get("hip") or "",
             "consignor": match.get("consignor") or "",
+            "barn": match.get("barn") or "",
         },
         "sire": match.get("sire") or "",
         "dam": match.get("dam") or "",

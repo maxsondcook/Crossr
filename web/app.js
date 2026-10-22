@@ -5,7 +5,12 @@ const state = {
   clients: [],
   roles: [],
   upcoming: [],
+  upcomingEmpty: true,
   resultSales: [],
+  resultYears: [],
+  resultSaleCount: 0,
+  resultsYear: "",
+  resultsQuery: "",
   clientId: "",
   filterOpen: false,
   filters: { sex: "", foaled: "", sire: "", surface: "", min_fee: "", max_fee: "" },
@@ -92,8 +97,11 @@ async function boot() {
   state.account = data.account;
   state.clients = data.clients;
   state.roles = data.roles;
-  state.upcoming = data.upcoming;
-  state.resultSales = data.result_sales;
+  state.upcoming = data.upcoming || [];
+  state.upcomingEmpty = Boolean(data.upcoming_empty);
+  state.resultSales = data.result_sales || [];
+  state.resultYears = data.result_years || [];
+  state.resultSaleCount = data.result_sale_count || state.resultSales.length;
   history.replaceState({ depth: 0 }, "");
   render();
 }
@@ -144,19 +152,49 @@ function entryView() {
 }
 
 async function resultsHome() {
-  const cards = state.resultSales.map((sale) => `
-    <button class="sale-card" type="button" data-sale="${esc(sale.sale_title)}">${esc(sale.sale_title)}<small class="muted" style="display:block;margin-top:4px">${esc(sale.sale_company)}</small></button>
+  const params = new URLSearchParams();
+  if (state.resultsYear) params.set("year", state.resultsYear);
+  if (state.resultsQuery) params.set("q", state.resultsQuery);
+  const data = await api(`/api/result-sales?${params.toString()}`);
+  state.resultYears = data.years || state.resultYears;
+  const yearOptions = [`<option value="">All years (${data.total})</option>`]
+    .concat((data.years || []).map((year) => `<option value="${esc(year)}" ${String(state.resultsYear) === String(year) ? "selected" : ""}>${esc(year)}</option>`))
+    .join("");
+  const cards = data.sales.map((sale) => `
+    <button class="sale-card" type="button" data-sale="${esc(sale.sale_title)}" data-sale-year="${esc(sale.sale_year)}">
+      <strong>${esc(sale.sale_title)}</strong>
+      <small class="muted" style="display:block;margin-top:4px">${esc(sale.sale_year)} · ${esc(sale.sale_company || "Sale")}</small>
+    </button>
   `).join("");
-  app.innerHTML = `<main class="shell">${commandBar("Sales results")}<div class="catalog-list">${cards || "<p>No results are loaded.</p>"}</div></main>`;
+  app.innerHTML = `
+    <main class="shell">
+      ${commandBar("Sales results")}
+      <div class="results-toolbar">
+        <label class="ui">Year
+          <select id="results-year">${yearOptions}</select>
+        </label>
+        <label class="ui">Find a sale
+          <input id="results-query" value="${esc(state.resultsQuery)}" placeholder="Saratoga, Keeneland September…" />
+        </label>
+        <p class="muted">${data.count} of ${data.total} sale editions</p>
+      </div>
+      <div class="catalog-list sale-grid">${cards || "<p>No sales match that year or search.</p>"}</div>
+    </main>`;
 }
 
 async function resultDetail(view) {
-  const report = await api(`/api/stats?sale_title=${encodeURIComponent(view.saleTitle)}`);
+  const yearParam = view.saleYear ? `&sale_year=${encodeURIComponent(view.saleYear)}` : "";
+  const report = await api(`/api/stats?sale_title=${encodeURIComponent(view.saleTitle)}${yearParam}`);
+  const focusYear = view.saleYear || report.sale_year;
+  const hipsData = await api(`/api/sale-hips?sale_title=${encodeURIComponent(view.saleTitle)}&sale_year=${encodeURIComponent(focusYear)}`);
   const latest = report.latest;
   const growth = report.growth_vs_previous;
+  const yearChips = report.rows.map((row) => `
+    <button class="year-chip ${String(row.year) === String(focusYear) ? "active" : ""}" type="button" data-sale="${esc(report.sale_title)}" data-sale-year="${esc(row.year)}">${esc(row.year)}</button>
+  `).join("");
   const rows = report.rows.map((row) => `
-    <tr>
-      <td>${esc(row.year)}</td>
+    <tr class="${String(row.year) === String(focusYear) ? "focus-year" : ""}">
+      <td><button class="text-btn" type="button" data-sale="${esc(report.sale_title)}" data-sale-year="${esc(row.year)}">${esc(row.year)}</button></td>
       <td>${esc(row.offered_display)} ${yoy(row.offered_yoy)}</td>
       <td>${esc(row.gross_display)} ${yoy(row.gross_yoy)}</td>
       <td>${esc(row.average_display)} ${yoy(row.average_yoy)}</td>
@@ -165,10 +203,21 @@ async function resultDetail(view) {
       <td>${esc(row.rna_display)}</td>
       <td>${esc(row.millionaires_display)} ${yoy(row.millionaires_yoy)}</td>
     </tr>`).join("");
+  const hipRows = hipsData.hips.map((hip) => `
+    <tr>
+      <td class="hip-no">Hip ${esc(hip.hip)}</td>
+      <td>${esc(hip.horse_name)}</td>
+      <td>${esc(hip.sex)}</td>
+      <td class="hide-sm">${esc(hip.sire)}</td>
+      <td class="hide-sm">${esc(hip.dam)}</td>
+      <td class="price-cell">${esc(hip.price_display)}</td>
+      <td class="hide-sm">${esc(hip.purchaser)}</td>
+    </tr>`).join("");
   const highs = report.highs;
   app.innerHTML = `
     <main class="shell">
-      ${commandBar(report.sale_title)}
+      ${commandBar(`${report.sale_title} · ${focusYear}`)}
+      <div class="year-chip-row">${yearChips}</div>
       <section class="stats-grid">
         <article class="stat"><span>Average · ${esc(latest.year)}</span><strong>${esc(latest.average_display)}</strong></article>
         <article class="stat"><span>Million-dollar horses</span><strong>${esc(latest.millionaires_display)}</strong></article>
@@ -181,35 +230,78 @@ async function resultDetail(view) {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <h2 class="ui" style="margin:18px 0 8px;font-size:0.8rem;letter-spacing:0.08em;text-transform:uppercase">Sale highs</h2>
+      <h2 class="ui section-label">Sale highs</h2>
       <p>Most offered ${esc(highs.most_offered.display)} in ${esc(highs.most_offered.year)} · Highest gross ${esc(highs.highest_gross.display)} in ${esc(highs.highest_gross.year)} · Highest average ${esc(highs.highest_average.display)} in ${esc(highs.highest_average.year)} · Highest median ${esc(highs.highest_median.display)} in ${esc(highs.highest_median.year)} · Most millionaires ${esc(highs.most_millionaires.display)} in ${esc(highs.most_millionaires.year)}</p>
+      <h2 class="ui section-label">Hips · ${esc(focusYear)} · ${hipsData.count} horses</h2>
+      <div class="hip-price-wrap">
+        <table class="hip-price-table">
+          <thead><tr><th>Hip</th><th>Horse</th><th>Sex</th><th class="hide-sm">Sire</th><th class="hide-sm">Dam</th><th>Price</th><th class="hide-sm">Buyer</th></tr></thead>
+          <tbody>${hipRows || "<tr><td colspan='7'>No hips for this edition.</td></tr>"}</tbody>
+        </table>
+      </div>
     </main>`;
 }
 
 async function upcomingHome() {
+  const data = await api("/api/bootstrap");
+  state.upcoming = data.upcoming || [];
+  state.upcomingEmpty = Boolean(data.upcoming_empty);
   const cards = state.upcoming.map((sale) => `
-    <button class="sale-card" type="button" data-upcoming="${esc(sale.sale_year)}" data-title="${esc(sale.sale_title)}">
+    <button class="sale-card" type="button"
+      data-upcoming="${esc(sale.sale_year)}"
+      data-title="${esc(sale.sale_title)}"
+      data-filename="${esc(sale.filename || "")}"
+      data-source="${esc(sale.source_file || "")}">
       ${esc(sale.sale_title)} · ${esc(sale.sale_year)}
-      <small class="muted" style="display:block;margin-top:4px">${esc(sale.source_file)}</small>
+      <small class="muted" style="display:block;margin-top:4px">${esc(sale.filename || sale.source_file)} · ${esc(sale.hip_count ?? "—")} hips</small>
     </button>`).join("");
-  app.innerHTML = `<main class="shell">${commandBar("Upcoming sales")}<div class="catalog-list">${cards}</div></main>`;
+  const empty = `
+    <div class="empty-catalog panel">
+      <h2>Upcoming Sales/ is empty</h2>
+      <p>Drop catalog CSV files into the <code>Upcoming Sales/</code> folder in the repo. Every file there is listed here — no rebuild needed.</p>
+    </div>`;
+  app.innerHTML = `
+    <main class="shell">
+      ${commandBar("Upcoming sales")}
+      <p class="muted" style="margin-top:10px">Reading catalogs from Upcoming Sales/</p>
+      <div class="catalog-list">${state.upcomingEmpty ? empty : cards}</div>
+    </main>`;
 }
 
-function queryFilters() {
-  const params = new URLSearchParams({ sale_year: "2026", account_id: state.account.account_id });
+function queryFilters(view) {
+  const params = new URLSearchParams({ account_id: state.account.account_id });
+  if (view && view.saleYear) params.set("sale_year", view.saleYear);
+  if (view && view.filename) params.set("filename", view.filename);
+  if (view && view.sourceFile) params.set("source_file", view.sourceFile);
   if (state.clientId) params.set("client_id", state.clientId);
   Object.entries(state.filters).forEach(([key, value]) => { if (value) params.set(key, value); });
   return params;
 }
 
 async function catalogView(view) {
-  const data = await api(`/api/catalog?${queryFilters().toString()}`);
+  const data = await api(`/api/catalog?${queryFilters(view).toString()}`);
+  if (data.empty_folder) {
+    app.innerHTML = `
+      <main class="shell">
+        ${commandBar("Upcoming sales")}
+        <div class="empty-catalog panel">
+          <h2>Upcoming Sales/ is empty</h2>
+          <p>Drop catalog CSV files into <code>Upcoming Sales/</code> to open the catalog workspace.</p>
+        </div>
+      </main>`;
+    return;
+  }
   let hips = data.hips.filter((hip) => !state.dismissed.has(markKey(hip.sale_year, hip.hip)));
   if (state.shortList) {
     hips = hips.filter((hip) => state.starred.has(markKey(hip.sale_year, hip.hip)) || hip.starred === "*");
   }
   const rows = hips.map((hip) => `
-    <button class="hip-row ${!state.clientId && hip.fits_any_client ? "fit" : ""}" type="button" data-open-hip="${esc(hip.hip)}" data-year="${esc(hip.sale_year)}" data-title="${esc(hip.sale_title)}">
+    <button class="hip-row ${!state.clientId && hip.fits_any_client ? "fit" : ""}" type="button"
+      data-open-hip="${esc(hip.hip)}"
+      data-year="${esc(hip.sale_year)}"
+      data-title="${esc(hip.sale_title)}"
+      data-filename="${esc(hip.filename || view.filename || "")}"
+      data-source="${esc(hip.source_file || view.sourceFile || "")}">
       <span class="num">Hip ${esc(hip.hip)}</span>
       <span>${esc(hip.horse_name)}</span>
       <span class="hide-sm">${esc(hip.sire)}</span>
@@ -221,7 +313,7 @@ async function catalogView(view) {
   app.innerHTML = `
     <main class="shell">
       ${commandBar(`${view.saleTitle} · ${view.saleYear}`)}
-      <p class="muted" style="margin-top:10px">${hips.length} hips${clientName ? ` for ${esc(clientName.client_name)}` : ""}${!state.clientId ? " · highlighted hip numbers fit at least one client" : ""}</p>
+      <p class="muted" style="margin-top:10px">${hips.length} hips from Upcoming Sales/${clientName ? ` · ${esc(clientName.client_name)}` : ""}${!state.clientId ? " · highlighted hip numbers fit at least one client" : ""}</p>
       <div class="desk" style="margin-top:8px">
         <div class="catalog-list">${rows || "<p>No hips match.</p>"}</div>
         ${toolsHtml()}
@@ -323,8 +415,17 @@ function pedigreeHtml(pedigree, openFamily) {
 }
 
 async function hipView(view) {
-  const detail = await api(`/api/hip?sale_year=${encodeURIComponent(view.saleYear)}&hip=${encodeURIComponent(view.hip)}&account_id=${encodeURIComponent(state.account.account_id)}`);
+  const params = new URLSearchParams({
+    hip: view.hip,
+    account_id: state.account.account_id,
+  });
+  if (view.saleYear) params.set("sale_year", view.saleYear);
+  if (view.filename) params.set("filename", view.filename);
+  if (view.sourceFile) params.set("source_file", view.sourceFile);
+  const detail = await api(`/api/hip?${params.toString()}`);
   view.detail = detail;
+  view.filename = detail.filename || view.filename;
+  view.sourceFile = detail.source_file || view.sourceFile;
   const header = detail.header;
   const fields = [
     ["Foaled", header.foaled],
@@ -332,6 +433,7 @@ async function hipView(view) {
     ["Sex", header.sex],
     ["Year", header.year],
     ["Hip", header.hip],
+    ["Barn", header.barn],
     ["Consigned by", header.consignor],
   ];
   const head = fields.map(([label, value]) => `<div><span>${esc(label)}</span><strong class="${label === "Hip" ? "hip-no" : ""}">${esc(value)}</strong></div>`).join("");
@@ -471,6 +573,8 @@ function openHipFrom(button) {
     hip: button.dataset.openHip,
     saleYear: button.dataset.year,
     saleTitle: button.dataset.title,
+    filename: button.dataset.filename || "",
+    sourceFile: button.dataset.source || "",
   });
 }
 
@@ -540,11 +644,28 @@ app.addEventListener("click", async (event) => {
     return;
   }
   if (target.dataset.sale) {
-    navigate({ type: "result", saleTitle: target.dataset.sale });
+    const next = {
+      type: "result",
+      saleTitle: target.dataset.sale,
+      saleYear: target.dataset.saleYear || "",
+    };
+    const currentView = current();
+    if (currentView && currentView.type === "result" && currentView.saleTitle === next.saleTitle) {
+      currentView.saleYear = next.saleYear;
+      render();
+    } else {
+      navigate(next);
+    }
     return;
   }
   if (target.dataset.upcoming) {
-    navigate({ type: "catalog", saleYear: target.dataset.upcoming, saleTitle: target.dataset.title });
+    navigate({
+      type: "catalog",
+      saleYear: target.dataset.upcoming,
+      saleTitle: target.dataset.title,
+      filename: target.dataset.filename || "",
+      sourceFile: target.dataset.source || "",
+    });
     return;
   }
   if (target.dataset.openHip) {
@@ -568,6 +689,8 @@ app.addEventListener("click", async (event) => {
         type: "catalog",
         saleYear: view.saleYear,
         saleTitle: view.detail ? view.detail.sale_title : view.saleTitle,
+        filename: view.filename || (view.detail && view.detail.filename) || "",
+        sourceFile: view.sourceFile || (view.detail && view.detail.source_file) || "",
       });
     } else {
       render();
@@ -582,6 +705,8 @@ app.addEventListener("click", async (event) => {
         type: "catalog",
         saleYear: view.saleYear,
         saleTitle: view.detail ? view.detail.sale_title : view.saleTitle,
+        filename: view.filename || (view.detail && view.detail.filename) || "",
+        sourceFile: view.sourceFile || (view.detail && view.detail.source_file) || "",
       });
     } else {
       render();
@@ -632,11 +757,23 @@ app.addEventListener("click", async (event) => {
 });
 
 app.addEventListener("change", (event) => {
+  if (event.target.id === "results-year") {
+    state.resultsYear = event.target.value;
+    render();
+    return;
+  }
   const input = event.target.closest("[data-filter]");
   if (!input) return;
   state.filters[input.dataset.filter] = input.value.trim();
   const view = current();
   if (view && (view.type === "catalog" || view.type === "hip")) render();
+});
+
+app.addEventListener("input", (event) => {
+  if (event.target.id !== "results-query") return;
+  state.resultsQuery = event.target.value.trim();
+  clearTimeout(state._resultsTimer);
+  state._resultsTimer = setTimeout(() => render(), 180);
 });
 
 app.addEventListener("submit", async (event) => {
