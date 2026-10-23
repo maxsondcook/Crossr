@@ -7,6 +7,7 @@ import copy
 # Import core tools and databases from your system files
 import main
 import hypomating_engine
+import ValueProjector
 
 INPUT_DIR = "Upcoming Sales"
 OUTPUT_DIR = "Analyzed Sales"
@@ -144,7 +145,12 @@ def format_race_list_grammatically(races):
 
 def analyze_dataframe(df):
     """Core analysis engine that calculates cross successes and producer stats."""
-    for col in ["CROSS SUCCESS", "DAM SUCCESS (RACER)", "DAM SUCCESS (PRODUCER)", "RACING SUCCESS", "STARRED", "COVERING SIRE", "NOTES"]:
+    for col in [
+        "CROSS SUCCESS", "DAM SUCCESS (RACER)", "DAM SUCCESS (PRODUCER)",
+        "RACING SUCCESS", "STARRED", "COVERING SIRE", "NOTES",
+        "VALUE PROJECTOR", "VP LOW", "VP HIGH", "VP POINT",
+        "PROJECTED RACE EARNINGS",
+    ]:
         if col not in df.columns:
             df[col] = ""
         else:
@@ -247,6 +253,15 @@ def analyze_dataframe(df):
             df.at[idx, "DAM SUCCESS (PRODUCER)"] = " ".join(progeny_strings)
         if racing_success_strings:
             df.at[idx, "RACING SUCCESS"] = " ".join(racing_success_strings)
+
+    # Weanling/yearling → BV + race earnings; broodmare → BV only; else blank
+    needs_race_col = "PROJECTED RACE EARNINGS" not in df.columns
+    vp_series = df["VALUE PROJECTOR"].astype(str).str.strip().replace(
+        {"nan": "", "None": "", "NaN": ""}
+    )
+    if needs_race_col or vp_series.eq("").mean() > 0.5:
+        print("Running ValueProjector across catalog hips…")
+        ValueProjector.enrich_sales_dataframe(df)
             
     df['HIP'] = pd.to_numeric(df['HIP'], errors='coerce').fillna(0).astype(int)
     return df
@@ -500,6 +515,17 @@ def run_interactive_viewer(csv_path):
         base_df['SOLD AS'] = base_df.apply(
             lambda r: determine_sold_as(r['YEAR OF BIRTH'], r['SEX'], sale_year, os.path.basename(csv_path), r.get('COVERING SIRE', '')), axis=1
         )
+
+    # Backfill Value Projector if columns are missing / stale
+    needs_vp = (
+        "VALUE PROJECTOR" not in base_df.columns
+        or "PROJECTED RACE EARNINGS" not in base_df.columns
+        or base_df["VALUE PROJECTOR"].astype(str).str.strip().replace({"nan": "", "None": ""}).eq("").all()
+    )
+    if needs_vp:
+        print("Adding ValueProjector columns to this catalog…")
+        ValueProjector.enrich_sales_dataframe(base_df)
+        base_df.to_csv(csv_path, index=False)
         
     df = analyze_dataframe(base_df)
     
@@ -598,6 +624,11 @@ def run_interactive_viewer(csv_path):
                 base_cols.append("DAM SUCCESS (RACER)")
             if has_producer:
                 base_cols.append("DAM SUCCESS (PRODUCER)")
+
+            if "VALUE PROJECTOR" in row and str(row.get("VALUE PROJECTOR", "")).strip() not in ("", "nan", "NaN", "None"):
+                base_cols.append("VALUE PROJECTOR")
+            if "PROJECTED RACE EARNINGS" in row and str(row.get("PROJECTED RACE EARNINGS", "")).strip() not in ("", "nan", "NaN", "None"):
+                base_cols.append("PROJECTED RACE EARNINGS")
                 
             base_cols.append("SOLD AS")
             
