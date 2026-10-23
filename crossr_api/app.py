@@ -369,6 +369,33 @@ def _attach_heights(lots, lookup):
     return lots
 
 
+def _attach_filter_prices(lots, book):
+    """Sale price when present; else mid of Expected Market Value (2×–6× sire stud fee)."""
+    lookup = horse_svc.profile_lookup(book or {})
+    for lot in lots:
+        sale = lot.get("price_num") or 0
+        try:
+            sale = float(sale)
+        except (TypeError, ValueError):
+            sale = 0.0
+        if sale > 0:
+            lot["filter_price"] = sale
+            lot["filter_price_source"] = "sale_price"
+            continue
+        profile = lookup.get(main.clean_horse_name(lot.get("sire") or ""))
+        band = horse_svc.expected_market_value(lot.get("sire"), sire_profile=profile)
+        low, high = band.get("low"), band.get("high")
+        if low and high:
+            lot["filter_price"] = (float(low) + float(high)) / 2.0
+            lot["filter_price_source"] = "expected_market_mid"
+            lot["filter_price_low"] = float(low)
+            lot["filter_price_high"] = float(high)
+        else:
+            lot["filter_price"] = None
+            lot["filter_price_source"] = "unknown"
+    return lots
+
+
 def _workspace(lot, book):
     ctx = horse_svc.sale_workspace(
         name=lot.get("name") or lot.get("raw_name"),
@@ -392,8 +419,10 @@ def sales_catalog_nav(catalog_id: int):
     payload = sales_svc.catalog_nav(catalog_id)
     if not payload:
         raise HTTPException(status_code=404, detail="Catalog not found")
-    lookup = horse_svc.profile_lookup(profiles())
+    book = profiles()
+    lookup = horse_svc.profile_lookup(book)
     _attach_heights(payload["lots"], lookup)
+    _attach_filter_prices(payload["lots"], book)
     return payload
 
 
@@ -431,8 +460,10 @@ def sales_upcoming_lots(
     lots = upcoming_svc.list_lots(catalog_id)
     if lots is None:
         raise HTTPException(status_code=404, detail="Catalog not found")
-    lookup = horse_svc.profile_lookup(profiles())
+    book = profiles()
+    lookup = horse_svc.profile_lookup(book)
     _attach_heights(lots, lookup)
+    _attach_filter_prices(lots, book)
     filtered = upcoming_svc.filter_lots(
         lots,
         sex=sex,

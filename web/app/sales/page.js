@@ -82,6 +82,41 @@ function saleHeading(title, year) {
   return `${name} ${y}`;
 }
 
+/** Widening price bands for FILTER. Half-open [min, max); last is 250k+. */
+const PRICE_RANGES = [
+  { id: "1-5", min: 1000, max: 5000, label: "$1,000–5k" },
+  { id: "5-10", min: 5000, max: 10000, label: "5k–10k" },
+  { id: "10-20", min: 10000, max: 20000, label: "10k–20k" },
+  { id: "20-30", min: 20000, max: 30000, label: "20k–30k" },
+  { id: "30-45", min: 30000, max: 45000, label: "30k–45k" },
+  { id: "45-60", min: 45000, max: 60000, label: "45k–60k" },
+  { id: "60-100", min: 60000, max: 100000, label: "60k–100k" },
+  { id: "100-150", min: 100000, max: 150000, label: "100k–150k" },
+  { id: "150-250", min: 150000, max: 250000, label: "150k–250k" },
+  { id: "250+", min: 250000, max: null, label: "250k+" },
+];
+
+function lotFilterPrice(lot) {
+  if (!lot) return 0;
+  const direct = Number(lot.filter_price);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const sale = Number(lot.price_num);
+  if (Number.isFinite(sale) && sale > 0) return sale;
+  return 0;
+}
+
+function priceInRanges(price, selectedIds) {
+  if (!selectedIds.length) return true;
+  if (!price) return false;
+  return selectedIds.some((id) => {
+    const range = PRICE_RANGES.find((row) => row.id === id);
+    if (!range) return false;
+    if (price < range.min) return false;
+    if (range.max == null) return true;
+    return price < range.max;
+  });
+}
+
 function SalesPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -107,6 +142,8 @@ function SalesPage() {
   const [sex, setSex] = useState("");
   const [color, setColor] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
+  const [selectedSires, setSelectedSires] = useState([]);
+  const [priceRanges, setPriceRanges] = useState([]);
   const [height, setHeight] = useState("");
   const [onlyDismissed, setOnlyDismissed] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
@@ -185,6 +222,11 @@ function SalesPage() {
   }, [catalogs, mode, catalog]);
 
   useEffect(() => {
+    setSelectedSires([]);
+    setPriceRanges([]);
+  }, [catalog?.id, mode]);
+
+  useEffect(() => {
     if (!catalog) return;
     let cancel = false;
     setLoadingList(true);
@@ -228,7 +270,47 @@ function SalesPage() {
     return new Set(list.map(String));
   }, [desk, catalog, mode]);
 
+  const sireOptions = useMemo(() => {
+    const counts = new Map();
+    for (const lot of lots) {
+      const name = blank(lot.sire);
+      if (!name) continue;
+      counts.set(name, (counts.get(name) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [lots]);
+
+  const sexOptions = useMemo(() => {
+    const map = new Map();
+    for (const lot of lots) {
+      const letter = (lot.sex_letter || lot.sex || "").toUpperCase().slice(0, 1);
+      if (!letter) continue;
+      map.set(letter, sexWord(lot) || letter);
+    }
+    const order = ["C", "F", "G", "R", "H", "M", "W"];
+    return [...map.entries()]
+      .map(([letter, label]) => ({ letter, label }))
+      .sort((a, b) => {
+        const ai = order.indexOf(a.letter);
+        const bi = order.indexOf(b.letter);
+        return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi) || a.label.localeCompare(b.label);
+      });
+  }, [lots]);
+
+  const priceProxyNote = useMemo(() => {
+    if (!lots.length) return "";
+    const sources = new Set(lots.map((lot) => lot.filter_price_source).filter(Boolean));
+    if (sources.has("sale_price") && (sources.has("expected_market_mid") || sources.has("unknown"))) {
+      return "Price uses sale price when sold; otherwise Expected Market mid (2×–6× sire stud fee).";
+    }
+    if (sources.has("sale_price")) return "Price uses catalog sale price.";
+    return "Price uses Expected Market mid (2×–6× sire stud fee) — no sale prices yet.";
+  }, [lots]);
+
   const filtered = useMemo(() => {
+    const sireSet = new Set(selectedSires);
     return lots.filter((lot) => {
       const id = navId(mode, lot);
       const dismissed = dismissedSet.has(id);
@@ -236,12 +318,17 @@ function SalesPage() {
       if (dismissed) return false;
       const letter = (lot.sex_letter || lot.sex || "").toUpperCase().slice(0, 1);
       if (sex && letter !== sex) return false;
+      if (sireSet.size) {
+        const sire = blank(lot.sire);
+        if (!sire || !sireSet.has(sire)) return false;
+      }
       if (color) {
-        const coat = (lot.color || "").toLowerCase();
+        const coat = (lot.color || lot.color_label || "").toLowerCase();
         if (!coat || !coat.includes(color.trim().toLowerCase())) return false;
       }
+      if (!priceInRanges(lotFilterPrice(lot), priceRanges)) return false;
       if (maxPrice) {
-        const price = Number(lot.price_num) || 0;
+        const price = lotFilterPrice(lot);
         if (!price || price > Number(maxPrice)) return false;
       }
       if (height) {
@@ -250,7 +337,7 @@ function SalesPage() {
       }
       return true;
     });
-  }, [lots, mode, dismissedSet, onlyDismissed, sex, color, maxPrice, height]);
+  }, [lots, mode, dismissedSet, onlyDismissed, sex, color, maxPrice, height, selectedSires, priceRanges]);
 
   useEffect(() => {
     if (!catalog || !filtered.length) return;
@@ -364,14 +451,28 @@ function SalesPage() {
     if (patch.color !== undefined) setColor(patch.color);
     if (patch.maxPrice !== undefined) setMaxPrice(patch.maxPrice);
     if (patch.height !== undefined) setHeight(patch.height);
+    if (patch.selectedSires !== undefined) setSelectedSires(patch.selectedSires);
+    if (patch.priceRanges !== undefined) setPriceRanges(patch.priceRanges);
     if (activeClient) {
       const clientPatch = {};
       if (patch.sex !== undefined) clientPatch.sex = patch.sex;
       if (patch.color !== undefined) clientPatch.color = patch.color;
       if (patch.maxPrice !== undefined) clientPatch.maxPrice = patch.maxPrice;
       if (patch.height !== undefined) clientPatch.height = patch.height;
-      updateClient(activeClient, clientPatch);
+      if (Object.keys(clientPatch).length) updateClient(activeClient, clientPatch);
     }
+  }
+
+  function toggleSire(name) {
+    setSelectedSires((cur) => (
+      cur.includes(name) ? cur.filter((item) => item !== name) : [...cur, name]
+    ));
+  }
+
+  function togglePriceRange(id) {
+    setPriceRanges((cur) => (
+      cur.includes(id) ? cur.filter((item) => item !== id) : [...cur, id]
+    ));
   }
 
   function selectClient(client) {
@@ -392,6 +493,8 @@ function SalesPage() {
     setColor("");
     setMaxPrice("");
     setHeight("");
+    setSelectedSires([]);
+    setPriceRanges([]);
     setOnlyDismissed(false);
     setActiveClient("");
   }
@@ -740,27 +843,67 @@ function SalesPage() {
                 ) : null}
 
                 <h4>FILTER</h4>
+                <p className="filter-count">{filtered.length} / {lots.length} hips</p>
                 <label>
-                  Height
-                  <input value={height} onChange={(e) => applyFilter({ height: e.target.value })} placeholder="16.1" />
+                  Stallion
+                  <div className="filter-sire-list" role="group" aria-label="Stallions in this catalog">
+                    {sireOptions.length ? sireOptions.map((row) => (
+                      <label key={row.name} className="filter-check">
+                        <input
+                          type="checkbox"
+                          checked={selectedSires.includes(row.name)}
+                          onChange={() => toggleSire(row.name)}
+                        />
+                        <span>{row.name}</span>
+                        <em>{row.count}</em>
+                      </label>
+                    )) : (
+                      <span className="empty" style={{ padding: 8 }}>No sires in catalog</span>
+                    )}
+                  </div>
+                  {selectedSires.length ? (
+                    <button className="ghost filter-clear" type="button" onClick={() => setSelectedSires([])}>
+                      Clear stallions
+                    </button>
+                  ) : null}
                 </label>
                 <label>
                   Sex
                   <select value={sex} onChange={(e) => applyFilter({ sex: e.target.value })}>
                     <option value="">Any</option>
-                    <option value="C">Colt</option>
-                    <option value="F">Filly</option>
-                    <option value="G">Gelding</option>
-                    <option value="M">Mare</option>
+                    {sexOptions.map((opt) => (
+                      <option key={opt.letter} value={opt.letter}>{opt.label}</option>
+                    ))}
                   </select>
+                </label>
+                <label>
+                  Price range
+                  <div className="filter-price-ranges" role="group" aria-label="Price ranges">
+                    {PRICE_RANGES.map((range) => (
+                      <label key={range.id} className="filter-check">
+                        <input
+                          type="checkbox"
+                          checked={priceRanges.includes(range.id)}
+                          onChange={() => togglePriceRange(range.id)}
+                        />
+                        <span>{range.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {priceProxyNote ? <span className="filter-note">{priceProxyNote}</span> : null}
+                  {priceRanges.length ? (
+                    <button className="ghost filter-clear" type="button" onClick={() => setPriceRanges([])}>
+                      Clear price ranges
+                    </button>
+                  ) : null}
                 </label>
                 <label>
                   Color
                   <input value={color} onChange={(e) => applyFilter({ color: e.target.value })} />
                 </label>
                 <label>
-                  Price
-                  <input value={maxPrice} onChange={(e) => applyFilter({ maxPrice: e.target.value })} placeholder="Max" />
+                  Height
+                  <input value={height} onChange={(e) => applyFilter({ height: e.target.value })} placeholder="16.1" />
                 </label>
                 <button className="ghost" type="button" onClick={viewFull}>View full</button>
                 <button className={onlyDismissed ? "primary" : "ghost"} type="button" onClick={viewDismissed}>X&apos;d list</button>

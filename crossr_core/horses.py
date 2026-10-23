@@ -495,7 +495,7 @@ def _fee_amount(raw):
 def expected_market_value(sire_name=None, profiles=None, sire_profile=None):
     """Placeholder band: 2×–6× the sire's current stud fee."""
     profile = sire_profile if sire_profile is not None else _profile_for(sire_name, profiles or {})
-    fee = _fee_amount((profile or {}).get("Stud Fee"))
+    fee = _fee_amount((profile or {}).get("Stud Fee")) or 0
     if fee > 0:
         low, high = fee * 2, fee * 6
         return {
@@ -857,6 +857,11 @@ def _assign_ranks(name_to_value):
 
 
 def _fee_amount(raw):
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        try:
+            return int(raw) if raw > 0 else None
+        except (TypeError, ValueError):
+            return None
     text = str(raw or "").strip()
     if not text or text.lower() == "private":
         return None

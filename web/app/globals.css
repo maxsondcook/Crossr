@@ -371,7 +371,6 @@ button, input, select { font: inherit; color: inherit; }
   overflow: auto;
 }
 .panel:has(.catalog-ped) {
-  overflow: visible;
   min-width: 0;
 }
 .panel select, .panel input {
@@ -531,7 +530,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .cat-cell.sire { border-left: 3px solid var(--teal); }
 .cat-cell.dam { border-left: 3px solid var(--pink); }
 
-.family-panel { overflow: visible; }
+.family-panel { overflow: auto; }
 .ff-block { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #243049; }
 .ff-block:last-child { border-bottom: 0; margin-bottom: 0; }
 .ff-ord { color: var(--gold); font-size: 11px; letter-spacing: 0.1em; font-weight: 800; text-transform: uppercase; margin-bottom: 4px; }
@@ -657,6 +656,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   display: grid;
   grid-template-columns: minmax(520px, 1.45fr) minmax(320px, 1fr) auto;
   gap: 10px;
+  align-items: stretch;
 }
 .sales-col {
   min-height: 0;
@@ -664,10 +664,22 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   display: flex;
   flex-direction: column;
   gap: 10px;
+  align-items: stretch;
+}
+/* Stack in document flow — never shrink panels over each other. */
+.sales-col > .panel {
+  position: static;
+  flex: 0 0 auto;
+  min-height: min-content;
+  overflow: auto;
+  z-index: auto;
+}
+.sales-col > .panel.family-panel {
+  overflow: auto;
 }
 .sales-col .panel:has(.catalog-ped) {
   overflow-x: auto;
-  overflow-y: visible;
+  overflow-y: auto;
 }
 .sales-root h4 {
   margin: 0 0 8px;
@@ -782,6 +794,59 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   background: var(--bg-2);
   border-radius: 10px;
   padding: 8px;
+}
+.filter-count {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.filter-sire-list,
+.filter-price-ranges {
+  max-height: 168px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  padding: 4px;
+}
+.filter-check {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  color: var(--text) !important;
+  font-size: 12px;
+  cursor: pointer;
+}
+.filter-check input {
+  width: auto !important;
+  margin: 0;
+  accent-color: var(--teal);
+}
+.filter-check span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filter-check em {
+  color: var(--muted);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+.filter-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.filter-clear {
+  margin-top: 6px;
+  width: 100%;
 }
 
 .sales-layout { display: grid; grid-template-columns: 280px 1fr; gap: 12px; }
