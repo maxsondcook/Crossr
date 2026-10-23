@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS lots (
 CREATE INDEX IF NOT EXISTS idx_lots_sire ON lots(sire_key);
 CREATE INDEX IF NOT EXISTS idx_lots_name ON lots(name_key);
 CREATE INDEX IF NOT EXISTS idx_lots_dam ON lots(dam_key);
+CREATE INDEX IF NOT EXISTS idx_lots_damsire ON lots(damsire_key);
 CREATE INDEX IF NOT EXISTS idx_lots_catalog ON lots(catalog_id);
 CREATE INDEX IF NOT EXISTS idx_lots_year ON lots(birth_year);
 """

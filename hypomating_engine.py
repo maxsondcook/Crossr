@@ -2,9 +2,9 @@ import sys
 import os
 import copy
 import re
-import pandas as pd
 import main
-import hypofoals_manager 
+import hypofoals_manager
+from graded_stakes import load_stakes_data
 
 # ==============================================================================
 # BROODMARE SIRE INTEGRATION FIXES
@@ -405,41 +405,63 @@ def get_mare_sire_from_pedigree(pedigree_dict):
         return sire_node
     return ""
 
-def load_stakes_data():
-    if not os.path.exists('graded_stakes_winners.csv'):
-        print("⚠️ Warning: graded_stakes_winners.csv not found.")
-        return []
-    df = pd.read_csv('graded_stakes_winners.csv')
-    df.fillna('', inplace=True)
-    for col in ['Horse Name', 'Race Name', 'Grade', 'Sex', 'Purse', 'Distance']:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-    return df.to_dict('records')
+def _is_winning_place(record):
+    """Treat missing Place as a winner (old winner-only files). Otherwise require 1."""
+    place = record.get("Place", 1)
+    if place in ("", None):
+        return True
+    try:
+        return int(float(place)) == 1
+    except (TypeError, ValueError):
+        return False
+
+
+def _surface_from_distance(dist_str):
+    upper = str(dist_str or "").upper()
+    if "(D)" in upper:
+        return "dirt"
+    if "(T)" in upper:
+        return "turf"
+    if "(AW)" in upper:
+        return "all-weather"
+    return "track"
+
 
 def build_horse_summaries(records):
+    """Build per-horse win summaries. Only Place==1 rows are counted as wins."""
     horses = {}
     for r in records:
-        h_name = r['Horse Name']
+        h_name = str(r.get("Horse Name") or "").strip()
+        if not h_name or h_name.upper() in {"N/A", "NAN", "NONE"}:
+            continue
+        if not _is_winning_place(r):
+            continue
+
         if h_name not in horses:
+            sex_val = str(r.get("Sex") or "").strip().lower()
             horses[h_name] = {
                 'name': h_name,
-                'foaling_year': r['Foaling Year'],
-                'sex': r['Sex'].lower(),
+                'foaling_year': r.get('Foaling Year') or "",
+                'sex': sex_val,
                 'races': [],
                 'g1_count': 0, 'g2_count': 0, 'g3_count': 0, 'ungraded_count': 0
             }
         
-        dist_str = r['Distance']
-        surface = "dirt" if "(D)" in dist_str.upper() else "turf" if "(T)" in dist_str.upper() else "track"
+        dist_str = str(r.get('Distance') or "")
+        surface = _surface_from_distance(dist_str)
         clean_dist = re.sub(r'\s*\([^)]*\)', '', dist_str).strip()
+        grade = str(r.get('Grade') or r.get('Group') or "").strip()
+        purse = str(r.get('Purse') or "").strip()
+        race_name = str(r.get('Race Name') or "").strip()
+        race_year = r.get('Race Year') or ""
         
-        race_line = f"{h_name} won the {r['Race Year']} edition of the {r['Purse']} {r['Grade']} {r['Race Name']} over {clean_dist} on the {surface}"
+        race_line = f"{h_name} won the {race_year} edition of the {purse} {grade} {race_name} over {clean_dist} on the {surface}"
         horses[h_name]['races'].append(race_line)
         
-        grade = r['Grade'].upper()
-        if 'G1' in grade: horses[h_name]['g1_count'] += 1
-        elif 'G2' in grade: horses[h_name]['g2_count'] += 1
-        elif 'G3' in grade: horses[h_name]['g3_count'] += 1
+        grade_upper = grade.upper()
+        if 'G1' in grade_upper: horses[h_name]['g1_count'] += 1
+        elif 'G2' in grade_upper: horses[h_name]['g2_count'] += 1
+        elif 'G3' in grade_upper: horses[h_name]['g3_count'] += 1
         else: horses[h_name]['ungraded_count'] += 1
 
     for h_name, h in horses.items():
@@ -606,8 +628,15 @@ def execute_top_crosses_search(pedigree_db):
     print("\n--- STALLION TOP CROSSES SEARCH ---")
     target_stallion = input("Enter Stallion Name (e.g., Into Mischief): ").strip()
     if not target_stallion: return
+
+    hit = main.resolve_pedigree(target_stallion, pedigree_db, prompt=True)
+    if hit.get("cancelled"):
+        return
+    if hit["tree"] and hit["tree"].get("Horse"):
+        target_stallion = hit["tree"].get("Horse")
+    chosen_year = hit.get("query_year") or ""
     
-    clean_target = main.clean_horse_name(target_stallion)  
+    clean_target = main.clean_horse_name(target_stallion)
     raw_records = load_stakes_data()
     horse_summaries = build_horse_summaries(raw_records)
     
@@ -622,7 +651,10 @@ def execute_top_crosses_search(pedigree_db):
             sire_node = h_ped.get("Sire", {})
             h_sire = sire_node.get("Horse", "") if isinstance(sire_node, dict) else str(sire_node)
             
-            if main.clean_horse_name(h_sire) == clean_target: 
+            if main.clean_horse_name(h_sire) == clean_target:
+                sire_year = main.foaling_year(h_sire)
+                if chosen_year and sire_year and sire_year != chosen_year:
+                    continue
                 dam_node = h_ped.get("Dam", {})
                 h_damsire = get_mare_sire_from_pedigree(dam_node)
                 if h_damsire:
@@ -673,15 +705,13 @@ def execute_suggestion_wizard(pedigree_db, all_profiles):
     mare_name = input("Enter Broodmare Name: ").strip()
     if not mare_name: return
     
-    clean_mare = main.clean_horse_name(mare_name)
-    upper_mare = mare_name.strip().upper()
-    
-    if clean_mare in pedigree_db:
+    hit = main.resolve_pedigree(mare_name, pedigree_db, prompt=True)
+    if hit.get("cancelled"):
+        return
+    if hit["tree"]:
         print(f"🌟 Complete tree found for '{mare_name}' in database! Autofilling pedigree tree.")
-        mare_pedigree = copy.deepcopy(pedigree_db[clean_mare])
-    elif upper_mare in pedigree_db:
-        print(f"🌟 Complete tree found for '{upper_mare}' in database! Autofilling pedigree tree.")
-        mare_pedigree = copy.deepcopy(pedigree_db[upper_mare])
+        mare_pedigree = copy.deepcopy(hit["tree"])
+        mare_name = mare_pedigree.get("Horse", mare_name)
     else:
         print("\n==================================================")
         print("   🐎 Launching Standalone Pedigree Builder 🐎   ")
@@ -694,7 +724,7 @@ def execute_suggestion_wizard(pedigree_db, all_profiles):
             add_pedigrees.main()
             
             if hasattr(main, 'load_and_sync_all_data'):
-                main.load_and_sync_all_data()
+                main.PEDIGREE_DATABASE = main.load_and_sync_all_data()
             if hasattr(main, 'PEDIGREE_DATABASE'):
                 pedigree_db.update(main.PEDIGREE_DATABASE)
                 
@@ -711,22 +741,17 @@ def execute_suggestion_wizard(pedigree_db, all_profiles):
         except Exception as e:
             print(f"⚠️ An error occurred while running the pedigree builder: {e}")
 
-        if clean_mare in pedigree_db:
-            mare_pedigree = copy.deepcopy(pedigree_db[clean_mare])
-        elif upper_mare in pedigree_db:
-            mare_pedigree = copy.deepcopy(pedigree_db[upper_mare])
+        hit = main.resolve_pedigree(mare_name, pedigree_db, prompt=True)
+        if hit.get("cancelled"):
+            return
+        if hit["tree"]:
+            mare_pedigree = copy.deepcopy(hit["tree"])
+            mare_name = mare_pedigree.get("Horse", mare_name)
         else:
-            matched_key = None
-            for key in pedigree_db.keys():
-                if clean_mare in key or key in clean_mare:
-                    matched_key = key
-                    break
-            if matched_key:
-                mare_pedigree = copy.deepcopy(pedigree_db[matched_key])
-            else:
-                print(f"❌ Broodmare '{mare_name}' not found in registry cache post builder run.")
-                return
+            print(f"❌ Broodmare '{mare_name}' not found in registry cache post builder run.")
+            return
 
+    clean_mare = main.clean_horse_name(mare_name)
     mating_damsire = get_mare_sire_from_pedigree(mare_pedigree)
     clean_display_damsire = re.sub(r'\s*\(\d{4}\)', '', mating_damsire).strip()
     clean_display_mare = re.sub(r'\s*\(\d{4}\)', '', mare_name).strip()
@@ -960,7 +985,7 @@ def execute_suggestion_wizard(pedigree_db, all_profiles):
     hypo_foal_name = f"{chosen_stallion.title()} x {mare_name}"
     combined_pedigree = {
         "Horse": hypo_foal_name,
-        "Sire": copy.deepcopy(pedigree_db.get(main.clean_horse_name(chosen_stallion), {"Horse": chosen_stallion})),
+        "Sire": copy.deepcopy(main.pedigree_tree(chosen_stallion, pedigree_db) or {"Horse": chosen_stallion}),
         "Dam": copy.deepcopy(mare_pedigree)
     }
 
@@ -985,20 +1010,17 @@ def execute_suggestion_wizard(pedigree_db, all_profiles):
 
 def lookup_mare_pedigree(pedigree_db, mare_name):
     """Find a broodmare pedigree by cleaned or uppercase name. Returns (tree, matched_key) or (None, None)."""
-    clean_mare = main.clean_horse_name(mare_name)
-    upper_mare = mare_name.strip().upper()
-    if clean_mare in pedigree_db:
-        return copy.deepcopy(pedigree_db[clean_mare]), clean_mare
-    if upper_mare in pedigree_db:
-        return copy.deepcopy(pedigree_db[upper_mare]), upper_mare
-    for key in pedigree_db.keys():
-        if clean_mare == main.clean_horse_name(key):
-            return copy.deepcopy(pedigree_db[key]), key
-    return None, None
+    hit = main.lookup_pedigree(mare_name, pedigree_db)
+    if hit["ambiguous"] or not hit["tree"]:
+        return None, None
+    return copy.deepcopy(hit["tree"]), hit["key"]
 
 
 def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither", min_fee=None, max_fee=None):
     """Non-interactive stallion suggestions for a broodmare already in the pedigree database."""
+    hit = main.lookup_pedigree(mare_name, pedigree_db)
+    if hit["ambiguous"]:
+        return {"error": "ambiguous_year", "mare": hit["clean_name"], "years": hit["years"]}
     mare_pedigree, matched_key = lookup_mare_pedigree(pedigree_db, mare_name)
     if not mare_pedigree:
         return {"error": "not_found", "mare": mare_name}
@@ -1206,6 +1228,9 @@ def lineage_options_payload(stallion_name, all_profiles, budget_filter=None):
 
 
 def build_hypo_report(pedigree_db, all_profiles, sire_name, dam_name, persist=False):
+    dam_hit = main.lookup_pedigree(dam_name, pedigree_db)
+    if dam_hit["ambiguous"]:
+        return {"error": "ambiguous_year", "mare": dam_hit["clean_name"], "years": dam_hit["years"]}
     mare_pedigree, _ = lookup_mare_pedigree(pedigree_db, dam_name)
     if not mare_pedigree:
         return {"error": "not_found", "mare": dam_name}
@@ -1213,7 +1238,7 @@ def build_hypo_report(pedigree_db, all_profiles, sire_name, dam_name, persist=Fa
     hypo_foal_name = f"{sire_name.title()} x {dam_display}"
     combined_pedigree = {
         "Horse": hypo_foal_name,
-        "Sire": copy.deepcopy(pedigree_db.get(main.clean_horse_name(sire_name), {"Horse": sire_name})),
+        "Sire": copy.deepcopy(main.pedigree_tree(sire_name, pedigree_db) or {"Horse": sire_name}),
         "Dam": copy.deepcopy(mare_pedigree),
     }
     if persist:

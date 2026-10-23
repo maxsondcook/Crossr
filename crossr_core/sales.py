@@ -20,6 +20,60 @@ def db_path():
     return os.environ.get("SALES_DB_PATH", DEFAULT_DB)
 
 
+_DAMSIRE_INDEXED = False
+
+
+def ensure_damsire_index():
+    global _DAMSIRE_INDEXED
+    if _DAMSIRE_INDEXED:
+        return
+    conn = connect()
+    if not conn:
+        return
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lots_damsire ON lots(damsire_key)")
+        conn.commit()
+        _DAMSIRE_INDEXED = True
+    finally:
+        conn.close()
+
+
+def damsire_yearling_averages(stallion_name):
+    """Catalog-year average sold yearling price for lots whose damsire is this stallion."""
+    ensure_damsire_index()
+    conn = connect()
+    if not conn:
+        return {}
+    key = sales_history.clean_search_string(stallion_name)
+    if not key:
+        return {}
+    try:
+        rows = conn.execute(
+            """
+            SELECT c.year AS year, COUNT(*) AS n, AVG(l.price_num) AS avg_price
+            FROM lots l
+            JOIN catalogs c ON c.id = l.catalog_id
+            WHERE l.damsire_key = ?
+              AND l.is_rna = 0 AND l.is_out = 0 AND l.price_num > 0
+              AND (
+                LOWER(c.title) LIKE '%yearling%'
+                OR LOWER(COALESCE(c.source_file, '')) LIKE '%yearling%'
+              )
+            GROUP BY c.year
+            ORDER BY c.year DESC
+            """,
+            (key,),
+        ).fetchall()
+        out = {}
+        for row in rows:
+            year = int(row["year"])
+            avg = float(row["avg_price"] or 0)
+            out[year] = {"n": int(row["n"]), "avg_price": int(round(avg))}
+        return out
+    finally:
+        conn.close()
+
+
 def connect():
     path = db_path()
     if not os.path.exists(path):
@@ -186,3 +240,107 @@ def get_lot(lot_id):
         }
     finally:
         conn.close()
+
+
+def catalog_nav(catalog_id):
+    """Compact hip list for walking a past catalog. No price aggregates."""
+    conn = connect()
+    if not conn:
+        return None
+    try:
+        cat = conn.execute(
+            "SELECT id, year, title FROM catalogs WHERE id = ?",
+            (int(catalog_id),),
+        ).fetchone()
+        if not cat:
+            return None
+        rows = conn.execute(
+            f"""
+            {LOT_SELECT}
+            WHERE l.catalog_id = ?
+            ORDER BY CAST(l.hip AS INTEGER), l.hip
+            """,
+            (int(catalog_id),),
+        ).fetchall()
+        lots = []
+        for row in rows:
+            lot = _lot_from_row(row)
+            lots.append({
+                "id": lot["id"],
+                "hip": lot.get("hip"),
+                "name": lot.get("name"),
+                "sex": lot.get("sex"),
+                "sex_letter": lot.get("sex_letter"),
+                "color": lot.get("color"),
+                "sire": lot.get("sire"),
+                "dam": lot.get("dam"),
+                "birth_year": lot.get("birth_year"),
+                "consignor": lot.get("consignor"),
+                "foaled": lot.get("foaled_location"),
+                "price_raw": lot.get("price_raw"),
+                "price_num": lot.get("price_num") or 0,
+                "is_rna": lot.get("is_rna"),
+            })
+        return {"catalog": dict(cat), "lots": lots, "total": len(lots)}
+    finally:
+        conn.close()
+
+
+def auctions_for_horses(crosses, limit=40):
+    """Sale rows for similar-cross horses: name, similarity, sale, price."""
+    if not crosses:
+        return []
+    sim_by_key = {}
+    name_by_key = {}
+    ordered_keys = []
+    for row in crosses:
+        name = row.get("name") or ""
+        key = sales_history.clean_search_string(name)
+        if not key:
+            continue
+        similarity = row.get("similarity")
+        previous = sim_by_key.get(key)
+        if key not in sim_by_key:
+            ordered_keys.append(key)
+        if previous is None or (similarity is not None and similarity > previous):
+            sim_by_key[key] = similarity
+            name_by_key[key] = name
+    if not ordered_keys:
+        return []
+    conn = connect()
+    if not conn:
+        return []
+    try:
+        placeholders = ",".join("?" * len(ordered_keys))
+        rows = conn.execute(
+            f"""
+            SELECT l.name, l.name_key, l.hip, l.price_raw, l.price_num, l.is_rna, l.purchaser,
+                   c.title AS sale, c.year
+            FROM lots l
+            JOIN catalogs c ON c.id = l.catalog_id
+            WHERE l.name_key IN ({placeholders}) AND l.is_out = 0
+            """,
+            ordered_keys,
+        ).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for row in rows:
+        key = row["name_key"]
+        out.append({
+            "name": name_by_key.get(key) or row["name"],
+            "similarity": sim_by_key.get(key),
+            "sale": row["sale"],
+            "year": row["year"],
+            "hip": row["hip"],
+            "price_raw": row["price_raw"],
+            "price_num": row["price_num"],
+            "is_rna": bool(row["is_rna"]),
+            "purchaser": row["purchaser"],
+        })
+    out.sort(key=lambda item: (
+        -(item["similarity"] if item["similarity"] is not None else -1),
+        -(int(item["year"] or 0)),
+        -(item["price_num"] or 0),
+    ))
+    return out[:limit]

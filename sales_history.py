@@ -564,16 +564,23 @@ def run_sales_menu(pedigrees_database=None):
             has_autofill = False
             
             if p_name and pedigrees_database:
-                base_key = p_name.upper()
-                year_suffix = f"({p_year})" if p_year else ""
-                
-                match_data = None
-                if base_key in pedigrees_database:
-                    match_data = pedigrees_database[base_key]
-                elif year_suffix:
-                    combined_key = f"{base_key} {year_suffix}".strip()
-                    if combined_key in pedigrees_database:
-                        match_data = pedigrees_database[combined_key]
+                lookup_label = f"{p_name} ({p_year})" if p_year else p_name
+                hit = None
+                try:
+                    import main as _main
+                    hit = _main.resolve_pedigree(lookup_label, pedigrees_database, prompt=not bool(p_year))
+                except Exception:
+                    hit = None
+                match_data = hit["tree"] if hit and hit.get("tree") and not hit.get("cancelled") else None
+                if not match_data:
+                    base_key = p_name.upper()
+                    year_suffix = f"({p_year})" if p_year else ""
+                    if base_key in pedigrees_database:
+                        match_data = pedigrees_database[base_key]
+                    elif year_suffix:
+                        combined_key = f"{base_key} {year_suffix}".strip()
+                        if combined_key in pedigrees_database:
+                            match_data = pedigrees_database[combined_key]
                 
                 if match_data:
                     if isinstance(match_data, dict):
