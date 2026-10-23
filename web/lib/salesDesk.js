@@ -34,3 +34,35 @@ export function saveDesk(next) {
 export function deskKey(mode, catalogId) {
   return `${mode}:${catalogId}`;
 }
+
+/** Catalog-scoped star ids (same shape as dismissed). Supports legacy flat boolean maps. */
+export function starredIds(desk, mode, catalogId) {
+  if (!desk || catalogId == null || catalogId === "") return [];
+  const key = deskKey(mode, catalogId);
+  const scoped = (desk.stars || {})[key];
+  if (Array.isArray(scoped)) return scoped.map(String);
+  // Legacy: { [lotId]: true } without catalog scope
+  if (scoped && typeof scoped === "object") {
+    return Object.entries(scoped).filter(([, on]) => on).map(([id]) => String(id));
+  }
+  const flat = desk.stars || {};
+  if (Array.isArray(flat)) return flat.map(String);
+  return Object.entries(flat)
+    .filter(([, on]) => on === true)
+    .map(([id]) => String(id));
+}
+
+export function withStarToggle(desk, mode, catalogId, lotId, on) {
+  const key = deskKey(mode, catalogId);
+  const list = new Set(starredIds(desk, mode, catalogId));
+  const id = String(lotId);
+  if (on) list.add(id);
+  else list.delete(id);
+  return {
+    ...desk,
+    stars: {
+      ...(desk.stars || {}),
+      [key]: Array.from(list),
+    },
+  };
+}

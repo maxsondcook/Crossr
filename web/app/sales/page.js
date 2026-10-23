@@ -4,7 +4,7 @@ import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { apiGet, apiPost, horseHref } from "../../lib/api";
-import { deskKey, loadDesk, saveDesk } from "../../lib/salesDesk";
+import { deskKey, loadDesk, saveDesk, starredIds, withStarToggle } from "../../lib/salesDesk";
 import {
   horseHrefWithReturn,
   salesHref,
@@ -146,6 +146,7 @@ function SalesPage() {
   const [priceRanges, setPriceRanges] = useState([]);
   const [height, setHeight] = useState("");
   const [onlyDismissed, setOnlyDismissed] = useState(false);
+  const [onlyStarred, setOnlyStarred] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteState, setNoteState] = useState("");
   const [openAuction, setOpenAuction] = useState("");
@@ -270,6 +271,11 @@ function SalesPage() {
     return new Set(list.map(String));
   }, [desk, catalog, mode]);
 
+  const starredSet = useMemo(() => {
+    if (!catalog) return new Set();
+    return new Set(starredIds(desk, mode, catalog.id));
+  }, [desk, catalog, mode]);
+
   const sireOptions = useMemo(() => {
     const counts = new Map();
     for (const lot of lots) {
@@ -309,11 +315,21 @@ function SalesPage() {
     return "Price uses Expected Market mid (2×–6× sire stud fee) — no sale prices yet.";
   }, [lots]);
 
+  function lotIsStarred(lot) {
+    if (!lot) return false;
+    const id = navId(mode, lot);
+    if (starredSet.has(id)) return true;
+    if (mode === "upcoming" && lot.starred) return true;
+    return false;
+  }
+
   const filtered = useMemo(() => {
     const sireSet = new Set(selectedSires);
     return lots.filter((lot) => {
       const id = navId(mode, lot);
       const dismissed = dismissedSet.has(id);
+      const isStarred = starredSet.has(id) || (mode === "upcoming" && Boolean(lot.starred));
+      if (onlyStarred) return isStarred;
       if (onlyDismissed) return dismissed;
       if (dismissed) return false;
       const letter = (lot.sex_letter || lot.sex || "").toUpperCase().slice(0, 1);
@@ -337,7 +353,7 @@ function SalesPage() {
       }
       return true;
     });
-  }, [lots, mode, dismissedSet, onlyDismissed, sex, color, maxPrice, height, selectedSires, priceRanges]);
+  }, [lots, mode, dismissedSet, starredSet, onlyDismissed, onlyStarred, sex, color, maxPrice, height, selectedSires, priceRanges]);
 
   useEffect(() => {
     if (!catalog || !filtered.length) return;
@@ -386,9 +402,13 @@ function SalesPage() {
   const ready = Boolean(detail && current && navId(mode, detail.lot) === currentId);
   readyRef.current = ready;
   draftRef.current = noteDraft;
-  const starred = current
-    ? (mode === "upcoming" ? Boolean(current.starred) : Boolean((desk.stars || {})[currentId]))
-    : false;
+  const starred = Boolean(current && lotIsStarred(current));
+  const starredCount = useMemo(
+    () => lots.filter((lot) => lotIsStarred(lot)).length,
+    // lotIsStarred closes over mode/starredSet
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lots, mode, starredSet],
+  );
 
   const salesReturn = useMemo(() => {
     if (!catalog || !current) return null;
@@ -482,6 +502,7 @@ function SalesPage() {
     }
     setActiveClient(client.id);
     setOnlyDismissed(false);
+    setOnlyStarred(false);
     setSex(client.sex || "");
     setColor(client.color || "");
     setMaxPrice(client.maxPrice || "");
@@ -496,15 +517,32 @@ function SalesPage() {
     setSelectedSires([]);
     setPriceRanges([]);
     setOnlyDismissed(false);
+    setOnlyStarred(false);
     setActiveClient("");
   }
 
   function viewDismissed() {
     setOnlyDismissed(true);
+    setOnlyStarred(false);
     setSex("");
     setColor("");
     setMaxPrice("");
     setHeight("");
+    setSelectedSires([]);
+    setPriceRanges([]);
+    setActiveClient("");
+    setRailOpen(true);
+  }
+
+  function viewStarred() {
+    setOnlyStarred(true);
+    setOnlyDismissed(false);
+    setSex("");
+    setColor("");
+    setMaxPrice("");
+    setHeight("");
+    setSelectedSires([]);
+    setPriceRanges([]);
     setActiveClient("");
     setRailOpen(true);
   }
@@ -532,22 +570,23 @@ function SalesPage() {
   }
 
   async function toggleStar() {
-    if (!current) return;
+    if (!current || !catalog) return;
+    const nextOn = !starred;
     try {
-    if (mode === "upcoming") {
-      const data = await apiPost(
-        `/api/sales/upcoming/${encodeURIComponent(catalog.id)}/lots/${encodeURIComponent(current.hip)}`,
-        { starred: !current.starred },
-      );
-      const on = Boolean(data.lot?.starred);
-      setLots((rows) => rows.map((lot) => (String(lot.hip) === String(current.hip) ? { ...lot, starred: on } : lot)));
-      setDetail((prev) => (prev && String(prev.lot?.hip) === String(current.hip)
-        ? { ...prev, lot: { ...prev.lot, starred: on } }
-        : prev));
-      return;
-    }
-    const next = { ...desk, stars: { ...desk.stars, [currentId]: !starred } };
-    setDesk(saveDesk(next));
+      if (mode === "upcoming") {
+        const data = await apiPost(
+          `/api/sales/upcoming/${encodeURIComponent(catalog.id)}/lots/${encodeURIComponent(current.hip)}`,
+          { starred: nextOn },
+        );
+        const on = Boolean(data.lot?.starred);
+        setLots((rows) => rows.map((lot) => (String(lot.hip) === String(current.hip) ? { ...lot, starred: on } : lot)));
+        setDetail((prev) => (prev && String(prev.lot?.hip) === String(current.hip)
+          ? { ...prev, lot: { ...prev.lot, starred: on } }
+          : prev));
+        setDesk(saveDesk(withStarToggle(desk, mode, catalog.id, currentId, on)));
+        return;
+      }
+      setDesk(saveDesk(withStarToggle(desk, mode, catalog.id, currentId, nextOn)));
     } catch (e) {
       setDetailError(e.message);
     }
@@ -791,7 +830,12 @@ function SalesPage() {
           </div>
 
           <aside className={`sales-rail${railOpen ? " open" : ""}`}>
-            <button className={`rail-btn${starred ? " on" : ""}`} type="button" onClick={toggleStar} title="Star">
+            <button
+              className={`rail-btn${starred ? " on" : ""}`}
+              type="button"
+              onClick={toggleStar}
+              title={starred ? "Unstar this hip" : "Star this hip"}
+            >
               {starred ? "★" : "☆"}
             </button>
             <button className="rail-btn" type="button" onClick={dismissCurrent} title="Dismiss">✕</button>
@@ -905,8 +949,18 @@ function SalesPage() {
                   Height
                   <input value={height} onChange={(e) => applyFilter({ height: e.target.value })} placeholder="16.1" />
                 </label>
+                <button
+                  className={onlyStarred ? "primary" : "ghost"}
+                  type="button"
+                  onClick={viewStarred}
+                >
+                  View Starred Horses{starredCount ? ` (${starredCount})` : ""}
+                </button>
                 <button className="ghost" type="button" onClick={viewFull}>View full</button>
                 <button className={onlyDismissed ? "primary" : "ghost"} type="button" onClick={viewDismissed}>X&apos;d list</button>
+                {onlyStarred && !filtered.length ? (
+                  <p className="filter-note">No starred hips in this catalog yet. Tap ★ on a hip to add it.</p>
+                ) : null}
               </div>
             ) : null}
           </aside>
