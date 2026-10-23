@@ -69,7 +69,7 @@ function colorWord(lot) {
 function expectedMarketLabel(detail, lot) {
   const band = detail?.expected_market;
   if (band?.label) return band.label;
-  return "2×–6× sire stud fee (fee unknown)";
+  return "Projection unavailable";
 }
 
 /** Show sale title once; skip appending year when already in the title. */
@@ -324,10 +324,10 @@ function SalesPage() {
     if (!lots.length) return "";
     const sources = new Set(lots.map((lot) => lot.filter_price_source).filter(Boolean));
     if (sources.has("sale_price") && (sources.has("expected_market_mid") || sources.has("unknown"))) {
-      return "Price uses sale price when sold; otherwise Expected Market mid (2×–6× sire stud fee).";
+      return "Price uses sale price when sold; otherwise Expected Market mid (PriceProjection).";
     }
     if (sources.has("sale_price")) return "Price uses catalog sale price.";
-    return "Price uses Expected Market mid (2×–6× sire stud fee) — no sale prices yet.";
+    return "Price uses Expected Market mid (PriceProjection) — no sale prices yet.";
   }, [lots]);
 
   function lotIsStarred(lot) {
@@ -755,6 +755,9 @@ function SalesPage() {
                     <div data-meta="expected-market">
                       <span className="meta-label">Expected Market Value</span>
                       <b className="money">{ready ? expectedMarketLabel(detail, current) : "…"}</b>
+                      {ready && detail?.expected_market?.rule ? (
+                        <span className="meta-sub">{detail.expected_market.rule}</span>
+                      ) : null}
                     </div>
                     {mode === "past" ? (
                       <div><span className="meta-label">Auction price</span><b className="money">{priceLabel(current)}</b></div>
@@ -763,9 +766,9 @@ function SalesPage() {
                   {jumpError ? <p className="error">{jumpError}</p> : null}
                 </div>
 
-                <div className="panel">
+                <div className="panel" data-panel="market-prediction">
                   <h4>MARKET PREDICTION</h4>
-                  <MarketCurve />
+                  <MarketCurve prediction={ready ? detail?.market_prediction : null} />
                 </div>
 
                 <div className="panel">

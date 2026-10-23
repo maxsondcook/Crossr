@@ -514,7 +514,8 @@ def run_sales_menu(pedigrees_database=None):
         print("[2] Search Stallion Progeny Entries")
         print("[3] Search Horse Sale History (Profile)")
         print("[4] Launch Pre-Sale Catalog Analyzer")
-        print("[5] Market Health Dashboard (SQL Graphs)")  # <--- ADDED OPTION
+        print("[5] Market Health Dashboard (SQL Graphs)")
+        print("[6] Price Projection (Yearlings / Weanlings vs Stud Fee)")
         print("----------------------------------")
         print("[X] Return to Main Menu")
         
@@ -615,7 +616,7 @@ def run_sales_menu(pedigrees_database=None):
             except Exception as e:
                 print(f"❌ Error running Sale Analyzer: {e}")
                 input("\nPress Enter to return...")
-        elif main_choice == "5":  # <--- ADDED HANDLER
+        elif main_choice == "5":
             try:
                 import sales_health
                 import importlib
@@ -623,6 +624,15 @@ def run_sales_menu(pedigrees_database=None):
                 sales_health.display_sales_health_dashboard()
             except Exception as e:
                 print(f"❌ Error rendering sales health dashboard: {e}")
+                input("\nPress Enter to return...")
+        elif main_choice == "6":
+            try:
+                import PriceProjection
+                import importlib
+                importlib.reload(PriceProjection)
+                PriceProjection.run_price_projection_menu()
+            except Exception as e:
+                print(f"❌ Error running Price Projection: {e}")
                 input("\nPress Enter to return...")
 
 if __name__ == "__main__":

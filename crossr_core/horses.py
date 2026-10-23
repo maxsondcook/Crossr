@@ -617,30 +617,54 @@ def _fee_amount(raw):
         return 0
 
 
-def expected_market_value(sire_name=None, profiles=None, sire_profile=None):
-    """Placeholder band: 2×–6× the sire's current stud fee."""
+def expected_market_value(
+    sire_name=None,
+    profiles=None,
+    sire_profile=None,
+    *,
+    sex=None,
+    sold_as=None,
+    dam=None,
+    name=None,
+    damsire=None,
+    covering_sire=None,
+    catalog_title=None,
+):
+    """Expected Market Value from PriceProjection / ValueProjector (fee fallback)."""
+    from crossr_core import projections as proj_svc
+
     profile = sire_profile if sire_profile is not None else _profile_for(sire_name, profiles or {})
-    fee = _fee_amount((profile or {}).get("Stud Fee")) or 0
-    if fee > 0:
-        low, high = fee * 2, fee * 6
-        return {
-            "sire_stud_fee": fee,
-            "low": low,
-            "high": high,
-            "label": f"${low:,} – ${high:,}",
-            "rule": "2×–6× sire stud fee",
-        }
-    return {
-        "sire_stud_fee": None,
-        "low": None,
-        "high": None,
-        "label": "2×–6× sire stud fee (fee unknown)",
-        "rule": "2×–6× sire stud fee",
-    }
+    bundled = proj_svc.project_lot_market(
+        sire=sire_name or "",
+        sex=sex or "",
+        sold_as=sold_as or "",
+        catalog_title=catalog_title or "",
+        sire_profile=profile,
+        dam=dam or "",
+        name=name or "",
+        damsire=damsire or "",
+        covering_sire=covering_sire or "",
+    )
+    return bundled["expected_market"]
 
 
-def sale_workspace(name, sire=None, dam=None, year=None, sex=None, color=None, foaled=None, sold_as=None, covering_sire=None, damsire=None, profiles=None):
+def sale_workspace(
+    name,
+    sire=None,
+    dam=None,
+    year=None,
+    sex=None,
+    color=None,
+    foaled=None,
+    sold_as=None,
+    covering_sire=None,
+    damsire=None,
+    profiles=None,
+    catalog_title=None,
+):
     """Pedigree, female family, similar crosses for one sale horse. Physical stays blank."""
+    from crossr_core import projections as proj_svc
+
     profiles = profiles or {}
     year_s = _year_only(year)
     tree = catalog_pedigree(name=name, year=year, sire=sire, dam=dam, damsire=damsire)
@@ -653,6 +677,17 @@ def sale_workspace(name, sire=None, dam=None, year=None, sex=None, color=None, f
         limit=20,
     ) if sire else []
     sire_profile = _profile_for(sire, profiles)
+    market = proj_svc.project_lot_market(
+        sire=sire or "",
+        sex=sex or "",
+        sold_as=sold_as or "",
+        catalog_title=catalog_title or "",
+        sire_profile=sire_profile,
+        dam=dam or "",
+        name=name or "",
+        damsire=damsire or "",
+        covering_sire=covering_sire or "",
+    )
     return {
         "year": year_s,
         "pedigree": trim_pedigree(tree) if tree else None,
@@ -660,7 +695,8 @@ def sale_workspace(name, sire=None, dam=None, year=None, sex=None, color=None, f
         "similar_crosses": crosses,
         "sire_class": _sire_class(sire, sire_profile),
         "dam_class": family[0].get("status") if family else None,
-        "expected_market": expected_market_value(sire, profiles=profiles, sire_profile=sire_profile),
+        "expected_market": market["expected_market"],
+        "market_prediction": market["market_prediction"],
         # Sales Physical panel is intentionally a blank placeholder.
         "physical": None,
     }

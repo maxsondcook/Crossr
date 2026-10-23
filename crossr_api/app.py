@@ -93,6 +93,12 @@ def startup():
     _PROFILES = main.load_master_profiles()
     horse_svc.build_search_index(_PROFILES)
     auth_svc.init_db()
+    try:
+        from crossr_core import projections as proj_svc
+
+        proj_svc.warm_price_model()
+    except Exception:
+        pass
 
 
 def profiles():
@@ -378,8 +384,10 @@ def _attach_heights(lots, lookup):
     return lots
 
 
-def _attach_filter_prices(lots, book):
-    """Sale price when present; else mid of Expected Market Value (2×–6× sire stud fee)."""
+def _attach_filter_prices(lots, book, catalog_title=""):
+    """Sale price when present; else Expected Market mid (PriceProjection / fee fallback)."""
+    from crossr_core import projections as proj_svc
+
     lookup = horse_svc.profile_lookup(book or {})
     for lot in lots:
         sale = lot.get("price_num") or 0
@@ -392,20 +400,29 @@ def _attach_filter_prices(lots, book):
             lot["filter_price_source"] = "sale_price"
             continue
         profile = lookup.get(main.clean_horse_name(lot.get("sire") or ""))
-        band = horse_svc.expected_market_value(lot.get("sire"), sire_profile=profile)
+        band = proj_svc.expected_market_mid_for_filter(
+            lot.get("sire") or "",
+            sold_as=lot.get("sold_as") or "",
+            catalog_title=catalog_title or lot.get("catalog_title") or "",
+            sex=lot.get("sex_letter") or lot.get("sex") or "",
+            sire_profile=profile,
+        )
+        mid = band.get("mid")
         low, high = band.get("low"), band.get("high")
-        if low and high:
-            lot["filter_price"] = (float(low) + float(high)) / 2.0
+        if mid:
+            lot["filter_price"] = float(mid)
             lot["filter_price_source"] = "expected_market_mid"
-            lot["filter_price_low"] = float(low)
-            lot["filter_price_high"] = float(high)
+            if low is not None:
+                lot["filter_price_low"] = float(low)
+            if high is not None:
+                lot["filter_price_high"] = float(high)
         else:
             lot["filter_price"] = None
             lot["filter_price_source"] = "unknown"
     return lots
 
 
-def _workspace(lot, book):
+def _workspace(lot, book, catalog_title=""):
     ctx = horse_svc.sale_workspace(
         name=lot.get("name") or lot.get("raw_name"),
         sire=lot.get("sire"),
@@ -418,6 +435,7 @@ def _workspace(lot, book):
         covering_sire=lot.get("covering_sire"),
         damsire=lot.get("damsire") or lot.get("sire_of_dam"),
         profiles=book,
+        catalog_title=catalog_title or lot.get("catalog_title") or "",
     )
     ctx["auction_history"] = sales_svc.auctions_for_horses(ctx.get("similar_crosses") or [])
     return ctx
@@ -431,7 +449,8 @@ def sales_catalog_nav(catalog_id: int):
     book = profiles()
     lookup = horse_svc.profile_lookup(book)
     _attach_heights(payload["lots"], lookup)
-    _attach_filter_prices(payload["lots"], book)
+    title = (payload.get("catalog") or {}).get("title") or payload.get("title") or ""
+    _attach_filter_prices(payload["lots"], book, catalog_title=title)
     return payload
 
 
@@ -440,7 +459,9 @@ def sales_lot_detail(lot_id: int):
     payload = sales_svc.get_lot(lot_id)
     if not payload:
         raise HTTPException(status_code=404, detail="Lot not found")
-    payload.update(_workspace(payload.get("lot") or {}, profiles()))
+    lot = payload.get("lot") or {}
+    title = (payload.get("catalog") or {}).get("title") or lot.get("catalog_title") or ""
+    payload.update(_workspace(lot, profiles(), catalog_title=title))
     return payload
 
 
@@ -472,7 +493,7 @@ def sales_upcoming_lots(
     book = profiles()
     lookup = horse_svc.profile_lookup(book)
     _attach_heights(lots, lookup)
-    _attach_filter_prices(lots, book)
+    _attach_filter_prices(lots, book, catalog_title=catalog_id)
     filtered = upcoming_svc.filter_lots(
         lots,
         sex=sex,
@@ -493,7 +514,7 @@ def sales_upcoming_lot(catalog_id: str, hip: str):
         raise HTTPException(status_code=404, detail="Hip not found")
     book = profiles()
     lot["height"] = horse_svc.sire_height(lot.get("sire"), horse_svc.profile_lookup(book))
-    return {"lot": lot, **_workspace(lot, book)}
+    return {"lot": lot, **_workspace(lot, book, catalog_title=catalog_id)}
 
 
 @app.post("/api/sales/upcoming/{catalog_id}/lots/{hip}")
