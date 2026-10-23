@@ -1,9 +1,15 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { apiGet, apiPost, horseHref } from "../../lib/api";
 import { deskKey, loadDesk, saveDesk } from "../../lib/salesDesk";
+import {
+  horseHrefWithReturn,
+  salesHref,
+  salesReturnFromParts,
+} from "../../lib/salesNav";
 import PedigreeChart from "../../components/PedigreeChart";
 import FemaleFamily from "../../components/FemaleFamily";
 import MarketCurve from "../../components/MarketCurve";
@@ -41,7 +47,40 @@ function blank(value) {
   return value == null ? "" : String(value).trim();
 }
 
-export default function SalesPage() {
+function sexWord(lot) {
+  if (!lot) return "";
+  if (lot.sex_label) return lot.sex_label;
+  const letter = String(lot.sex_letter || lot.sex || "").trim().toUpperCase().slice(0, 1);
+  return ({
+    C: "Colt", F: "Filly", M: "Mare", H: "Horse", G: "Gelding", R: "Ridgling", W: "Weanling",
+  })[letter] || blank(lot.sex) || "";
+}
+
+function colorWord(lot) {
+  if (!lot) return "";
+  if (lot.color_label) return lot.color_label;
+  const key = blank(lot.color).toUpperCase().replace(/\./g, "").replace(/\s+/g, " ");
+  return ({
+    B: "Bay",
+    CH: "Chestnut",
+    "DK B/BR": "Dark Bay or Brown",
+    "GR/RO": "Gray/Roan",
+    GR: "Gray",
+    RO: "Roan",
+    BLK: "Black",
+  })[key] || blank(lot.color);
+}
+
+function expectedMarketLabel(detail, lot) {
+  const band = detail?.expected_market;
+  if (band?.label) return band.label;
+  return "2×–6× sire stud fee (fee unknown)";
+}
+
+function SalesPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [mode, setMode] = useState("");
   const [years, setYears] = useState([]);
   const [year, setYear] = useState("");
@@ -71,10 +110,35 @@ export default function SalesPage() {
   const readyRef = useRef(false);
   const draftRef = useRef("");
   const loadedNote = useRef("");
+  const restoreRef = useRef(null);
+  const restoreBooted = useRef(false);
 
   useEffect(() => {
     setDesk(loadDesk());
   }, []);
+
+  useEffect(() => {
+    if (restoreBooted.current) return;
+    restoreBooted.current = true;
+    const modeParam = searchParams.get("mode") || "";
+    const catalogParam = searchParams.get("catalog") || "";
+    const hipParam = searchParams.get("hip") || "";
+    const lotParam = searchParams.get("lot") || "";
+    const yearParam = searchParams.get("year") || "";
+    const titleParam = searchParams.get("title") || "";
+    if (!modeParam || !catalogParam) return;
+    restoreRef.current = {
+      mode: modeParam,
+      catalogId: catalogParam,
+      hip: hipParam,
+      lotId: lotParam,
+      year: yearParam,
+      title: titleParam,
+    };
+    setMode(modeParam);
+    if (yearParam) setYear(yearParam);
+    setLoadingCatalogs(true);
+  }, [searchParams]);
 
   useEffect(() => {
     if (mode !== "past") return;
@@ -108,6 +172,14 @@ export default function SalesPage() {
   }, [mode]);
 
   useEffect(() => {
+    const pending = restoreRef.current;
+    if (!pending || pending.mode !== mode || !catalogs.length || catalog) return;
+    const match = catalogs.find((item) => String(item.id) === String(pending.catalogId));
+    if (!match) return;
+    setCatalog(match);
+  }, [catalogs, mode, catalog]);
+
+  useEffect(() => {
     if (!catalog) return;
     let cancel = false;
     setLoadingList(true);
@@ -123,7 +195,18 @@ export default function SalesPage() {
         if (cancel) return;
         const rows = d.lots || [];
         setLots(rows);
-        if (rows[0]) setCurrentId(navId(mode, rows[0]));
+        const pending = restoreRef.current;
+        let nextId = rows[0] ? navId(mode, rows[0]) : "";
+        if (pending && String(pending.catalogId) === String(catalog.id) && pending.mode === mode) {
+          const want = mode === "past"
+            ? String(pending.lotId || pending.hip || "")
+            : String(pending.hip || "");
+          if (want && rows.some((lot) => navId(mode, lot) === want)) {
+            nextId = want;
+          }
+          restoreRef.current = null;
+        }
+        if (nextId) setCurrentId(nextId);
       })
       .catch((e) => {
         if (!cancel) setListError(e.message);
@@ -215,7 +298,33 @@ export default function SalesPage() {
     ? (mode === "upcoming" ? Boolean(current.starred) : Boolean((desk.stars || {})[currentId]))
     : false;
 
+  const salesReturn = useMemo(() => {
+    if (!catalog || !current) return null;
+    return salesReturnFromParts({
+      mode,
+      catalogId: catalog.id,
+      catalogTitle: catalog.title,
+      year: mode === "past" ? year : catalog.year,
+      hip: current.hip,
+      lotId: current.id,
+    });
+  }, [catalog, current, mode, year]);
+
+  const hrefFor = useMemo(
+    () => (horseName) => (salesReturn ? horseHrefWithReturn(horseName, salesReturn) : horseHref(horseName)),
+    [salesReturn],
+  );
+
+  useEffect(() => {
+    if (!salesReturn || typeof window === "undefined") return;
+    const next = salesHref(salesReturn);
+    const currentPath = `${pathname}${window.location.search || ""}`;
+    if (currentPath === next) return;
+    router.replace(next, { scroll: false });
+  }, [salesReturn, pathname, router]);
+
   function chooseMode(next) {
+    restoreRef.current = null;
     setMode(next);
     setCatalog(null);
     setCatalogs([]);
@@ -223,6 +332,7 @@ export default function SalesPage() {
     setListError("");
     setActiveClient("");
     setOnlyDismissed(false);
+    router.replace("/sales", { scroll: false });
   }
 
   function openCatalog(item) {
@@ -440,11 +550,11 @@ export default function SalesPage() {
           <div className="sales-col">
             <div className="panel">
               <h4>PEDIGREE</h4>
-              {ready ? <PedigreeChart tree={detail.pedigree} showSubject={false} /> : <p className="empty">Loading pedigree…</p>}
+              {ready ? <PedigreeChart tree={detail.pedigree} showSubject={false} hrefFor={hrefFor} /> : <p className="empty">Loading pedigree…</p>}
             </div>
             <div className="panel family-panel">
               <h4>FEMALE FAMILY</h4>
-              {ready ? <FemaleFamily family={detail.female_family} /> : <p className="empty">Loading female family…</p>}
+              {ready ? <FemaleFamily family={detail.female_family} hrefFor={hrefFor} /> : <p className="empty">Loading female family…</p>}
             </div>
             <div className="panel">
               <h4>PHYSICAL</h4>
@@ -472,27 +582,29 @@ export default function SalesPage() {
               <>
                 <div className="panel sale-identity">
                   <h2>
-                    <Link href={horseHref(current.name)}>{current.name || current.raw_name || "Unnamed"}</Link>
-                    {current.sex_letter || current.sex ? <span className="sale-sex"> [{current.sex_letter || current.sex}]</span> : null}
+                    <Link href={hrefFor(current.name)}>{current.name || current.raw_name || "Unnamed"}</Link>
                   </h2>
                   <p className="byline">
-                    by {current.sire || "Unknown"}
+                    by {current.sire ? <Link href={hrefFor(current.sire)}>{current.sire}</Link> : "Unknown"}
                     {ready && detail.sire_class ? <span className="sale-class"> [{shortClass(detail.sire_class)}]</span> : null}
                     {current.dam ? (
                       <>
-                        {" "}(<Link href={horseHref(current.dam)}>{current.dam}</Link>
+                        {" "}(<Link href={hrefFor(current.dam)}>{current.dam}</Link>
                         {ready && detail.dam_class ? <span className="sale-class"> [{detail.dam_class}]</span> : null})
                       </>
                     ) : null}
                     {current.birth_year ? ` ${current.birth_year}` : ""}
                   </p>
                   <div className="sale-meta">
-                    <div><span className="meta-label">Color</span><b>{blank(current.color) || "—"}</b></div>
-                    <div><span className="meta-label">Sex</span><b>{current.sex_letter || current.sex || "—"}</b></div>
-                    <div><span className="meta-label">Foaled</span><b>{current.birth_year || "—"}</b></div>
+                    <div><span className="meta-label">Color</span><b>{colorWord(current) || "—"}</b></div>
+                    <div><span className="meta-label">Sex</span><b>{sexWord(current) || "—"}</b></div>
+                    <div><span className="meta-label">Foaled</span><b>{blank(current.birth_date) || current.birth_year || "—"}</b></div>
                     <div><span className="meta-label">Consigned by</span><b>{blank(current.consignor) || "—"}</b></div>
                     <div><span className="meta-label">Hip</span><b>{current.hip || "—"}</b></div>
-                    <div><span className="meta-label">Expected market</span><b>—</b></div>
+                    <div data-meta="expected-market">
+                      <span className="meta-label">Expected Market Value</span>
+                      <b className="money">{ready ? expectedMarketLabel(detail, current) : "…"}</b>
+                    </div>
                     {mode === "past" ? (
                       <div><span className="meta-label">Auction price</span><b className="money">{priceLabel(current)}</b></div>
                     ) : null}
@@ -524,7 +636,7 @@ export default function SalesPage() {
                       <tbody>
                         {detail.similar_crosses.map((row, index) => (
                           <tr key={`${row.name}-${row.class}-${index}`}>
-                            <td><Link href={horseHref(row.name)}>{row.name}</Link></td>
+                            <td><Link href={hrefFor(row.name)}>{row.name}</Link></td>
                             <td>{row.class || "—"}</td>
                             <td>{row.similarity != null ? `${row.similarity}%` : "—"}</td>
                           </tr>
@@ -556,7 +668,7 @@ export default function SalesPage() {
                           return (
                             <Fragment key={key}>
                               <tr className="auction-row" role="button" tabIndex={0} onClick={() => setOpenAuction(open ? "" : key)}>
-                                <td><Link href={horseHref(row.name)} onClick={(e) => e.stopPropagation()}>{row.name}</Link></td>
+                                <td><Link href={hrefFor(row.name)} onClick={(e) => e.stopPropagation()}>{row.name}</Link></td>
                                 <td>{row.similarity != null ? `${row.similarity}%` : "—"}</td>
                                 <td>{row.sale}{row.year ? ` ${row.year}` : ""}</td>
                                 <td className="money">{priceLabel(row)}</td>
@@ -664,5 +776,13 @@ export default function SalesPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function SalesPageSuspense() {
+  return (
+    <Suspense fallback={<p className="empty">Loading sales…</p>}>
+      <SalesPage />
+    </Suspense>
   );
 }

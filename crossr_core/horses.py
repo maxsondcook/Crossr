@@ -2,6 +2,7 @@
 import csv
 import datetime
 import glob
+import json
 import os
 import re
 
@@ -107,21 +108,60 @@ def _fee_num(raw):
         return 0
 
 
+def _progeny_earnings_lookup():
+    """Map cleaned horse name -> career earnings from placeholder stallion race records + GSW purses."""
+    earn = {}
+    try:
+        import placeholder_store
+
+        for row in placeholder_store.load_table("stallion_stats"):
+            name = main.clean_horse_name(row.get("stallion_name") or "")
+            if not name:
+                continue
+            total = 0
+            record = row.get("race_record") or ""
+            try:
+                parsed = json.loads(record) if isinstance(record, str) and record.strip().startswith("{") else record
+            except Exception:
+                parsed = {}
+            if isinstance(parsed, dict):
+                for stats in parsed.values():
+                    if not isinstance(stats, dict):
+                        continue
+                    amount = _intish(stats.get("Earnings"))
+                    if amount:
+                        total += amount
+            if total:
+                earn[name] = max(earn.get(name, 0), total)
+        for row in placeholder_store.load_table("graded_stakes_winners"):
+            name = main.clean_horse_name(row.get("horse_name") or "")
+            purse = _intish(row.get("purse"))
+            if name and purse:
+                earn[name] = earn.get(name, 0) + purse
+    except Exception:
+        pass
+    return earn
+
+
 def top_progeny_for_sire(sire_name, limit=12):
     payload = hypomating_engine.top_crosses_payload(main.PEDIGREE_DATABASE, sire_name, limit=40)
+    earn_lookup = _progeny_earnings_lookup()
     rows = []
     for cross in payload.get("crosses", []):
         for w in cross.get("winners", []):
+            name = w["name"]
+            earnings = earn_lookup.get(main.clean_horse_name(name)) or 0
             rows.append({
-                "name": w["name"],
+                "name": name,
                 "sex": "",
                 "broodmare_sire": cross["broodmare_sire"],
                 "class": w["status"],
                 "dam": w.get("dam"),
+                "earnings": earnings or None,
+                "earnings_display": f"${earnings:,}" if earnings else None,
             })
-            if len(rows) >= limit:
-                return rows
-    return rows
+    rows.sort(key=lambda row: (row.get("earnings") or 0), reverse=True)
+    return rows[:limit]
 
 
 def parent_names(search_name):
@@ -442,6 +482,38 @@ def catalog_pedigree(name=None, year=None, sire=None, dam=None, damsire=None):
     return resolve_pedigree_tree(name=lookup or label, sire=sire, dam=dam, damsire=damsire)
 
 
+def _fee_amount(raw):
+    if isinstance(raw, (int, float)) and raw > 0:
+        return int(raw)
+    digits = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    try:
+        return int(digits) if digits else 0
+    except ValueError:
+        return 0
+
+
+def expected_market_value(sire_name=None, profiles=None, sire_profile=None):
+    """Placeholder band: 2×–6× the sire's current stud fee."""
+    profile = sire_profile if sire_profile is not None else _profile_for(sire_name, profiles or {})
+    fee = _fee_amount((profile or {}).get("Stud Fee"))
+    if fee > 0:
+        low, high = fee * 2, fee * 6
+        return {
+            "sire_stud_fee": fee,
+            "low": low,
+            "high": high,
+            "label": f"${low:,} – ${high:,}",
+            "rule": "2×–6× sire stud fee",
+        }
+    return {
+        "sire_stud_fee": None,
+        "low": None,
+        "high": None,
+        "label": "2×–6× sire stud fee (fee unknown)",
+        "rule": "2×–6× sire stud fee",
+    }
+
+
 def sale_workspace(name, sire=None, dam=None, year=None, sex=None, color=None, foaled=None, sold_as=None, covering_sire=None, damsire=None, profiles=None):
     """Pedigree, female family, similar crosses for one sale horse. Physical stays blank."""
     profiles = profiles or {}
@@ -463,6 +535,7 @@ def sale_workspace(name, sire=None, dam=None, year=None, sex=None, color=None, f
         "similar_crosses": crosses,
         "sire_class": _sire_class(sire, sire_profile),
         "dam_class": family[0].get("status") if family else None,
+        "expected_market": expected_market_value(sire, profiles=profiles, sire_profile=sire_profile),
         # Sales Physical panel is intentionally a blank placeholder.
         "physical": None,
     }
@@ -1073,30 +1146,63 @@ def stallion_ranking_history(stallion_name, entered_stud=None):
     return {"lists": lists, "rows": rows}
 
 
-def broodmare_sire_history(stallion_name):
-    """Yearly BMS rank plus average sold yearling price for this damsire."""
+def _broodmare_ranking_rows(stallion_name):
+    """Year/rank/earnings/runners from Leading Broodmare Sires CSVs + placeholder stats."""
     key = main.clean_horse_name(stallion_name)
-    ranks = load_broodmare_ranks().get(key, {})
-    sales = {}
+    by_year = {}
+    pattern = os.path.join(ROOT, "stallion_rankings_data", "*", "*Leading Broodmare Sires.csv")
+    for path in sorted(glob.glob(pattern)):
+        year_match = re.search(r"(?:19|20)\d{2}", os.path.basename(os.path.dirname(path)))
+        if not year_match:
+            continue
+        year = int(year_match.group(0))
+        try:
+            with open(path, encoding="utf-8-sig", errors="ignore", newline="") as handle:
+                for row in csv.DictReader(handle):
+                    raw_name = (row.get("Stallion") or "").strip()
+                    if not raw_name:
+                        continue
+                    first = raw_name.splitlines()[0].strip()
+                    if main.clean_horse_name(first) != key:
+                        continue
+                    rank = _intish(row.get("#") or row.get("Rank"))
+                    earnings = _csv_earnings(row)
+                    runners = _intish(row.get("Rnrs") or row.get("Runners") or row.get("Dams"))
+                    count_label = "Runners" if (row.get("Rnrs") or row.get("Runners")) else ("Dams" if row.get("Dams") else "Runners")
+                    by_year[year] = {
+                        "year": year,
+                        "rank": rank,
+                        "earnings": earnings,
+                        "count": runners,
+                        "count_label": count_label,
+                    }
+        except Exception:
+            continue
     try:
-        from crossr_core.sales import damsire_yearling_averages
+        import placeholder_store
 
-        sales = damsire_yearling_averages(stallion_name) or {}
+        for entry in placeholder_store.load_broodmare_sire_rows():
+            if placeholder_store.broodmare_clean_horse_name(entry.get("stallion") or "") != key:
+                # also try main cleaner
+                if main.clean_horse_name(entry.get("stallion") or "") != key:
+                    continue
+            year = 2026
+            if year not in by_year:
+                by_year[year] = {
+                    "year": year,
+                    "rank": entry.get("rank"),
+                    "earnings": entry.get("earnings_2026"),
+                    "count": entry.get("rnrs") or entry.get("dams"),
+                    "count_label": "Runners" if entry.get("rnrs") not in (None, "") else "Dams",
+                }
     except Exception:
-        sales = {}
-    years = sorted(set(ranks) | set(sales), reverse=True)
-    rows = []
-    for year in years:
-        sold = sales.get(year) or {}
-        rows.append(
-            {
-                "year": year,
-                "rank": ranks.get(year),
-                "avg_yearling": sold.get("avg_price"),
-                "n_yearlings": sold.get("n"),
-            }
-        )
-    return rows
+        pass
+    return [by_year[y] for y in sorted(by_year, reverse=True)]
+
+
+def broodmare_sire_history(stallion_name):
+    """Yearly BMS rank, earnings, and runners/dams count from broodmare rankings data."""
+    return _broodmare_ranking_rows(stallion_name)
 
 
 def stud_book_history(stallion_name, entered_stud=None):

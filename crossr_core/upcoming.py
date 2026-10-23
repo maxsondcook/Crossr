@@ -74,16 +74,91 @@ def _catalog_entry(stem, path, source):
     }
 
 
-def _display_name(name, sire, dam, hip=""):
-    """Yearling placeholders like 2025-RAVER become Sire x Dam."""
+def _yy_suffix(year):
+    digits = _year(year)
+    if not digits or len(digits) < 2:
+        return ""
+    return f" '{digits[-2:]}"
+
+
+def _display_name(name, sire, dam, hip="", year=""):
+    """Yearling placeholders like 2025-RAVER become Sire x Dam '25."""
     label = _blank(name)
+    suffix = _yy_suffix(year)
     if not label or _PLACEHOLDER_NAME.match(label):
         if sire or dam:
-            return f"{sire} x {dam}".strip(" x")
+            base = f"{sire} x {dam}".strip(" x")
+            return f"{base}{suffix}" if base else (f"Hip {hip}" if hip else "Unnamed")
         return f"Hip {hip}" if hip else "Unnamed"
-    if re.search(r"\s+x\s+", label, re.I) and re.search(r"'\d{2}\s*$", label):
-        return re.sub(r"\s*'\d{2}\s*$", "", label).strip()
+    if re.search(r"\s+x\s+", label, re.I):
+        base = re.sub(r"\s*'\d{2}\s*$", "", label).strip()
+        return f"{base}{suffix}" if suffix else base
     return label
+
+
+def _sex_word(sex):
+    letter = _blank(sex)[:1].upper()
+    return {
+        "C": "Colt",
+        "F": "Filly",
+        "M": "Mare",
+        "H": "Horse",
+        "G": "Gelding",
+        "R": "Ridgling",
+        "W": "Weanling",
+    }.get(letter, _blank(sex))
+
+
+def _color_word(color):
+    raw = _blank(color)
+    if not raw:
+        return ""
+    key = re.sub(r"\s+", " ", raw.upper().replace(".", "")).strip()
+    key = key.replace("DKB/", "DK B/").replace("DKB ", "DK B ")
+    mapping = {
+        "B": "Bay",
+        "BAY": "Bay",
+        "CH": "Chestnut",
+        "CHESTNUT": "Chestnut",
+        "DK B/BR": "Dark Bay or Brown",
+        "DK B / BR": "Dark Bay or Brown",
+        "DK B BR": "Dark Bay or Brown",
+        "DKB/BR": "Dark Bay or Brown",
+        "DARK BAY OR BROWN": "Dark Bay or Brown",
+        "GR/RO": "Gray/Roan",
+        "GR / RO": "Gray/Roan",
+        "G/R": "Gray/Roan",
+        "GRAY/ROAN": "Gray/Roan",
+        "GR": "Gray",
+        "GRAY": "Gray",
+        "GREY": "Gray",
+        "RO": "Roan",
+        "ROAN": "Roan",
+        "BLK": "Black",
+        "BLACK": "Black",
+        "WH": "White",
+        "WHITE": "White",
+    }
+    if key in mapping:
+        return mapping[key]
+    # Tolerate "Dk B/Br" style with mixed spacing.
+    compact = key.replace(" ", "")
+    compact_map = {
+        "DKB/BR": "Dark Bay or Brown",
+        "GR/RO": "Gray/Roan",
+    }
+    if compact in compact_map:
+        return compact_map[compact]
+    return raw
+
+
+def _birth_date(raw):
+    text = _blank(raw)
+    if not text:
+        return ""
+    if re.search(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", text):
+        return text
+    return _year(text)
 
 
 def _path_for(catalog_id):
@@ -140,21 +215,27 @@ def _lot_from_csv(row):
     sire = _blank(_col(row, "SIRE"))
     dam = _blank(_col(row, "DAM"))
     hip = _blank(_col(row, "HIP", "HIP NUMBER", "LOT"))
-    display = _display_name(raw_name, sire, dam, hip)
+    yob_raw = _blank(_col(row, "YEAR OF BIRTH", "YOB", "DOB"))
+    birth_year = _year(yob_raw)
+    color_raw = _blank(_col(row, "COLOR", "COLOUR"))
+    display = _display_name(raw_name, sire, dam, hip, year=birth_year or yob_raw)
     return {
         "hip": hip,
         "name": display,
         "raw_name": raw_name,
         "sex": sex,
         "sex_letter": sex[:1].upper() if sex else "",
+        "sex_label": _sex_word(sex),
         "sire": sire,
         "dam": dam,
         "damsire": _blank(_col(row, "SIRE OF DAM", "BMS", "DAMSIRE", "BROODMARE SIRE", "DAM SIRE")),
-        "birth_year": _year(_col(row, "YEAR OF BIRTH", "YOB", "DOB")),
+        "birth_year": birth_year,
+        "birth_date": _birth_date(yob_raw),
         "foaled": _blank(_col(row, "FOALED", "STATE")),
         "sold_as": _sold_as(row),
         "covering_sire": _blank(_col(row, "COVERING SIRE")),
-        "color": _blank(_col(row, "COLOR", "COLOUR")),
+        "color": color_raw,
+        "color_label": _color_word(color_raw),
         "consignor": _blank(_col(row, "CONSIGNOR", "CONSIGNED BY", "PROPERTY LINE")),
         "notes": _blank(_col(row, "NOTES")),
         "starred": starred in {"*", "1", "true", "yes"},

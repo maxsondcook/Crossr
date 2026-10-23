@@ -14,23 +14,25 @@ function flatten(node, idx, depth, map) {
   flatten(node.dam, idx * 2 + 2, depth + 1, map);
 }
 
-function Cell({ n, className, style }) {
+function Cell({ n, className, style, hrefFor }) {
+  const href = n?.name ? (hrefFor ? hrefFor(n.name) : horseHref(n.name)) : "";
   return (
     <div className={`cat-cell ${className || ""}`} style={style}>
       {n?.name ? (
-        <>
-          <Link href={horseHref(n.name)}>{n.name}</Link>
+        <div className="cat-cell-inner">
+          <Link className="cat-name" href={href} title={n.name}>
+            {n.name}
+          </Link>
           {n.year ? <span className="yr">{n.year}</span> : null}
-          <span className="leaders" aria-hidden="true" />
-        </>
+        </div>
       ) : (
-        <span className="leaders empty-lead" aria-hidden="true" />
+        <div className="cat-cell-inner empty" aria-hidden="true" />
       )}
     </div>
   );
 }
 
-export default function PedigreeChart({ tree, showSubject = true }) {
+export default function PedigreeChart({ tree, showSubject = true, hrefFor = null }) {
   const map = useMemo(() => {
     const m = {};
     flatten(tree, 0, 0, m);
@@ -52,21 +54,24 @@ export default function PedigreeChart({ tree, showSubject = true }) {
         <Cell
           key={idx}
           n={map[idx]}
+          hrefFor={hrefFor}
           className={`cat-g${gen} ${side}`}
           style={{
             gridColumn: col,
             gridRow: span === 1 ? i + 1 : `${i * span + 1} / span ${span}`,
           }}
-        />
+        />,
       );
     }
   }
+
+  const subjectHref = tree.name ? (hrefFor ? hrefFor(tree.name) : horseHref(tree.name)) : "";
 
   return (
     <div className={`catalog-ped gen-5${showSubject ? "" : " no-subject"}`}>
       {showSubject ? (
         <div className="cat-subject">
-          <Link href={horseHref(tree.name)}>{tree.name}</Link>
+          <Link className="cat-name" href={subjectHref} title={tree.name}>{tree.name}</Link>
           {tree.year ? <span className="yr">{tree.year}</span> : null}
         </div>
       ) : null}
