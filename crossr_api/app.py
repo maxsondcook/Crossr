@@ -218,8 +218,11 @@ def stallions(
     stud_year_max: Optional[int] = None,
     crop: str = "",
 ):
+    """Cheap list: 2026 mares-bred roster. Pedigree is loaded only on horse profile select."""
+    started = time.perf_counter()
+    book = profiles()
     rows = horse_svc.list_stallions(
-        profiles=profiles(),
+        profiles=book,
         q=q,
         sort=sort,
         farm=farm,
@@ -229,7 +232,13 @@ def stallions(
         stud_year_max=stud_year_max,
         crop=crop,
     )
-    return {"stallions": rows, "total": len(rows)}
+    ms = round((time.perf_counter() - started) * 1000, 1)
+    return {
+        "stallions": rows,
+        "total": len(rows),
+        "source": "mares_bred_2026",
+        "ms": ms,
+    }
 
 
 @app.get("/api/stallions/farms")

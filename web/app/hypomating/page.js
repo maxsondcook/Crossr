@@ -235,48 +235,62 @@ function HypomatingInner() {
                   <p className="empty">No stallions in this fee band. Check lineage alternatives below.</p>
                 ) : null}
                 {(result.suggestions || []).map((s) => (
-                  <div key={s.name} className="suggest-card">
-                    <div>
-                      <strong>{s.name}</strong>
-                      <div className="parents">Rank #{s.rank} · {s.stud_fee}</div>
-                      {openLogic === s.name ? (
-                        <div className="logic">
-                          {(s.cross_meta || []).map((m) => <p key={m.foal_name}>{m.races_sentence}<br />{m.bio_sentence}</p>)}
-                          {Object.entries(s.reasons_by_tier || {}).flatMap(([tier, msgs]) =>
-                            msgs.map((msg) => <p key={msg}>{tier}: {msg}</p>)
-                          )}
-                        </div>
-                      ) : null}
+                  <div key={s.name} className="suggest-card suggest-card-stack">
+                    <div className="suggest-card-main">
+                      <div>
+                        <strong>{s.name}</strong>
+                        <div className="parents">Rank #{s.rank} · {s.stud_fee}</div>
+                        {openLogic === s.name ? (
+                          <div className="logic">
+                            {(s.cross_meta || []).map((m) => <p key={m.foal_name}>{m.races_sentence}<br />{m.bio_sentence}</p>)}
+                            {Object.entries(s.reasons_by_tier || {}).flatMap(([tier, msgs]) =>
+                              msgs.map((msg) => <p key={msg}>{tier}: {msg}</p>)
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="suggest-actions">
+                        <Link
+                          className="ghost suggest-profile"
+                          href={horseHref(s.name)}
+                          onClick={() => {
+                            saveHypomatingSession({
+                              mare, surface, minFee, maxFee, result, lineage, report,
+                            });
+                            recordAppView("/hypomating", "Hypomating");
+                          }}
+                        >
+                          Profile
+                        </Link>
+                        <button className="ghost" onClick={() => setOpenLogic(openLogic === s.name ? null : s.name)}>Logic</button>
+                        <button className="primary" onClick={() => makeReport(s.name)}>Create hypofoal</button>
+                      </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
-                      <Link
-                        className="ghost"
-                        href={horseHref(s.name)}
-                        onClick={() => {
-                          saveHypomatingSession({
-                            mare, surface, minFee, maxFee, result, lineage, report,
-                          });
-                          recordAppView("/hypomating", "Hypomating");
-                        }}
-                      >
-                        Profile
-                      </Link>
-                      <button className="ghost" onClick={() => setOpenLogic(openLogic === s.name ? null : s.name)}>Logic</button>
-                      {s.has_lineage ? <button className="ghost" onClick={() => loadLineage(s.name)}>Lineage</button> : null}
-                      <button className="primary" onClick={() => makeReport(s.name)}>Create hypofoal</button>
-                    </div>
-                  </div>
-                ))}
-                {(result.lineage_groups || []).map((g) => (
-                  <div key={g.anchor} className="suggest-card">
-                    <div>
-                      <strong>Lineage alternatives of {g.anchor}</strong>
-                      <div className="parents">{g.variant ? "Cross variant" : "Related sires in budget"}</div>
-                    </div>
-                    <button className="ghost" onClick={() => loadLineage(g.anchor)}>Open</button>
+                    {s.has_lineage ? (
+                      <div className="suggest-alts">
+                        <span className="meta-label">Alternatives</span>
+                        <button className="ghost" type="button" onClick={() => loadLineage(s.name)}>
+                          Lineage options of {s.name}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
+              {(result.lineage_groups || []).length ? (
+                <div className="panel" style={{ marginTop: 12 }}>
+                  <h4>ALTERNATIVES</h4>
+                  {(result.lineage_groups || []).map((g) => (
+                    <div key={g.anchor} className="suggest-card">
+                      <div>
+                        <strong>Lineage alternatives of {g.anchor}</strong>
+                        <div className="parents">{g.variant ? "Cross variant" : "Related sires in budget"}</div>
+                      </div>
+                      <button className="ghost" onClick={() => loadLineage(g.anchor)}>Open</button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               {lineage ? (
                 <div className="panel" style={{ marginTop: 12 }}>
                   <h4>LINEAGE OPTIONS · {lineage.stallion}</h4>

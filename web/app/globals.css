@@ -297,9 +297,15 @@ button, input, select { font: inherit; color: inherit; }
 .warn { background: #2a3348; border-color: var(--line); }
 
 .stallion-list { display: flex; flex-direction: column; gap: 10px; }
+.stallion-list-meta {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 .stallion-card {
   display: grid;
-  grid-template-columns: 72px 1.4fr 1.3fr auto;
+  grid-template-columns: 56px 1.4fr 1.3fr auto;
   gap: 12px;
   align-items: center;
   background: var(--panel);
@@ -309,14 +315,22 @@ button, input, select { font: inherit; color: inherit; }
   transition: border-color 0.15s, transform 0.15s;
 }
 .stallion-card:hover { border-color: #3b5073; transform: translateY(-1px); }
-.stallion-card img {
-  width: 72px;
+.stallion-avatar {
+  width: 56px;
   height: 56px;
-  object-fit: contain;
-  object-position: center;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 0.02em;
+  color: #f2f5fa;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 .stallion-card h3 { margin: 0; font-size: 22px; font-weight: 700; }
 .stallion-card .parents { color: var(--muted); font-style: italic; margin-top: 2px; font-size: 13px; }
+.stallion-mares { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .meta-label { color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
 .fee { color: var(--green); font-weight: 800; }
 .badge {
@@ -358,7 +372,7 @@ button, input, select { font: inherit; color: inherit; }
 
 .dash {
   display: grid;
-  grid-template-columns: minmax(520px, 1.7fr) minmax(280px, 1fr) minmax(240px, 0.9fr) 48px;
+  grid-template-columns: minmax(560px, 1.85fr) minmax(260px, 1fr) minmax(220px, 0.85fr) 48px;
   gap: 12px;
   align-items: start;
 }
@@ -591,6 +605,39 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   padding: 12px 14px;
   margin-bottom: 8px;
 }
+.suggest-card-stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+.suggest-card-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.suggest-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 132px;
+}
+.suggest-actions .ghost,
+.suggest-actions .primary,
+.suggest-profile {
+  width: 100%;
+  text-align: center;
+  justify-content: center;
+}
+.suggest-alts {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #243049;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.suggest-alts .ghost { width: 100%; text-align: left; }
 .logic { color: var(--muted); font-size: 13px; margin-top: 8px; }
 
 .shell-sales {

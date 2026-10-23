@@ -14,6 +14,9 @@ _FEE_HISTORY = None
 _MARES_HISTORY = None
 _BMS_RANKS = None
 _STALLION_RANK_TABLES = None
+_RANK_BY_CLEAN = None
+_PARENT_BY_KEY = None
+_STALLION_ROSTER = None
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -56,12 +59,134 @@ def _format_ratio(ratio_str):
         return str(ratio_str)
 
 
+def _rank_map():
+    global _RANK_BY_CLEAN
+    if _RANK_BY_CLEAN is None:
+        _RANK_BY_CLEAN = {
+            main.clean_horse_name(name): idx
+            for idx, name in enumerate(hypomating_engine.RAW_RANKING_ORDER, 1)
+        }
+    return _RANK_BY_CLEAN
+
+
 def _stud_rank(name):
-    clean = main.clean_horse_name(name)
-    for idx, r_name in enumerate(hypomating_engine.RAW_RANKING_ORDER, 1):
-        if main.clean_horse_name(r_name) == clean:
-            return idx
-    return None
+    return _rank_map().get(main.clean_horse_name(name))
+
+
+def _parent_lookup():
+    """Sire/dam from placeholder horses.csv — never scans the pedigree DB."""
+    global _PARENT_BY_KEY
+    if _PARENT_BY_KEY is not None:
+        return _PARENT_BY_KEY
+    out = {}
+    path = os.path.join(ROOT, "placeholderdatabase", "horses.csv")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8-sig", errors="ignore") as handle:
+            for row in csv.DictReader(handle):
+                key = main.clean_horse_name(row.get("name") or row.get("name_key") or "")
+                if not key or key in out:
+                    continue
+                sire = (row.get("sire_name") or "").strip() or None
+                dam = (row.get("dam_name") or "").strip() or None
+                if sire:
+                    sire = re.sub(r"\s*\(\d{4}\)", "", sire).strip() or None
+                if dam:
+                    dam = re.sub(r"\s*\(\d{4}\)", "", dam).strip() or None
+                out[key] = (sire, dam)
+    _PARENT_BY_KEY = out
+    return out
+
+
+def _mares_bred_2026_path():
+    pattern = os.path.join(ROOT, "live_foal_statistics", "*2026*Breeding Season*.csv")
+    hits = sorted(glob.glob(pattern))
+    return hits[0] if hits else None
+
+
+def _load_mares_bred_2026():
+    path = _mares_bred_2026_path()
+    if not path:
+        return []
+    rows = []
+    with open(path, encoding="utf-8-sig", errors="ignore") as handle:
+        for row in csv.DictReader(handle):
+            name = (row.get("Stallion") or "").strip()
+            if not name:
+                continue
+            rows.append({
+                "name": name,
+                "key": main.clean_horse_name(name),
+                "mares_bred": _intish(row.get("Mares Bred")),
+                "state": (row.get("State") or "").strip() or None,
+            })
+    return rows
+
+
+def _profile_by_key(profiles):
+    out = {}
+    for name, data in (profiles or {}).items():
+        key = main.clean_horse_name(name)
+        if key and key not in out:
+            out[key] = (name, data)
+    return out
+
+
+def build_stallion_roster(profiles=None):
+    """Cheap list cache: 2026 mares-bred roster + profile/CSV parents. No pedigree scans."""
+    global _STALLION_ROSTER
+    if _STALLION_ROSTER is not None:
+        return _STALLION_ROSTER
+    profiles = profiles if profiles is not None else main.load_master_profiles()
+    by_profile = _profile_by_key(profiles)
+    parents = _parent_lookup()
+    ranks = _rank_map()
+    roster = []
+    for row in _load_mares_bred_2026():
+        key = row["key"]
+        display, data = by_profile.get(key, (row["name"], {}))
+        status = str((data or {}).get("Status", "")).strip().lower()
+        if status == "pensioned":
+            continue
+        fee = (data or {}).get("Stud Fee", 0)
+        fee_n = fee if isinstance(fee, int) else _fee_num(fee)
+        fee_n = int(fee_n or 0)
+        stud_year = (data or {}).get("Stud Duty Year") or 0
+        try:
+            stud_year = int(stud_year)
+        except (TypeError, ValueError):
+            stud_year = 0
+        farm_title = str((data or {}).get("Farm", "")).replace("_", " ").title()
+        if not farm_title and row.get("state"):
+            farm_title = row["state"]
+        sire, dam = parents.get(key, (None, None))
+        crop_l = crop_label(stud_year)
+        rank = ranks.get(key)
+        stallion_meta = {
+            "rank": rank,
+            "crop": crop_l,
+            "major_wins": (data or {}).get("Major Wins", ""),
+        }
+        fee_display = f"${fee_n:,}" if fee_n > 0 else "Private / N/A"
+        roster.append({
+            "name": display or row["name"],
+            "key": key,
+            "sire": sire,
+            "dam": dam,
+            "farm": farm_title,
+            "stud_fee": fee_display,
+            "stud_fee_num": fee_n,
+            "year_foaled": (data or {}).get("Year Born"),
+            "entered_stud": stud_year,
+            "rank": rank if rank is not None else 9999,
+            "crop": crop_l,
+            "badge": stallion_badge(stallion_meta),
+            "surface": (data or {}).get("Surface", "Both"),
+            "mares_bred_2026": row.get("mares_bred"),
+            "state": row.get("state"),
+            "avatar": (display or row["name"] or "?")[:1].upper(),
+        })
+    _STALLION_ROSTER = roster
+    return roster
 
 
 def crop_label(entered_stud, current_year=None):
@@ -542,8 +667,8 @@ def sale_workspace(name, sire=None, dam=None, year=None, sex=None, color=None, f
 
 
 def list_farms(profiles=None):
-    profiles = profiles if profiles is not None else main.load_master_profiles()
-    farms = sorted({str(v.get("Farm", "")).replace("_", " ").title() for v in profiles.values() if v.get("Farm")})
+    roster = build_stallion_roster(profiles)
+    farms = sorted({row["farm"] for row in roster if row.get("farm")})
     return farms
 
 
@@ -558,59 +683,29 @@ def list_stallions(
     stud_year_max=None,
     crop="",
 ):
-    profiles = profiles if profiles is not None else main.load_master_profiles()
+    """2026 mares-bred roster. No pedigree DB scans — parents come from horses.csv."""
+    rows = list(build_stallion_roster(profiles))
     qn = main.clean_horse_name(q) if q else ""
     farm_n = farm.replace("_", " ").strip().lower() if farm else ""
-    rows = []
-    for name, data in profiles.items():
-        if str(data.get("Status", "")).strip().lower() == "pensioned":
+    kept = []
+    for row in rows:
+        if qn and qn not in row["key"] and qn not in main.clean_horse_name(row["name"]):
             continue
-        if qn and qn not in main.clean_horse_name(name):
+        if farm_n and farm_n not in (row.get("farm") or "").lower():
             continue
-        farm_title = str(data.get("Farm", "")).replace("_", " ").title()
-        if farm_n and farm_n not in farm_title.lower():
-            continue
-        fee = data.get("Stud Fee", 0)
-        fee_n = fee if isinstance(fee, int) else _fee_num(fee)
+        fee_n = row.get("stud_fee_num") or 0
         if min_fee is not None and fee_n < int(min_fee):
             continue
         if max_fee is not None and fee_n > int(max_fee):
             continue
-        stud_year = data.get("Stud Duty Year") or 0
-        try:
-            stud_year = int(stud_year)
-        except (TypeError, ValueError):
-            stud_year = 0
+        stud_year = row.get("entered_stud") or 0
         if stud_year_min is not None and stud_year < int(stud_year_min):
             continue
         if stud_year_max is not None and stud_year > int(stud_year_max):
             continue
-        crop_l = crop_label(stud_year)
-        if crop and crop.lower() not in (crop_l or "").lower():
+        if crop and crop.lower() not in (row.get("crop") or "").lower():
             continue
-        rank = _stud_rank(name)
-        sire, dam = parent_names(name)
-        stallion_meta = {
-            "rank": rank,
-            "crop": crop_l,
-            "major_wins": data.get("Major Wins", ""),
-        }
-        fee_display = f"${fee_n:,}" if fee_n > 0 else "Private / N/A"
-        rows.append({
-            "name": name,
-            "key": main.clean_horse_name(name),
-            "sire": sire,
-            "dam": dam,
-            "farm": farm_title,
-            "stud_fee": fee_display,
-            "stud_fee_num": fee_n,
-            "year_foaled": data.get("Year Born"),
-            "entered_stud": stud_year,
-            "rank": rank if rank is not None else 9999,
-            "crop": crop_l,
-            "badge": stallion_badge(stallion_meta),
-            "surface": data.get("Surface", "Both"),
-        })
+        kept.append(row)
     reverse = False
     keyfn = lambda r: (r["rank"], r["name"])
     if sort == "name":
@@ -623,10 +718,13 @@ def list_stallions(
     elif sort == "stud_year":
         keyfn = lambda r: r["entered_stud"] or 0
         reverse = True
-    rows.sort(key=keyfn, reverse=reverse)
+    elif sort == "mares":
+        keyfn = lambda r: r.get("mares_bred_2026") or 0
+        reverse = True
+    kept.sort(key=keyfn, reverse=reverse)
     if sort == "rank":
-        rows.sort(key=lambda r: (r["rank"], r["name"]))
-    return rows
+        kept.sort(key=lambda r: (r["rank"], -(r.get("mares_bred_2026") or 0), r["name"]))
+    return kept
 
 
 def _index_id(clean, year):
