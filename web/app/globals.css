@@ -748,8 +748,34 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   font-weight: 500;
   line-height: 1.3;
 }
-.market-card svg { width: 100%; height: auto; display: block; }
-.market-note { color: var(--muted); font-size: 13px; margin: 6px 0 0; line-height: 1.45; }
+.projected-value { margin: 0; }
+.pv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+.pv-grid.with-sold { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pv-item { min-width: 0; }
+.pv-label {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pv-item b {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+.pv-item[data-pv="sold"] b { color: var(--gold); }
+.pv-note { color: var(--muted); font-size: 13px; margin: 10px 0 0; line-height: 1.45; }
+@media (max-width: 720px) {
+  .pv-grid,
+  .pv-grid.with-sold { grid-template-columns: 1fr; }
+}
 .auction-row { cursor: pointer; }
 .auction-more td { color: var(--muted); }
 .blank-value {

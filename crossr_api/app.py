@@ -422,6 +422,17 @@ def _attach_filter_prices(lots, book, catalog_title=""):
     return lots
 
 
+def _lot_catalog_title(lot, catalog_title=""):
+    """Past lots often only carry sale_title; upcoming uses catalog id/title."""
+    return (
+        (catalog_title or "").strip()
+        or (lot.get("catalog_title") or "").strip()
+        or (lot.get("sale_title") or "").strip()
+        or (lot.get("sale") or "").strip()
+        or ""
+    )
+
+
 def _workspace(lot, book, catalog_title=""):
     ctx = horse_svc.sale_workspace(
         name=lot.get("name") or lot.get("raw_name"),
@@ -435,7 +446,7 @@ def _workspace(lot, book, catalog_title=""):
         covering_sire=lot.get("covering_sire"),
         damsire=lot.get("damsire") or lot.get("sire_of_dam"),
         profiles=book,
-        catalog_title=catalog_title or lot.get("catalog_title") or "",
+        catalog_title=_lot_catalog_title(lot, catalog_title),
     )
     ctx["auction_history"] = sales_svc.auctions_for_horses(ctx.get("similar_crosses") or [])
     return ctx
@@ -460,7 +471,10 @@ def sales_lot_detail(lot_id: int):
     if not payload:
         raise HTTPException(status_code=404, detail="Lot not found")
     lot = payload.get("lot") or {}
-    title = (payload.get("catalog") or {}).get("title") or lot.get("catalog_title") or ""
+    title = (
+        (payload.get("catalog") or {}).get("title")
+        or _lot_catalog_title(lot)
+    )
     payload.update(_workspace(lot, profiles(), catalog_title=title))
     return payload
 

@@ -12,7 +12,7 @@ import {
 } from "../../lib/salesNav";
 import PedigreeChart from "../../components/PedigreeChart";
 import FemaleFamily from "../../components/FemaleFamily";
-import MarketCurve from "../../components/MarketCurve";
+import ProjectedValue from "../../components/ProjectedValue";
 
 function money(n) {
   if (n == null || n === "") return "—";
@@ -766,9 +766,14 @@ function SalesPage() {
                   {jumpError ? <p className="error">{jumpError}</p> : null}
                 </div>
 
-                <div className="panel" data-panel="market-prediction">
-                  <h4>MARKET PREDICTION</h4>
-                  <MarketCurve prediction={ready ? detail?.market_prediction : null} />
+                <div className="panel" data-panel="projected-value">
+                  <h4>PROJECTED VALUE</h4>
+                  <ProjectedValue
+                    valueProjector={ready ? detail?.expected_market?.value_projector : null}
+                    expectedMarket={ready ? detail?.expected_market : null}
+                    lot={ready ? (detail?.lot || current) : current}
+                    showSold={mode === "past"}
+                  />
                 </div>
 
                 <div className="panel">
