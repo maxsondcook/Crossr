@@ -848,9 +848,18 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+.filter-sire-search {
+  width: 100%;
+  margin: 4px 0 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  color: var(--text);
+}
 .filter-sire-list,
 .filter-price-ranges {
-  max-height: 168px;
+  max-height: 200px;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;

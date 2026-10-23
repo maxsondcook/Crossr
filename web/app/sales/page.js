@@ -82,7 +82,7 @@ function saleHeading(title, year) {
   return `${name} ${y}`;
 }
 
-/** Widening price bands for FILTER. Half-open [min, max); last is 250k+. */
+/** Widening lower bands, then $250k steps to $2M. Half-open [min, max); last is 2M+. */
 const PRICE_RANGES = [
   { id: "1-5", min: 1000, max: 5000, label: "$1,000–5k" },
   { id: "5-10", min: 5000, max: 10000, label: "5k–10k" },
@@ -93,7 +93,14 @@ const PRICE_RANGES = [
   { id: "60-100", min: 60000, max: 100000, label: "60k–100k" },
   { id: "100-150", min: 100000, max: 150000, label: "100k–150k" },
   { id: "150-250", min: 150000, max: 250000, label: "150k–250k" },
-  { id: "250+", min: 250000, max: null, label: "250k+" },
+  { id: "250-500", min: 250000, max: 500000, label: "250k–500k" },
+  { id: "500-750", min: 500000, max: 750000, label: "500k–750k" },
+  { id: "750-1000", min: 750000, max: 1000000, label: "750k–1M" },
+  { id: "1000-1250", min: 1000000, max: 1250000, label: "1M–1.25M" },
+  { id: "1250-1500", min: 1250000, max: 1500000, label: "1.25M–1.5M" },
+  { id: "1500-1750", min: 1500000, max: 1750000, label: "1.5M–1.75M" },
+  { id: "1750-2000", min: 1750000, max: 2000000, label: "1.75M–2M" },
+  { id: "2000+", min: 2000000, max: null, label: "2M+" },
 ];
 
 function lotFilterPrice(lot) {
@@ -143,6 +150,7 @@ function SalesPage() {
   const [color, setColor] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [selectedSires, setSelectedSires] = useState([]);
+  const [sireQuery, setSireQuery] = useState("");
   const [priceRanges, setPriceRanges] = useState([]);
   const [height, setHeight] = useState("");
   const [onlyDismissed, setOnlyDismissed] = useState(false);
@@ -224,6 +232,7 @@ function SalesPage() {
 
   useEffect(() => {
     setSelectedSires([]);
+    setSireQuery("");
     setPriceRanges([]);
   }, [catalog?.id, mode]);
 
@@ -287,6 +296,12 @@ function SalesPage() {
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [lots]);
+
+  const visibleSireOptions = useMemo(() => {
+    const q = sireQuery.trim().toLowerCase();
+    if (!q) return sireOptions;
+    return sireOptions.filter((row) => row.name.toLowerCase().includes(q));
+  }, [sireOptions, sireQuery]);
 
   const sexOptions = useMemo(() => {
     const map = new Map();
@@ -890,8 +905,16 @@ function SalesPage() {
                 <p className="filter-count">{filtered.length} / {lots.length} hips</p>
                 <label>
                   Stallion
+                  <input
+                    className="filter-sire-search"
+                    type="search"
+                    value={sireQuery}
+                    onChange={(e) => setSireQuery(e.target.value)}
+                    placeholder="Type a stallion name…"
+                    aria-label="Filter stallion list"
+                  />
                   <div className="filter-sire-list" role="group" aria-label="Stallions in this catalog">
-                    {sireOptions.length ? sireOptions.map((row) => (
+                    {visibleSireOptions.length ? visibleSireOptions.map((row) => (
                       <label key={row.name} className="filter-check">
                         <input
                           type="checkbox"
@@ -902,9 +925,19 @@ function SalesPage() {
                         <em>{row.count}</em>
                       </label>
                     )) : (
-                      <span className="empty" style={{ padding: 8 }}>No sires in catalog</span>
+                      <span className="empty" style={{ padding: 8 }}>
+                        {sireOptions.length ? "No stallions match that name" : "No sires in catalog"}
+                      </span>
                     )}
                   </div>
+                  {selectedSires.length ? (
+                    <p className="filter-note">
+                      {selectedSires.length} selected
+                      {sireQuery.trim() ? ` · showing ${visibleSireOptions.length} of ${sireOptions.length}` : ""}
+                    </p>
+                  ) : sireQuery.trim() ? (
+                    <p className="filter-note">Showing {visibleSireOptions.length} of {sireOptions.length}</p>
+                  ) : null}
                   {selectedSires.length ? (
                     <button className="ghost filter-clear" type="button" onClick={() => setSelectedSires([])}>
                       Clear stallions
