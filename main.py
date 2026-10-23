@@ -807,10 +807,11 @@ if __name__ == "__main__":
         print(" [4] See Stallion Stats")
         print(" [5] Run Hypomating Engine")
         print(" [6] Sales History")
+        print(" [7] Value Projector (breeding value)")
         print(" [E] Exit Application")
         print("=========================================")
         
-        choice = input("Select an option (1-6 or E): ").strip()
+        choice = input("Select an option (1-7 or E): ").strip()
 
         if choice.lower() == 'e':
             print("Exiting application. Goodbye!")
@@ -888,6 +889,11 @@ if __name__ == "__main__":
         elif choice == "6":  
             import sales_history
             sales_history.run_sales_menu()
+
+        elif choice == "7":
+            import ValueProjector
+            importlib.reload(ValueProjector)
+            ValueProjector.run_value_projector_menu()
             
         else:
             if choice:
