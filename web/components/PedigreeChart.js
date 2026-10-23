@@ -16,14 +16,15 @@ function flatten(node, idx, depth, map) {
 
 function Cell({ n, className, style, hrefFor }) {
   const href = n?.name ? (hrefFor ? hrefFor(n.name) : horseHref(n.name)) : "";
+  const year = n?.year != null && n.year !== "" ? String(n.year) : "";
   return (
     <div className={`cat-cell ${className || ""}`} style={style}>
       {n?.name ? (
         <div className="cat-cell-inner">
-          <Link className="cat-name" href={href} title={n.name}>
+          <Link className="cat-name" href={href} title={year ? `${n.name} (${year})` : n.name}>
             {n.name}
           </Link>
-          {n.year ? <span className="yr">{n.year}</span> : null}
+          {year ? <span className="yr">{year}</span> : null}
         </div>
       ) : (
         <div className="cat-cell-inner empty" aria-hidden="true" />
@@ -67,12 +68,20 @@ export default function PedigreeChart({ tree, showSubject = true, hrefFor = null
 
   const subjectHref = tree.name ? (hrefFor ? hrefFor(tree.name) : horseHref(tree.name)) : "";
 
+  const subjectYear = tree.year != null && tree.year !== "" ? String(tree.year) : "";
+
   return (
     <div className={`catalog-ped gen-5${showSubject ? "" : " no-subject"}`}>
       {showSubject ? (
         <div className="cat-subject">
-          <Link className="cat-name" href={subjectHref} title={tree.name}>{tree.name}</Link>
-          {tree.year ? <span className="yr">{tree.year}</span> : null}
+          <Link
+            className="cat-name"
+            href={subjectHref}
+            title={subjectYear ? `${tree.name} (${subjectYear})` : tree.name}
+          >
+            {tree.name}
+          </Link>
+          {subjectYear ? <span className="yr">{subjectYear}</span> : null}
         </div>
       ) : null}
       {cells}

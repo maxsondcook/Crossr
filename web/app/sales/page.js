@@ -33,11 +33,6 @@ function priceLabel(lot) {
   return "—";
 }
 
-function shortClass(value) {
-  if (!value) return "";
-  return String(value).split(/\s+(?=G[1-3]\b)/)[0].trim();
-}
-
 function navId(mode, lot) {
   if (!lot) return "";
   return mode === "past" ? String(lot.id) : String(lot.hip ?? "");
@@ -75,6 +70,16 @@ function expectedMarketLabel(detail, lot) {
   const band = detail?.expected_market;
   if (band?.label) return band.label;
   return "2×–6× sire stud fee (fee unknown)";
+}
+
+/** Show sale title once; skip appending year when already in the title. */
+function saleHeading(title, year) {
+  const name = blank(title);
+  const y = year == null || year === "" ? "" : String(year).trim();
+  if (!name) return y;
+  if (!y) return name;
+  if (name.includes(y)) return name;
+  return `${name} ${y}`;
 }
 
 function SalesPage() {
@@ -498,7 +503,7 @@ function SalesPage() {
           >
             →
           </button>
-          <div className="maneuver-title">{catalog.title}{catalog.year ? ` ${catalog.year}` : ""}</div>
+          <div className="maneuver-title">{saleHeading(catalog.title, catalog.year)}</div>
           <span className="maneuver-count">
             {filtered.length ? `${position + 1} / ${filtered.length}` : "0"}
           </span>
@@ -584,17 +589,6 @@ function SalesPage() {
                   <h2>
                     <Link href={hrefFor(current.name)}>{current.name || current.raw_name || "Unnamed"}</Link>
                   </h2>
-                  <p className="byline">
-                    by {current.sire ? <Link href={hrefFor(current.sire)}>{current.sire}</Link> : "Unknown"}
-                    {ready && detail.sire_class ? <span className="sale-class"> [{shortClass(detail.sire_class)}]</span> : null}
-                    {current.dam ? (
-                      <>
-                        {" "}(<Link href={hrefFor(current.dam)}>{current.dam}</Link>
-                        {ready && detail.dam_class ? <span className="sale-class"> [{detail.dam_class}]</span> : null})
-                      </>
-                    ) : null}
-                    {current.birth_year ? ` ${current.birth_year}` : ""}
-                  </p>
                   <div className="sale-meta">
                     <div><span className="meta-label">Color</span><b>{colorWord(current) || "—"}</b></div>
                     <div><span className="meta-label">Sex</span><b>{sexWord(current) || "—"}</b></div>
@@ -670,7 +664,7 @@ function SalesPage() {
                               <tr className="auction-row" role="button" tabIndex={0} onClick={() => setOpenAuction(open ? "" : key)}>
                                 <td><Link href={hrefFor(row.name)} onClick={(e) => e.stopPropagation()}>{row.name}</Link></td>
                                 <td>{row.similarity != null ? `${row.similarity}%` : "—"}</td>
-                                <td>{row.sale}{row.year ? ` ${row.year}` : ""}</td>
+                                <td>{saleHeading(row.sale, row.year)}</td>
                                 <td className="money">{priceLabel(row)}</td>
                               </tr>
                               {open ? (

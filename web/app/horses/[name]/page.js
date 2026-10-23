@@ -9,10 +9,9 @@ import PedigreeChart from "../../../components/PedigreeChart";
 import FemaleFamily from "../../../components/FemaleFamily";
 import {
   horseHrefWithReturn,
-  parseSalesReturn,
   rememberSalesVisit,
-  salesHref,
-} from "../../../lib/salesNav";
+  resolveReturnTarget,
+} from "../../../lib/appNav";
 
 function money(n) {
   if (n == null || n === "") return "—";
@@ -113,7 +112,8 @@ function HorsePage() {
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
   const [rankList, setRankList] = useState("leading_sire");
-  const salesReturn = useMemo(() => parseSalesReturn(searchParams), [searchParams]);
+  const returnTarget = useMemo(() => resolveReturnTarget(searchParams), [searchParams]);
+  const salesReturn = returnTarget.sales;
   const hrefFor = useMemo(
     () => (horseName) => (salesReturn ? horseHrefWithReturn(horseName, salesReturn) : horseHref(horseName)),
     [salesReturn],
@@ -136,25 +136,52 @@ function HorsePage() {
       .catch((e) => setError(e.message));
   }, [decoded]);
 
-  function backToSale() {
-    if (!salesReturn) {
+  function goBack() {
+    const href = returnTarget?.href;
+    if (href) {
+      router.push(href);
+      return;
+    }
+    if (typeof window !== "undefined" && window.history.length > 1) {
       router.back();
       return;
     }
-    router.push(salesHref(salesReturn));
+    router.push("/stallions");
   }
 
-  if (error) return <p className="error">{error}</p>;
-  if (!data) return <p className="empty">Loading profile…</p>;
+  const backLabel = returnTarget?.label
+    ? `← Go Back · ${returnTarget.label}`
+    : "← Go Back";
+
+  if (error) {
+    return (
+      <div>
+        <div className="sales-return-bar">
+          <button className="primary" type="button" onClick={goBack}>{backLabel}</button>
+          <button className="ghost" type="button" onClick={goBack}>Close</button>
+        </div>
+        <p className="error">{error}</p>
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div>
+        <div className="sales-return-bar">
+          <button className="primary" type="button" onClick={goBack}>{backLabel}</button>
+          <button className="ghost" type="button" onClick={goBack}>Close</button>
+        </div>
+        <p className="empty">Loading profile…</p>
+      </div>
+    );
+  }
   if (data.ambiguous) {
     return (
       <div className="panel">
-        {salesReturn ? (
-          <div className="sales-return-bar">
-            <button className="ghost" type="button" onClick={backToSale}>← Back to sale</button>
-            <button className="ghost" type="button" onClick={backToSale}>Close</button>
-          </div>
-        ) : null}
+        <div className="sales-return-bar">
+          <button className="primary" type="button" onClick={goBack}>{backLabel}</button>
+          <button className="ghost" type="button" onClick={goBack}>Close</button>
+        </div>
         <h2>Which {data.name}?</h2>
         <p className="sub">Multiple horses named {data.name} are in the pedigree database. Choose a foaling year.</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
@@ -195,17 +222,12 @@ function HorsePage() {
 
   return (
     <div className="dash">
-      {salesReturn ? (
-        <div className="sales-return-bar dash-span">
-          <button className="primary" type="button" onClick={backToSale}>
-            ← Back to sale
-            {salesReturn.catalogTitle || salesReturn.hip
-              ? ` · ${salesReturn.catalogTitle || "Hip"} ${salesReturn.hip ? `#${salesReturn.hip}` : ""}`
-              : ""}
-          </button>
-          <button className="ghost" type="button" onClick={backToSale}>Close</button>
-        </div>
-      ) : null}
+      <div className="sales-return-bar dash-span">
+        <button className="primary" type="button" onClick={goBack}>
+          {backLabel}
+        </button>
+        <button className="ghost" type="button" onClick={goBack}>Close</button>
+      </div>
       <div>
         <div className="panel">
           <h4>SALES CATALOG PEDIGREE</h4>
@@ -426,11 +448,7 @@ function HorsePage() {
         <button onClick={() => { toggleStar(data.name); saveFavorite(data.name); setTick((n) => n + 1); }} title="Star">
           {isStarred(data.name) && tick >= 0 ? "★" : "☆"}
         </button>
-        {salesReturn ? (
-          <button type="button" onClick={backToSale} title="Back to sale">←</button>
-        ) : (
-          <Link href="/stallions" title="Back">↔</Link>
-        )}
+        <button type="button" onClick={goBack} title="Go Back">←</button>
       </div>
     </div>
   );

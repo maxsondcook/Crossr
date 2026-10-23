@@ -4,6 +4,12 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { apiGet, apiPost, horseHref } from "../../lib/api";
+import {
+  clearHypomatingSession,
+  loadHypomatingSession,
+  recordAppView,
+  saveHypomatingSession,
+} from "../../lib/appNav";
 import { saveHypofoal } from "../../lib/barn";
 import PedigreeChart from "../../components/PedigreeChart";
 
@@ -21,6 +27,23 @@ function HypomatingInner() {
   const [lineage, setLineage] = useState(null);
   const [report, setReport] = useState(null);
   const [sireCrosses, setSireCrosses] = useState(null);
+  const [yearChoices, setYearChoices] = useState(null);
+  const [restored, setRestored] = useState(false);
+
+  useEffect(() => {
+    if (sireFromPage || restored) return;
+    const saved = loadHypomatingSession();
+    if (saved?.result) {
+      setMare(saved.mare || "");
+      setSurface(saved.surface || "neither");
+      setMinFee(saved.minFee || "");
+      setMaxFee(saved.maxFee || "");
+      setResult(saved.result);
+      setLineage(saved.lineage || null);
+      setReport(saved.report || null);
+    }
+    setRestored(true);
+  }, [sireFromPage, restored]);
 
   useEffect(() => {
     if (!sireFromPage) {
@@ -45,6 +68,7 @@ function HypomatingInner() {
     setError("");
     setReport(null);
     setSireCrosses(null);
+    setYearChoices(null);
     try {
       const data = await apiPost("/api/hypomating/suggest", {
         mare,
@@ -53,8 +77,14 @@ function HypomatingInner() {
         max_fee: maxFee ? Number(maxFee) : null,
       });
       setResult(data);
+      saveHypomatingSession({ mare, surface, minFee, maxFee, result: data });
     } catch (e) {
-      setError(e.message);
+      if (e.status === 409 && e.detail?.error === "ambiguous_year") {
+        setYearChoices(e.detail);
+        setError("");
+      } else {
+        setError(e.message);
+      }
       setResult(null);
     } finally {
       setLoading(false);
@@ -141,12 +171,42 @@ function HypomatingInner() {
               ))}
             </div>
           </div>
+          {yearChoices ? (
+            <div className="field">
+              <p className="sub">Multiple horses named {yearChoices.name} are in the pedigree database. Which foaling year do you want?</p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {(yearChoices.years || []).map((year) => (
+                  <button
+                    key={year}
+                    type="button"
+                    className="primary"
+                    onClick={() => {
+                      setMare(`${yearChoices.name} (${year})`);
+                      setYearChoices(null);
+                    }}
+                  >
+                    {yearChoices.name} ({year})
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {error ? <p className="error">{error}</p> : null}
           <button className="primary" disabled={loading}>{loading ? "Searching crosses…" : "Find stallions"}</button>
         </form>
       ) : (
         <div>
-          <button className="ghost" onClick={() => setResult(null)}>← New search</button>
+          <button
+            className="ghost"
+            onClick={() => {
+              clearHypomatingSession();
+              setResult(null);
+              setLineage(null);
+              setReport(null);
+            }}
+          >
+            ← New search
+          </button>
           <div className="dash" style={{ marginTop: 12, gridTemplateColumns: "1fr 1fr" }}>
             <div className="panel">
               <h4>BROODMARE · {result.mare}</h4>
@@ -188,8 +248,19 @@ function HypomatingInner() {
                         </div>
                       ) : null}
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <Link className="ghost" href={horseHref(s.name)}>Profile</Link>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
+                      <Link
+                        className="ghost"
+                        href={horseHref(s.name)}
+                        onClick={() => {
+                          saveHypomatingSession({
+                            mare, surface, minFee, maxFee, result, lineage, report,
+                          });
+                          recordAppView("/hypomating", "Hypomating");
+                        }}
+                      >
+                        Profile
+                      </Link>
                       <button className="ghost" onClick={() => setOpenLogic(openLogic === s.name ? null : s.name)}>Logic</button>
                       {s.has_lineage ? <button className="ghost" onClick={() => loadLineage(s.name)}>Lineage</button> : null}
                       <button className="primary" onClick={() => makeReport(s.name)}>Create hypofoal</button>

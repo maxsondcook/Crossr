@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { apiGet, horseHref } from "../lib/api";
+import { recordAppView } from "../lib/appNav";
 import { loadUser, signOutAccount } from "../lib/auth";
+import { useSalesChrome } from "../lib/SalesChrome";
 
 const LINKS = [
   { href: "/stallions", label: "STALLIONS" },
@@ -16,6 +18,7 @@ const LINKS = [
 export default function Nav() {
   const path = usePathname();
   const router = useRouter();
+  const { command } = useSalesChrome();
   const [q, setQ] = useState("");
   const [hits, setHits] = useState([]);
   const [user, setUser] = useState(null);
@@ -42,12 +45,21 @@ export default function Nav() {
 
   return (
     <header className="topbar">
-      <div className="brand-wrap">
-        <Link href="/" className="home-btn" aria-label="Home">
-          <img src="/logo.png" alt="Crossr home" />
-        </Link>
-        <Link href="/" className="brand-name">CROSSR</Link>
-      </div>
+      {command ? (
+        <div className="command-bar">
+          <button className="ghost command-back" type="button" onClick={command.onBack}>
+            ←
+          </button>
+          <div className="command-title">{command.title}</div>
+        </div>
+      ) : (
+        <div className="brand-wrap">
+          <Link href="/" className="home-btn" aria-label="Home">
+            <img src="/logo.png" alt="Crossr home" />
+          </Link>
+          <Link href="/" className="brand-name">CROSSR</Link>
+        </div>
+      )}
       <nav className="nav">
         {LINKS.map((l) => (
           <Link key={l.href} href={l.href} className={path.startsWith(l.href) ? "active" : ""}>
@@ -61,6 +73,15 @@ export default function Nav() {
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && q.trim()) {
+              if (typeof window !== "undefined") {
+                recordAppView(
+                  `${window.location.pathname}${window.location.search}`,
+                  path.startsWith("/sales") ? "Sales"
+                    : path.startsWith("/hypomating") ? "Hypomating"
+                      : path.startsWith("/stallions") ? "Stallions"
+                        : undefined,
+                );
+              }
               router.push(horseHref(q.trim()));
               setHits([]);
             }
@@ -71,9 +92,18 @@ export default function Nav() {
           <div className="nav-hits">
             {hits.map((h) => (
               <Link
-                key={h.key}
-                href={horseHref(h.name)}
+                key={`${h.key}|${h.year || ""}`}
+                href={horseHref(h.year ? `${h.name} (${h.year})` : h.name)}
                 onClick={() => {
+                  if (typeof window !== "undefined") {
+                    recordAppView(
+                      `${window.location.pathname}${window.location.search}`,
+                      path.startsWith("/sales") ? "Sales"
+                        : path.startsWith("/hypomating") ? "Hypomating"
+                          : path.startsWith("/stallions") ? "Stallions"
+                            : undefined,
+                    );
+                  }
                   setQ("");
                   setHits([]);
                 }}
