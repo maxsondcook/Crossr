@@ -624,16 +624,16 @@ def _project_broodmare_sire_filly(bms_name: str, verbose: bool = True) -> dict:
     sales = sales_by_dam_sire(display)
     used_fallback = False
     fallback_from = None
-
+    # Prefer the subject's own BMS sales; only borrow a similar-ISF peer when
+    # that peer has a meaningful auction sample (same bar used for ranges).
     if len(sales) < 5:
-        # Familial bonds / similar ISF peers
-        used_fallback = True
-        peers = similar_isf_peers(display, top_n=8)
+        peers = similar_isf_peers(display, top_n=12)
         for peer_name, _, dist in peers:
             peer_sales = sales_by_dam_sire(peer_name)
-            if len(peer_sales) >= 5:
+            if len(peer_sales) >= FILLY_RANGE_MIN_N:
                 sales = peer_sales
                 fallback_from = peer_name
+                used_fallback = True
                 break
 
     multipliers = []
@@ -667,7 +667,10 @@ def _project_broodmare_sire_filly(bms_name: str, verbose: bool = True) -> dict:
     mean_per_dam = statistics.mean(by_dam.values()) if by_dam else None
 
     projected = None
-    if median_price is not None:
+    if used_fallback and mean_per_dam is not None:
+        # Peer fallback: use observed mean Σ/dam (no full-career scale-up)
+        projected = mean_per_dam
+    elif median_price is not None:
         projected = EXPECTED_LIVE_FOALS * median_price
     elif mean_per_dam is not None:
         projected = mean_per_dam
@@ -858,6 +861,371 @@ def print_bm_sire_timeline() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Catalog enrichment — point estimate or statistically supported range
+# ---------------------------------------------------------------------------
+# Show an IQR / percentile range only when the sample is large enough that a
+# single point would understate dispersion. Otherwise emit a point estimate.
+FILLY_RANGE_MIN_N = 20          # progeny sales for BMS / filly lens
+MARE_RANGE_MIN_N = 5            # progeny sales for a specific mare
+COLT_RANGE_MIN_SIMILAR = 5      # similar stallions at stud
+RANGE_MIN_RELATIVE_SPAN = 0.12  # collapse to point if (high-low)/mid < 12%
+
+_HIP_CACHE: Dict[str, dict] = {}
+
+
+def _percentile(sorted_vals: List[float], p: float) -> float:
+    if not sorted_vals:
+        return 0.0
+    if len(sorted_vals) == 1:
+        return sorted_vals[0]
+    k = (len(sorted_vals) - 1) * p
+    f = math.floor(k)
+    c = math.ceil(k)
+    if f == c:
+        return sorted_vals[int(k)]
+    return sorted_vals[f] * (c - k) + sorted_vals[c] * (k - f)
+
+
+def _fmt_vp_display(low: Optional[float], high: Optional[float], point: Optional[float]) -> str:
+    if point is None and low is None and high is None:
+        return ""
+    if low is not None and high is not None and high > low:
+        mid = (low + high) / 2.0
+        if mid > 0 and (high - low) / mid >= RANGE_MIN_RELATIVE_SPAN:
+            return f"{fmt_money(low)}–{fmt_money(high)}"
+        return fmt_money(mid if point is None else point)
+    if point is not None:
+        return fmt_money(point)
+    if low is not None:
+        return fmt_money(low)
+    return fmt_money(high) if high is not None else ""
+
+
+def _pack_vp_result(
+    *,
+    kind: str,
+    point: Optional[float],
+    low: Optional[float] = None,
+    high: Optional[float] = None,
+    n: int = 0,
+    detail: str = "",
+) -> dict:
+    is_range = (
+        low is not None
+        and high is not None
+        and high > low
+        and point is not None
+        and point > 0
+        and (high - low) / max(point, 1.0) >= RANGE_MIN_RELATIVE_SPAN
+    )
+    if not is_range:
+        low = point
+        high = point
+    display = _fmt_vp_display(low if is_range else None, high if is_range else None, point)
+    return {
+        "kind": kind,
+        "point": point,
+        "low": low,
+        "high": high,
+        "is_range": is_range,
+        "n": n,
+        "display": display,
+        "detail": detail,
+        "VALUE PROJECTOR": display,
+        "VP LOW": "" if low is None else round(low),
+        "VP HIGH": "" if high is None else round(high),
+        "VP POINT": "" if point is None else round(point),
+    }
+
+
+def _empty_vp(kind: str = "") -> dict:
+    return _pack_vp_result(kind=kind, point=None, n=0, detail="insufficient data")
+
+
+def _colt_vp_summary(colt_sire: str) -> dict:
+    raw = project_colt_bv(colt_sire, verbose=False)
+    point = float(raw.get("expected_bv") or 0.0)
+    contribs = raw.get("contributions") or []
+    n = len(contribs)
+    if point <= 0 or n == 0:
+        return _empty_vp("colt")
+
+    low = high = None
+    detail = f"n_similar={n}; SS={raw.get('sire_of_stallions')}"
+
+    if n >= COLT_RANGE_MIN_SIMILAR:
+        sons = [c["contribution"] for c in contribs if c.get("relation") == "son"]
+        all_sum = point
+        sons_sum = sum(sons) if sons else None
+        # Jackknife band: leave-one-out totals (always ≤ full sum)
+        jack = []
+        for i in range(n):
+            jack.append(all_sum - contribs[i]["contribution"])
+        jack_sorted = sorted(jack)
+        # Spread from conservative (leave out top contributor ≈ jack min)
+        # up through full mean; also widen with sons-only when available.
+        candidates_low = [jack_sorted[0], jack_sorted[len(jack_sorted) // 4]]
+        candidates_high = [all_sum]
+        if sons_sum is not None and len(sons) >= 2:
+            candidates_low.append(sons_sum)
+            candidates_high.append(all_sum)
+        low = min(candidates_low)
+        high = max(candidates_high)
+        # Ensure point sits inside the band
+        low = min(low, point)
+        high = max(high, point)
+        detail += "; range=jackknife/sons sensitivity"
+
+    return _pack_vp_result(
+        kind="colt",
+        point=point,
+        low=low,
+        high=high,
+        n=n,
+        detail=detail,
+    )
+
+
+def _filly_bms_vp_summary(bms_name: str) -> dict:
+    raw = project_filly_bv(bms_name, mode="bms", verbose=False)
+    point = raw.get("projected_career_bv")
+    if point is None:
+        point = raw.get("empirical_bv")
+    if point is None:
+        return _empty_vp("filly_bms")
+    point = float(point)
+
+    # Rebuild price list from the same sales source the projector used
+    sales = sales_by_dam_sire(raw.get("fallback_peer") or bms_name)
+    if raw.get("used_similar_isf_fallback") and raw.get("fallback_peer"):
+        sales = sales_by_dam_sire(raw["fallback_peer"])
+    else:
+        sales = sales_by_dam_sire(bms_name)
+        if len(sales) < 5 and raw.get("fallback_peer"):
+            sales = sales_by_dam_sire(raw["fallback_peer"])
+
+    prices = sorted(r["price"] for r in sales if r.get("price"))
+    n = len(prices)
+    used_fallback = bool(raw.get("used_similar_isf_fallback"))
+    detail = f"n_sales={n}"
+    if used_fallback:
+        detail += f"; peer={raw.get('fallback_peer')}"
+
+    low = high = None
+    # Ranges only from direct BMS evidence — peer fallbacks stay a point estimate
+    # so another sire's auction IQR is not pasted onto a thinly documented line.
+    if not used_fallback and n >= FILLY_RANGE_MIN_N:
+        p25 = _percentile(prices, 0.25)
+        p75 = _percentile(prices, 0.75)
+        low = EXPECTED_LIVE_FOALS * p25
+        high = EXPECTED_LIVE_FOALS * p75
+        low = min(low, point)
+        high = max(high, point)
+        detail += "; range=P25–P75 career"
+    elif not used_fallback and n >= 10:
+        p20 = _percentile(prices, 0.20)
+        p80 = _percentile(prices, 0.80)
+        low = EXPECTED_LIVE_FOALS * p20
+        high = EXPECTED_LIVE_FOALS * p80
+        low = min(low, point)
+        high = max(high, point)
+        detail += "; range=P20–P80 career"
+
+    return _pack_vp_result(
+        kind="filly_bms",
+        point=point,
+        low=low,
+        high=high,
+        n=n,
+        detail=detail,
+    )
+
+
+def _mare_vp_summary(mare_name: str, mare_sire: str = "") -> dict:
+    raw = project_filly_bv(mare_name, mode="mare", verbose=False)
+    sales = sales_by_dam(mare_name)
+    n = len(sales)
+    point = raw.get("projected_career_bv")
+    if point is None:
+        point = raw.get("empirical_bv")
+    if (point is None or point == 0) and mare_sire:
+        return _filly_bms_vp_summary(mare_sire)
+
+    if point is None:
+        return _empty_vp("mare")
+    point = float(point)
+
+    low = high = None
+    detail = f"n_progeny_sales={n}"
+    if n >= MARE_RANGE_MIN_N:
+        prices = sorted(r["price"] for r in sales)
+        # Empirical total so far as low; scale unfinished careers with percentiles
+        total = sum(prices)
+        p25 = _percentile(prices, 0.25)
+        p75 = _percentile(prices, 0.75)
+        # Remaining expected foals beyond those already sold
+        remaining = max(EXPECTED_LIVE_FOALS - n, 0.0)
+        low = total + remaining * p25
+        high = total + remaining * p75
+        if remaining <= 0:
+            low = total
+            high = total
+        low = min(low, point) if point else low
+        high = max(high, point) if point else high
+        detail += "; range=realized+remaining P25–P75"
+    elif mare_sire:
+        return _filly_bms_vp_summary(mare_sire)
+
+    return _pack_vp_result(
+        kind="mare",
+        point=point,
+        low=low,
+        high=high,
+        n=n,
+        detail=detail,
+    )
+
+
+def project_hip_value(
+    sex: str,
+    sire: str = "",
+    dam: str = "",
+    horse_name: str = "",
+    sold_as: str = "",
+    covering_sire: str = "",
+    sire_of_dam: str = "",
+) -> dict:
+    """
+    Catalog-row Value Projector entry.
+
+    Colts / colt weanlings  → colt E[BV] by sire
+    Fillies / filly weanlings → filly BMS lens by sire (future broodmare)
+    Mares / broodmares      → mare progeny auctions (fallback to her sire / BMS)
+    """
+    sex_u = (sex or "").strip().upper()
+    sold_u = (sold_as or "").strip().upper()
+    sire = (sire or "").strip()
+    dam = (dam or "").strip()
+    horse_name = (horse_name or "").strip()
+    sire_of_dam = (sire_of_dam or "").strip()
+    covering_sire = (covering_sire or "").strip()
+
+    is_mare = (
+        sex_u in ("M", "MARE")
+        or "BROODMARE" in sold_u
+        or bool(covering_sire)
+    )
+    is_colt = sex_u in ("C", "H", "R", "COLT", "HORSE", "RIDGLING") or (
+        sex_u.startswith("C") and not is_mare
+    )
+    is_filly = sex_u in ("F", "FILLY") or sex_u.startswith("F")
+
+    if is_mare:
+        cache_key = f"mare::{clean_horse_name(horse_name) or clean_horse_name(dam)}"
+        if cache_key not in _HIP_CACHE:
+            mare_id = horse_name or dam
+            mare_sire = sire if horse_name else (sire_of_dam or sire)
+            # Broodmare rows: SIRE is the mare's sire; DAM is her dam
+            if horse_name:
+                mare_sire = sire or sire_of_dam
+            _HIP_CACHE[cache_key] = _mare_vp_summary(mare_id, mare_sire=mare_sire)
+        return _HIP_CACHE[cache_key]
+
+    if is_colt:
+        cache_key = f"colt::{clean_horse_name(sire)}"
+        if cache_key not in _HIP_CACHE:
+            _HIP_CACHE[cache_key] = _colt_vp_summary(sire) if sire else _empty_vp("colt")
+        return _HIP_CACHE[cache_key]
+
+    if sex_u in ("G", "GELDING") or sex_u.startswith("G"):
+        return _empty_vp("gelding")
+
+    if is_filly:
+        # Filly yearling/weanling: future broodmare lens via her sire (BMS of her foals)
+        cache_key = f"filly::{clean_horse_name(sire)}"
+        if cache_key not in _HIP_CACHE:
+            _HIP_CACHE[cache_key] = _filly_bms_vp_summary(sire) if sire else _empty_vp("filly_bms")
+        return _HIP_CACHE[cache_key]
+
+    # Unknown sex — try colt path by sire, else filly
+    if sire:
+        cache_key = f"colt::{clean_horse_name(sire)}"
+        if cache_key not in _HIP_CACHE:
+            _HIP_CACHE[cache_key] = _colt_vp_summary(sire)
+        return _HIP_CACHE[cache_key]
+    return _empty_vp()
+
+
+def enrich_sales_dataframe(df, progress_every: int = 500):
+    """
+    Add VALUE PROJECTOR / VP LOW / VP HIGH / VP POINT columns to a catalog DataFrame.
+    Mutates and returns df.
+    """
+    import pandas as pd  # local import — matches sale_analyzer dependency style
+
+    if df is None or len(df) == 0:
+        return df
+
+    for col in ("VALUE PROJECTOR", "VP LOW", "VP HIGH", "VP POINT"):
+        if col not in df.columns:
+            df[col] = ""
+
+    total = len(df)
+    for i, (idx, row) in enumerate(df.iterrows()):
+        vp = project_hip_value(
+            sex=str(row.get("SEX", "") or ""),
+            sire=str(row.get("SIRE", "") or ""),
+            dam=str(row.get("DAM", "") or ""),
+            horse_name=str(row.get("HORSE NAME", "") or ""),
+            sold_as=str(row.get("SOLD AS", "") or ""),
+            covering_sire=str(row.get("COVERING SIRE", "") or ""),
+            sire_of_dam=str(row.get("SIRE OF DAM", "") or ""),
+        )
+        def _as_cell(v):
+            if v is None or v == "":
+                return ""
+            return str(v)
+
+        df.at[idx, "VALUE PROJECTOR"] = _as_cell(vp.get("VALUE PROJECTOR", ""))
+        df.at[idx, "VP LOW"] = _as_cell(vp.get("VP LOW", ""))
+        df.at[idx, "VP HIGH"] = _as_cell(vp.get("VP HIGH", ""))
+        df.at[idx, "VP POINT"] = _as_cell(vp.get("VP POINT", ""))
+        if progress_every and (i + 1) % progress_every == 0:
+            print(f"  ValueProjector: {i + 1:,}/{total:,} hips…")
+
+    return df
+
+
+def enrich_catalog_csv(csv_path: str, inplace: bool = True) -> str:
+    """Load a catalog CSV, attach Value Projector columns, save, return path."""
+    import pandas as pd
+
+    path = Path(csv_path)
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    for col in ("VALUE PROJECTOR", "VP LOW", "VP HIGH", "VP POINT"):
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].astype(str)
+    print(f"ValueProjector enriching {path.name} ({len(df):,} rows)…")
+    enrich_sales_dataframe(df)
+    out = path if inplace else path.with_name(path.stem + "_vp" + path.suffix)
+    df.to_csv(out, index=False)
+    print(f"  → wrote {out}")
+    return str(out)
+
+
+def enrich_all_analyzed_sales(analyzed_dir: str = "Analyzed Sales") -> List[str]:
+    """Enrich every analyzed_*.csv catalog with Value Projector columns."""
+    root = Path(analyzed_dir)
+    written = []
+    if not root.exists():
+        return written
+    for fp in sorted(root.glob("analyzed_*.csv")):
+        written.append(enrich_catalog_csv(str(fp), inplace=True))
+    return written
+
+
+# ---------------------------------------------------------------------------
 # Interactive menu
 # ---------------------------------------------------------------------------
 def run_value_projector_menu() -> None:
@@ -869,6 +1237,7 @@ def run_value_projector_menu() -> None:
         print(" [2] Project FILLY / MARE breeding value")
         print(" [3] Project race earnings (stallion)")
         print(" [4] Broodmare-sire timeline")
+        print(" [5] Enrich all Analyzed Sales catalogs")
         print(" [B] Back / Exit")
         print("=========================================")
         choice = input("Select an option: ").strip().lower()
@@ -900,6 +1269,10 @@ def run_value_projector_menu() -> None:
 
         elif choice == "4":
             print_bm_sire_timeline()
+
+        elif choice == "5":
+            paths = enrich_all_analyzed_sales()
+            print(f"Enriched {len(paths)} catalog(s).")
 
         else:
             print("Invalid selection.")
