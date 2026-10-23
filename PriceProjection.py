@@ -23,6 +23,24 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import fee_and_standing_location as fee_db
 
 SEARCH_DIRS = [Path("sales_data"), Path(".")]
+ROOT = Path(__file__).resolve().parent
+FEE_BAND_CACHE_PATH = ROOT / "Analyzed Sales" / "expected_market_fee_bands.json"
+
+# Stud-fee bands for empirical Expected Market Value (USD, half-open [lo, hi)).
+FEE_BANDS: List[Tuple[int, Optional[int], str]] = [
+    (0, 5_000, "under $5k"),
+    (5_000, 10_000, "$5k–10k"),
+    (10_000, 15_000, "$10k–15k"),
+    (15_000, 25_000, "$15k–25k"),
+    (25_000, 40_000, "$25k–40k"),
+    (40_000, 60_000, "$40k–60k"),
+    (60_000, 100_000, "$60k–100k"),
+    (100_000, 150_000, "$100k–150k"),
+    (150_000, 250_000, "$150k–250k"),
+    (250_000, 500_000, "$250k–500k"),
+    (500_000, None, "$500k+"),
+]
+MIN_BAND_N = 25
 
 
 def safe_str(val: Any) -> str:
@@ -252,11 +270,17 @@ def attach_stud_fees(
     scrape_missing: bool = True,
     max_scrapes: Optional[int] = None,
     progress_every: int = 25,
+    fee_year_field: str = "covering_year",
+    allow_nearest_prior: bool = False,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Attach covering-year stud fee to each lot. Scrapes Racing Post when needed.
+    Attach stud fee to each lot for ``fee_year_field`` (covering_year or sale_year).
+
+    BloodHorse CSV + JSON are consulted first (no network). Scrapes Racing Post
+    only when ``scrape_missing`` is True and the year is still unknown.
     """
     db = fee_db.load_fee_database()
+    fee_db.load_csv_fee_history()
     enriched: List[Dict[str, Any]] = []
     stats = {
         "lots": len(lots),
@@ -265,21 +289,26 @@ def attach_stud_fees(
         "scrapes_ok": 0,
         "scrapes_fail": 0,
         "cache_hits": 0,
+        "fee_year_field": fee_year_field,
     }
 
     # Deduplicate scrape attempts by normalized sire
     scrape_budget = max_scrapes if max_scrapes is not None else 10**9
     failed_sires = set()
 
-    # Group unique (sire, covering_year) first for efficiency
     needed = {}
     for lot in lots:
-        key = (fee_db._norm_name(lot["sire"]), int(lot["covering_year"]))
+        year_val = lot.get(fee_year_field) or lot.get("covering_year")
+        if year_val is None:
+            continue
+        key = (fee_db._norm_name(lot["sire"]), int(year_val))
         needed.setdefault(key, lot["sire"])
 
     fee_cache: Dict[Tuple[str, int], Optional[int]] = {}
     for (norm, year), display_name in sorted(needed.items(), key=lambda x: (x[0][0], x[0][1])):
-        cached = fee_db.get_fee_for_year(display_name, year, db)
+        cached = fee_db.get_fee_for_year(
+            display_name, year, db, allow_nearest_prior=allow_nearest_prior
+        )
         if cached is not None:
             fee_cache[(norm, year)] = cached
             stats["cache_hits"] += 1
@@ -298,7 +327,10 @@ def attach_stud_fees(
         elif note not in ("cache", "missing"):
             stats["scrapes_fail"] += 1
             failed_sires.add(norm)
-        fee_cache[(norm, year)] = fee
+        # Re-resolve so CSV / plausibility filters still apply after scrape.
+        fee_cache[(norm, year)] = fee_db.get_fee_for_year(
+            display_name, year, db, allow_nearest_prior=allow_nearest_prior
+        ) or fee
 
         if progress_every and (stats["scrapes_ok"] + stats["scrapes_fail"]) % progress_every == 0:
             print(
@@ -308,10 +340,11 @@ def attach_stud_fees(
 
     for lot in lots:
         norm = fee_db._norm_name(lot["sire"])
-        year = int(lot["covering_year"])
-        fee = fee_cache.get((norm, year))
+        year_val = lot.get(fee_year_field) or lot.get("covering_year")
+        fee = fee_cache.get((norm, int(year_val))) if year_val is not None else None
         row = dict(lot)
         row["stud_fee"] = fee
+        row["fee_year"] = int(year_val) if year_val is not None else None
         row["price_to_fee"] = (row["price"] / fee) if fee and fee > 0 else None
         enriched.append(row)
         if fee:
@@ -320,6 +353,22 @@ def attach_stud_fees(
             stats["missing_fee"] += 1
 
     return enriched, stats
+
+
+def attach_sale_year_stud_fees(
+    lots: List[Dict[str, Any]],
+    *,
+    scrape_missing: bool = False,
+    max_scrapes: Optional[int] = 0,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Attach sire stud fee as of the sale year (exact or nearest prior)."""
+    return attach_stud_fees(
+        lots,
+        scrape_missing=scrape_missing,
+        max_scrapes=max_scrapes,
+        fee_year_field="sale_year",
+        allow_nearest_prior=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -410,6 +459,242 @@ def project_price(
     if block["log_slope"] is not None and block["log_intercept"] is not None and fee > 0:
         out["proj_loglog"] = math.exp(block["log_intercept"] + block["log_slope"] * math.log(fee))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Empirical Expected Market Value (fee-at-sale bands → hammer percentiles)
+# ---------------------------------------------------------------------------
+
+def fee_band_for(fee: float) -> Tuple[int, Optional[int], str]:
+    fee_i = int(fee)
+    for lo, hi, label in FEE_BANDS:
+        if hi is None:
+            if fee_i >= lo:
+                return lo, hi, label
+        elif lo <= fee_i < hi:
+            return lo, hi, label
+    return FEE_BANDS[-1]
+
+
+def _percentile(sorted_vals: List[float], p: float) -> Optional[float]:
+    if not sorted_vals:
+        return None
+    if len(sorted_vals) == 1:
+        return float(sorted_vals[0])
+    idx = (len(sorted_vals) - 1) * p
+    lo = int(math.floor(idx))
+    hi = int(math.ceil(idx))
+    if lo == hi:
+        return float(sorted_vals[lo])
+    w = idx - lo
+    return float(sorted_vals[lo] * (1 - w) + sorted_vals[hi] * w)
+
+
+def _band_key(lo: int, hi: Optional[int]) -> str:
+    return f"{lo}-{hi if hi is not None else 'up'}"
+
+
+def fit_fee_band_model(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Empirical sale-price ranges by sire stud-fee band (fee at sale year).
+
+    Exclusions: RNA / OUT / non-positive hammer (already dropped in ingest),
+    missing / implausible stud fee. Range = p25–p75; mid = p50.
+    """
+    usable = [
+        r
+        for r in rows
+        if r.get("stud_fee") and r["stud_fee"] > 0 and r.get("price") and r["price"] > 0
+    ]
+    prices: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+    multiples: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+    for r in usable:
+        lo, hi, _label = fee_band_for(r["stud_fee"])
+        key = _band_key(lo, hi)
+        price = float(r["price"])
+        mult = price / float(r["stud_fee"])
+        prices[r["sold_as"]][key].append(price)
+        prices["All"][key].append(price)
+        multiples[r["sold_as"]][key].append(mult)
+        multiples["All"][key].append(mult)
+
+    by_kind: Dict[str, Dict[str, Any]] = {}
+    for kind, band_map in prices.items():
+        bands_out: Dict[str, Any] = {}
+        for lo, hi, label in FEE_BANDS:
+            key = _band_key(lo, hi)
+            vals = sorted(band_map.get(key) or [])
+            if not vals:
+                continue
+            mults = multiples[kind].get(key) or []
+            bands_out[key] = {
+                "lo": lo,
+                "hi": hi,
+                "label": label,
+                "n": len(vals),
+                "p10": _percentile(vals, 0.10),
+                "p25": _percentile(vals, 0.25),
+                "p50": _percentile(vals, 0.50),
+                "p75": _percentile(vals, 0.75),
+                "p90": _percentile(vals, 0.90),
+                "median_multiple": _safe_median(mults),
+                "mean_multiple": _safe_mean(mults),
+            }
+        by_kind[kind] = bands_out
+
+    sale_years = sorted({int(r["sale_year"]) for r in usable if r.get("sale_year")})
+    return {
+        "method": "empirical_fee_band_percentiles",
+        "fee_basis": "sire_stud_fee_at_sale_year",
+        "range": "p25-p75",
+        "mid": "p50",
+        "exclusions": "RNA, OUT, non-positive hammer, missing/implausible stud fee (>$1M)",
+        "n_sales_total": len(rows),
+        "n_matched": len(usable),
+        "match_rate": (len(usable) / len(rows)) if rows else 0.0,
+        "sale_years": sale_years,
+        "min_band_n": MIN_BAND_N,
+        "bands_def": [
+            {"lo": lo, "hi": hi, "label": label, "key": _band_key(lo, hi)}
+            for lo, hi, label in FEE_BANDS
+        ],
+        "by_kind": by_kind,
+    }
+
+
+def _pick_band_block(
+    band_model: Dict[str, Any],
+    fee: float,
+    sold_as: str,
+) -> Tuple[Optional[Dict[str, Any]], str, str]:
+    """Return (block, kind_used, band_key), widening to All / neighbors if sparse."""
+    lo, hi, _label = fee_band_for(fee)
+    key = _band_key(lo, hi)
+    by_kind = band_model.get("by_kind") or {}
+    min_n = int(band_model.get("min_band_n") or MIN_BAND_N)
+    keys = [_band_key(a, b) for a, b, _ in FEE_BANDS]
+    try:
+        idx = keys.index(key)
+    except ValueError:
+        idx = 0
+
+    for kind in (sold_as, "All"):
+        kind_bands = by_kind.get(kind) or {}
+        block = kind_bands.get(key)
+        if block and block.get("n", 0) >= min_n:
+            return block, kind, key
+        for j in (idx - 1, idx + 1, idx - 2, idx + 2):
+            if j < 0 or j >= len(keys):
+                continue
+            neighbor = kind_bands.get(keys[j])
+            if neighbor and neighbor.get("n", 0) >= min_n:
+                return neighbor, kind, keys[j]
+
+    for kind in (sold_as, "All"):
+        block = (by_kind.get(kind) or {}).get(key)
+        if block and block.get("n", 0) > 0:
+            return block, kind, key
+    return None, sold_as, key
+
+
+def project_from_fee_band(
+    fee: float,
+    band_model: Dict[str, Any],
+    sold_as: str = "Yearling",
+) -> Dict[str, Any]:
+    """Expected Market Value from empirical fee-band sale-price percentiles."""
+    if not band_model or not fee or fee <= 0:
+        return {"ok": False, "error": "fee or band model unavailable"}
+
+    block, kind_used, key = _pick_band_block(band_model, fee, sold_as)
+    if not block:
+        return {"ok": False, "error": "no band coverage", "current_fee": fee, "sold_as": sold_as}
+
+    low = block.get("p25")
+    mid = block.get("p50")
+    high = block.get("p75")
+    if low and high and high < low:
+        low, high = high, low
+    label = ""
+    if low and high:
+        label = f"${int(round(low)):,} – ${int(round(high)):,}"
+    elif mid:
+        label = f"${int(round(mid)):,}"
+        low = high = mid
+
+    band_label = block.get("label") or key
+    return {
+        "ok": bool(label),
+        "sold_as": sold_as,
+        "kind_used": kind_used,
+        "current_fee": float(fee),
+        "band_key": key,
+        "band_label": band_label,
+        "band_lo": block.get("lo"),
+        "band_hi": block.get("hi"),
+        "n": block.get("n"),
+        "n_matched": band_model.get("n_matched"),
+        "match_rate": band_model.get("match_rate"),
+        "p10": block.get("p10"),
+        "p25": low,
+        "p50": mid,
+        "p75": high,
+        "p90": block.get("p90"),
+        "low": low,
+        "mid": mid,
+        "high": high,
+        "point": mid,
+        "label": label,
+        "median_multiple": block.get("median_multiple"),
+        "mean_multiple": block.get("mean_multiple"),
+        "method": band_model.get("method"),
+        "fee_basis": band_model.get("fee_basis"),
+        "rule": (
+            f"Historical sales × fee-at-sale · {band_label} band · "
+            f"n={block.get('n'):,} · p25–p75"
+        ),
+    }
+
+
+def build_fee_band_dataset(
+    *,
+    scrape_missing: bool = False,
+    max_scrapes: Optional[int] = 0,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
+    """Load Y/W sales, attach sale-year fees, fit empirical fee-band ranges."""
+    print("\nLoading yearling & weanling sales for fee-band model…")
+    lots = iter_yearling_weanling_sales()
+    print(f"  Found {len(lots):,} sold yearling/weanling lots.")
+    print("Matching sale-year stud fees (CSV + JSON, nearest prior)…")
+    enriched, stats = attach_sale_year_stud_fees(
+        lots, scrape_missing=scrape_missing, max_scrapes=max_scrapes
+    )
+    print(
+        f"  Matched fees: {stats['matched']:,} | Missing: {stats['missing_fee']:,} | "
+        f"Cache hits: {stats['cache_hits']:,}"
+    )
+    model = fit_fee_band_model(enriched)
+    return enriched, stats, model
+
+
+def save_fee_band_model(model: Dict[str, Any], path: Optional[Path] = None) -> Path:
+    import json
+
+    path = path or FEE_BAND_CACHE_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(model, f, indent=2)
+    return path
+
+
+def load_fee_band_model(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    import json
+
+    path = path or FEE_BAND_CACHE_PATH
+    if not path.exists():
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def summarize_sire_history(

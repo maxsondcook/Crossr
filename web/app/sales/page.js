@@ -324,10 +324,10 @@ function SalesPage() {
     if (!lots.length) return "";
     const sources = new Set(lots.map((lot) => lot.filter_price_source).filter(Boolean));
     if (sources.has("sale_price") && (sources.has("expected_market_mid") || sources.has("unknown"))) {
-      return "Price uses sale price when sold; otherwise Expected Market mid (PriceProjection).";
+      return "Price uses sale price when sold; otherwise Expected Market mid (historical sales × fee-at-sale).";
     }
     if (sources.has("sale_price")) return "Price uses catalog sale price.";
-    return "Price uses Expected Market mid (PriceProjection) — no sale prices yet.";
+    return "Price uses Expected Market mid (historical sales × fee-at-sale) — no sale prices yet.";
   }, [lots]);
 
   function lotIsStarred(lot) {

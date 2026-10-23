@@ -7,6 +7,7 @@ Scraped Racing Post fee-history rows are persisted to stud_fee_database.json.
 
 from __future__ import annotations
 
+import csv
 import json
 import re
 import time
@@ -15,6 +16,15 @@ from typing import Any, Dict, Optional, Tuple
 from urllib.parse import quote_plus
 
 DB_PATH = Path(__file__).resolve().parent / "stud_fee_database.json"
+ROOT = Path(__file__).resolve().parent
+CSV_FEE_PATHS = [
+    ROOT / "stud_fee_database.csv",
+    ROOT / "stallion_rankings_data" / "stud_fee_database.csv",
+]
+# Fees above this are almost always bad scrapes / FX artifacts (e.g. ¥ mislabeled as $).
+MAX_PLAUSIBLE_USD_FEE = 1_000_000
+
+_CSV_FEE_HISTORY: Optional[Dict[str, Dict[int, int]]] = None
 
 # Seed map of common US sires so fee scrapes work even when web search is flaky.
 KNOWN_RACING_POST_IDS = {
@@ -133,52 +143,147 @@ def parse_fee_value(raw: Any) -> Optional[int]:
     return int(digits) if digits else None
 
 
+def _plausible_fee(fee: Optional[int]) -> Optional[int]:
+    if fee is None or fee <= 0:
+        return None
+    if fee > MAX_PLAUSIBLE_USD_FEE:
+        return None
+    return int(fee)
+
+
+def load_csv_fee_history(force: bool = False) -> Dict[str, Dict[int, int]]:
+    """BloodHorse / rankings CSV: stallion -> {year: fee}. Cached in-process."""
+    global _CSV_FEE_HISTORY
+    if _CSV_FEE_HISTORY is not None and not force:
+        return _CSV_FEE_HISTORY
+
+    out: Dict[str, Dict[int, int]] = {}
+    path = next((p for p in CSV_FEE_PATHS if p.exists()), None)
+    if path is None:
+        _CSV_FEE_HISTORY = {}
+        return _CSV_FEE_HISTORY
+
+    with open(path, encoding="utf-8-sig", errors="ignore") as f:
+        for row in csv.DictReader(f):
+            name = _norm_name(row.get("Stallion") or "")
+            try:
+                year = int(str(row.get("Year") or "").strip())
+            except (TypeError, ValueError):
+                continue
+            fee = _plausible_fee(parse_fee_value(row.get("Stud Fee")))
+            if not name or not year or not fee:
+                continue
+            out.setdefault(name, {})[year] = fee
+
+    _CSV_FEE_HISTORY = out
+    return out
+
+
+def _fee_from_json_entry(entry: dict, year: int) -> Optional[int]:
+    fees = entry.get("fees_by_year") or {}
+    raw = fees.get(str(year), fees.get(year))
+    return _plausible_fee(parse_fee_value(raw))
+
+
+def _nearest_prior_fee(year_map: Dict[int, int], year: int) -> Optional[int]:
+    priors = [y for y in year_map if y <= year]
+    if not priors:
+        return None
+    return _plausible_fee(year_map[max(priors)])
+
+
 def get_fee_for_year(
     stallion: str,
     year: int,
     db: Optional[Dict[str, dict]] = None,
+    *,
+    allow_nearest_prior: bool = False,
 ) -> Optional[int]:
-    """Return nominated stud fee for a stallion in a given year, if known."""
+    """Return stud fee for a stallion in a given year.
+
+    Preference: BloodHorse CSV exact → JSON exact → (optional) nearest prior
+    from CSV then JSON. Implausible USD amounts (> $1M) are ignored.
+    """
+    year = int(year)
+    key = _norm_name(stallion)
+    csv_hist = load_csv_fee_history().get(key) or {}
+    if year in csv_hist:
+        return csv_hist[year]
+
     db = db if db is not None else load_fee_database()
-    entry = db.get(_norm_name(stallion))
-    if not entry:
+    entry = db.get(key)
+    if entry:
+        exact = _fee_from_json_entry(entry, year)
+        if exact:
+            return exact
+
+    if not allow_nearest_prior:
         return None
-    fees = entry.get("fees_by_year") or {}
-    # JSON keys are strings
-    if str(year) in fees:
-        return parse_fee_value(fees[str(year)])
-    if year in fees:
-        return parse_fee_value(fees[year])
+
+    prior_csv = _nearest_prior_fee(csv_hist, year)
+    if prior_csv:
+        return prior_csv
+
+    if entry:
+        fees = entry.get("fees_by_year") or {}
+        year_map: Dict[int, int] = {}
+        for y, raw in fees.items():
+            try:
+                yi = int(y)
+            except (TypeError, ValueError):
+                continue
+            fee = _plausible_fee(parse_fee_value(raw))
+            if fee:
+                year_map[yi] = fee
+        return _nearest_prior_fee(year_map, year)
     return None
+
+
+def resolve_fee_at_sale(
+    stallion: str,
+    sale_year: Optional[int],
+    db: Optional[Dict[str, dict]] = None,
+) -> Optional[int]:
+    """Sire stud fee as of the sale year (exact, else nearest prior ≤ sale year)."""
+    if not stallion or not sale_year:
+        return get_current_fee(stallion, db)
+    return get_fee_for_year(
+        stallion, int(sale_year), db, allow_nearest_prior=True
+    ) or get_current_fee(stallion, db)
 
 
 def get_current_fee(stallion: str, db: Optional[Dict[str, dict]] = None) -> Optional[int]:
     db = db if db is not None else load_fee_database()
     entry = db.get(_norm_name(stallion))
-    if not entry:
-        return None
+    key = _norm_name(stallion)
+
     # Prefer explicitly stored current USD fee when present
-    current = parse_fee_value(entry.get("current_fee"))
-    usd_years = entry.get("usd_fee_years") or []
-    fees = entry.get("fees_by_year") or {}
-    if usd_years:
-        newest_usd = max(int(y) for y in usd_years)
-        usd_fee = parse_fee_value(fees.get(str(newest_usd)))
-        if usd_fee:
-            return usd_fee
-    if current:
-        return current
-    if not fees:
-        return None
-    years = []
-    for y in fees:
-        try:
-            years.append(int(y))
-        except (TypeError, ValueError):
-            continue
-    if not years:
-        return None
-    return parse_fee_value(fees[str(max(years))])
+    if entry:
+        current = _plausible_fee(parse_fee_value(entry.get("current_fee")))
+        usd_years = entry.get("usd_fee_years") or []
+        fees = entry.get("fees_by_year") or {}
+        if usd_years:
+            newest_usd = max(int(y) for y in usd_years)
+            usd_fee = _plausible_fee(parse_fee_value(fees.get(str(newest_usd))))
+            if usd_fee:
+                return usd_fee
+        if current:
+            return current
+        years = []
+        for y in fees:
+            try:
+                years.append(int(y))
+            except (TypeError, ValueError):
+                continue
+        if years:
+            fee = _plausible_fee(parse_fee_value(fees[str(max(years))]))
+            if fee:
+                return fee
+
+    csv_hist = load_csv_fee_history().get(key) or {}
+    if csv_hist:
+        return csv_hist[max(csv_hist)]
+    return None
 
 
 def upsert_fee_history(

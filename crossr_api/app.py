@@ -384,8 +384,33 @@ def _attach_heights(lots, lookup):
     return lots
 
 
-def _attach_filter_prices(lots, book, catalog_title=""):
-    """Sale price when present; else Expected Market mid (PriceProjection / fee fallback)."""
+def _sale_year_from(lot=None, catalog=None, catalog_title=""):
+    """Best-effort catalog / sale year for fee-at-sale lookup."""
+    import re
+
+    for raw in (
+        (lot or {}).get("sale_year"),
+        (lot or {}).get("catalog_year"),
+        (catalog or {}).get("year"),
+        # Past DB lots use `year` for the catalog/sale year (not foaling year).
+        (lot or {}).get("year"),
+        catalog_title,
+        (lot or {}).get("catalog_title"),
+        (lot or {}).get("sale_title"),
+        (lot or {}).get("sale"),
+    ):
+        if raw is None or raw == "":
+            continue
+        if isinstance(raw, int):
+            return raw
+        m = re.search(r"(19|20)\d{2}", str(raw))
+        if m:
+            return int(m.group(0))
+    return None
+
+
+def _attach_filter_prices(lots, book, catalog_title="", sale_year=None):
+    """Sale price when present; else Expected Market mid (empirical fee-band / fallback)."""
     from crossr_core import projections as proj_svc
 
     lookup = horse_svc.profile_lookup(book or {})
@@ -400,12 +425,14 @@ def _attach_filter_prices(lots, book, catalog_title=""):
             lot["filter_price_source"] = "sale_price"
             continue
         profile = lookup.get(main.clean_horse_name(lot.get("sire") or ""))
+        year = sale_year or _sale_year_from(lot, catalog_title=catalog_title)
         band = proj_svc.expected_market_mid_for_filter(
             lot.get("sire") or "",
             sold_as=lot.get("sold_as") or "",
             catalog_title=catalog_title or lot.get("catalog_title") or "",
             sex=lot.get("sex_letter") or lot.get("sex") or "",
             sire_profile=profile,
+            sale_year=year,
         )
         mid = band.get("mid")
         low, high = band.get("low"), band.get("high")
@@ -433,7 +460,9 @@ def _lot_catalog_title(lot, catalog_title=""):
     )
 
 
-def _workspace(lot, book, catalog_title=""):
+def _workspace(lot, book, catalog_title="", catalog=None):
+    title = _lot_catalog_title(lot, catalog_title)
+    sale_year = _sale_year_from(lot, catalog=catalog, catalog_title=title)
     ctx = horse_svc.sale_workspace(
         name=lot.get("name") or lot.get("raw_name"),
         sire=lot.get("sire"),
@@ -446,7 +475,8 @@ def _workspace(lot, book, catalog_title=""):
         covering_sire=lot.get("covering_sire"),
         damsire=lot.get("damsire") or lot.get("sire_of_dam"),
         profiles=book,
-        catalog_title=_lot_catalog_title(lot, catalog_title),
+        catalog_title=title,
+        sale_year=sale_year,
     )
     ctx["auction_history"] = sales_svc.auctions_for_horses(ctx.get("similar_crosses") or [])
     return ctx
@@ -460,8 +490,14 @@ def sales_catalog_nav(catalog_id: int):
     book = profiles()
     lookup = horse_svc.profile_lookup(book)
     _attach_heights(payload["lots"], lookup)
-    title = (payload.get("catalog") or {}).get("title") or payload.get("title") or ""
-    _attach_filter_prices(payload["lots"], book, catalog_title=title)
+    catalog = payload.get("catalog") or {}
+    title = catalog.get("title") or payload.get("title") or ""
+    _attach_filter_prices(
+        payload["lots"],
+        book,
+        catalog_title=title,
+        sale_year=_sale_year_from(catalog=catalog, catalog_title=title),
+    )
     return payload
 
 
@@ -471,11 +507,9 @@ def sales_lot_detail(lot_id: int):
     if not payload:
         raise HTTPException(status_code=404, detail="Lot not found")
     lot = payload.get("lot") or {}
-    title = (
-        (payload.get("catalog") or {}).get("title")
-        or _lot_catalog_title(lot)
-    )
-    payload.update(_workspace(lot, profiles(), catalog_title=title))
+    catalog = payload.get("catalog") or {}
+    title = catalog.get("title") or _lot_catalog_title(lot)
+    payload.update(_workspace(lot, profiles(), catalog_title=title, catalog=catalog))
     return payload
 
 
@@ -507,7 +541,12 @@ def sales_upcoming_lots(
     book = profiles()
     lookup = horse_svc.profile_lookup(book)
     _attach_heights(lots, lookup)
-    _attach_filter_prices(lots, book, catalog_title=catalog_id)
+    _attach_filter_prices(
+        lots,
+        book,
+        catalog_title=catalog_id,
+        sale_year=_sale_year_from(catalog_title=catalog_id),
+    )
     filtered = upcoming_svc.filter_lots(
         lots,
         sex=sex,
@@ -528,7 +567,15 @@ def sales_upcoming_lot(catalog_id: str, hip: str):
         raise HTTPException(status_code=404, detail="Hip not found")
     book = profiles()
     lot["height"] = horse_svc.sire_height(lot.get("sire"), horse_svc.profile_lookup(book))
-    return {"lot": lot, **_workspace(lot, book, catalog_title=catalog_id)}
+    return {
+        "lot": lot,
+        **_workspace(
+            lot,
+            book,
+            catalog_title=catalog_id,
+            catalog={"year": _sale_year_from(catalog_title=catalog_id)},
+        ),
+    }
 
 
 @app.post("/api/sales/upcoming/{catalog_id}/lots/{hip}")
