@@ -1086,6 +1086,85 @@ def _mare_vp_summary(mare_name: str, mare_sire: str = "") -> dict:
     )
 
 
+def classify_catalog_role(
+    sex: str = "",
+    sold_as: str = "",
+    covering_sire: str = "",
+) -> str:
+    """
+    Return catalog projection role:
+      - "youngstock" : weanling / yearling → breeding value + projected race earnings
+      - "broodmare"  : broodmare (incl. broodmare/racing prospect) → breeding value only
+      - "other"      : 2yos, racing prospects, etc. → no projections
+    """
+    sold_u = (sold_as or "").strip().upper()
+    sex_u = (sex or "").strip().upper()
+    cov = (covering_sire or "").strip()
+    cov_ok = cov and cov.lower() not in ("nan", "none", "")
+
+    if "BROODMARE" in sold_u or cov_ok or sex_u in ("M", "MARE"):
+        return "broodmare"
+    if "YEARLING" in sold_u or "WEANLING" in sold_u:
+        return "youngstock"
+    return "other"
+
+
+def _race_earnings_vp_summary(sire_name: str) -> dict:
+    """Projected race earnings (per foal) for youngstock, keyed by sire."""
+    if not sire_name or not str(sire_name).strip():
+        return {
+            "display": "",
+            "point": None,
+            "PROJECTED RACE EARNINGS": "",
+            "detail": "no sire",
+        }
+    cache_key = f"race::{clean_horse_name(sire_name)}"
+    if cache_key in _HIP_CACHE:
+        return _HIP_CACHE[cache_key]
+
+    raw = project_race_earnings(sire_name, verbose=False)
+    point = raw.get("projected_earnings_per_foal")
+    detail = f"sire={raw.get('stallion')}"
+    if raw.get("used_similar_isf_fallback"):
+        detail += f"; peer={raw.get('fallback_peer')}"
+    display = fmt_money(point) if point else ""
+    result = {
+        "display": display,
+        "point": point,
+        "PROJECTED RACE EARNINGS": display,
+        "detail": detail,
+        "n": raw.get("foals_age_ge_3") or raw.get("runners") or 0,
+    }
+    _HIP_CACHE[cache_key] = result
+    return result
+
+
+def _breeding_value_for_youngstock(sex: str, sire: str) -> dict:
+    sex_u = (sex or "").strip().upper()
+    if sex_u in ("G", "GELDING") or sex_u.startswith("G"):
+        return _empty_vp("gelding")
+    is_colt = sex_u in ("C", "H", "R", "COLT", "HORSE", "RIDGLING") or sex_u.startswith("C")
+    is_filly = sex_u in ("F", "FILLY") or sex_u.startswith("F")
+    if is_colt:
+        cache_key = f"colt::{clean_horse_name(sire)}"
+        if cache_key not in _HIP_CACHE:
+            _HIP_CACHE[cache_key] = _colt_vp_summary(sire) if sire else _empty_vp("colt")
+        return _HIP_CACHE[cache_key]
+    if is_filly:
+        cache_key = f"filly::{clean_horse_name(sire)}"
+        if cache_key not in _HIP_CACHE:
+            _HIP_CACHE[cache_key] = (
+                _filly_bms_vp_summary(sire) if sire else _empty_vp("filly_bms")
+            )
+        return _HIP_CACHE[cache_key]
+    if sire:
+        cache_key = f"colt::{clean_horse_name(sire)}"
+        if cache_key not in _HIP_CACHE:
+            _HIP_CACHE[cache_key] = _colt_vp_summary(sire)
+        return _HIP_CACHE[cache_key]
+    return _empty_vp()
+
+
 def project_hip_value(
     sex: str,
     sire: str = "",
@@ -1098,77 +1177,74 @@ def project_hip_value(
     """
     Catalog-row Value Projector entry.
 
-    Colts / colt weanlings  → colt E[BV] by sire
-    Fillies / filly weanlings → filly BMS lens by sire (future broodmare)
-    Mares / broodmares      → mare progeny auctions (fallback to her sire / BMS)
+    Weanlings / yearlings → breeding value + projected race earnings
+    Broodmares            → breeding value only
+    Everything else       → blank (no projections)
     """
     sex_u = (sex or "").strip().upper()
-    sold_u = (sold_as or "").strip().upper()
     sire = (sire or "").strip()
     dam = (dam or "").strip()
     horse_name = (horse_name or "").strip()
     sire_of_dam = (sire_of_dam or "").strip()
     covering_sire = (covering_sire or "").strip()
+    role = classify_catalog_role(sex=sex_u, sold_as=sold_as, covering_sire=covering_sire)
 
-    is_mare = (
-        sex_u in ("M", "MARE")
-        or "BROODMARE" in sold_u
-        or bool(covering_sire)
-    )
-    is_colt = sex_u in ("C", "H", "R", "COLT", "HORSE", "RIDGLING") or (
-        sex_u.startswith("C") and not is_mare
-    )
-    is_filly = sex_u in ("F", "FILLY") or sex_u.startswith("F")
+    blank_race = {
+        "display": "",
+        "point": None,
+        "PROJECTED RACE EARNINGS": "",
+        "detail": "",
+    }
 
-    if is_mare:
+    if role == "other":
+        out = _empty_vp("other")
+        out["role"] = role
+        out["PROJECTED RACE EARNINGS"] = ""
+        return out
+
+    if role == "broodmare":
         cache_key = f"mare::{clean_horse_name(horse_name) or clean_horse_name(dam)}"
         if cache_key not in _HIP_CACHE:
             mare_id = horse_name or dam
-            mare_sire = sire if horse_name else (sire_of_dam or sire)
-            # Broodmare rows: SIRE is the mare's sire; DAM is her dam
-            if horse_name:
-                mare_sire = sire or sire_of_dam
+            mare_sire = sire or sire_of_dam
             _HIP_CACHE[cache_key] = _mare_vp_summary(mare_id, mare_sire=mare_sire)
-        return _HIP_CACHE[cache_key]
+        out = dict(_HIP_CACHE[cache_key])
+        out["role"] = role
+        out["PROJECTED RACE EARNINGS"] = ""  # broodmares: breeding value only
+        return out
 
-    if is_colt:
-        cache_key = f"colt::{clean_horse_name(sire)}"
-        if cache_key not in _HIP_CACHE:
-            _HIP_CACHE[cache_key] = _colt_vp_summary(sire) if sire else _empty_vp("colt")
-        return _HIP_CACHE[cache_key]
+    # youngstock: weanling / yearling
+    bv = _breeding_value_for_youngstock(sex_u, sire)
+    race = _race_earnings_vp_summary(sire) if sire else blank_race
+    out = dict(bv)
+    out["role"] = role
+    out["PROJECTED RACE EARNINGS"] = race.get("PROJECTED RACE EARNINGS", "")
+    out["race_detail"] = race.get("detail", "")
+    return out
 
-    if sex_u in ("G", "GELDING") or sex_u.startswith("G"):
-        return _empty_vp("gelding")
 
-    if is_filly:
-        # Filly yearling/weanling: future broodmare lens via her sire (BMS of her foals)
-        cache_key = f"filly::{clean_horse_name(sire)}"
-        if cache_key not in _HIP_CACHE:
-            _HIP_CACHE[cache_key] = _filly_bms_vp_summary(sire) if sire else _empty_vp("filly_bms")
-        return _HIP_CACHE[cache_key]
-
-    # Unknown sex — try colt path by sire, else filly
-    if sire:
-        cache_key = f"colt::{clean_horse_name(sire)}"
-        if cache_key not in _HIP_CACHE:
-            _HIP_CACHE[cache_key] = _colt_vp_summary(sire)
-        return _HIP_CACHE[cache_key]
-    return _empty_vp()
+VP_CATALOG_COLUMNS = (
+    "VALUE PROJECTOR",
+    "VP LOW",
+    "VP HIGH",
+    "VP POINT",
+    "PROJECTED RACE EARNINGS",
+)
 
 
 def enrich_sales_dataframe(df, progress_every: int = 500):
     """
-    Add VALUE PROJECTOR / VP LOW / VP HIGH / VP POINT columns to a catalog DataFrame.
+    Add breeding-value + (for youngstock) race-earnings columns to a catalog DataFrame.
     Mutates and returns df.
     """
-    import pandas as pd  # local import — matches sale_analyzer dependency style
-
     if df is None or len(df) == 0:
         return df
 
-    for col in ("VALUE PROJECTOR", "VP LOW", "VP HIGH", "VP POINT"):
+    for col in VP_CATALOG_COLUMNS:
         if col not in df.columns:
             df[col] = ""
+        else:
+            df[col] = df[col].astype(str).replace({"nan": "", "None": "", "NaN": ""})
 
     total = len(df)
     for i, (idx, row) in enumerate(df.iterrows()):
@@ -1181,6 +1257,7 @@ def enrich_sales_dataframe(df, progress_every: int = 500):
             covering_sire=str(row.get("COVERING SIRE", "") or ""),
             sire_of_dam=str(row.get("SIRE OF DAM", "") or ""),
         )
+
         def _as_cell(v):
             if v is None or v == "":
                 return ""
@@ -1190,6 +1267,9 @@ def enrich_sales_dataframe(df, progress_every: int = 500):
         df.at[idx, "VP LOW"] = _as_cell(vp.get("VP LOW", ""))
         df.at[idx, "VP HIGH"] = _as_cell(vp.get("VP HIGH", ""))
         df.at[idx, "VP POINT"] = _as_cell(vp.get("VP POINT", ""))
+        df.at[idx, "PROJECTED RACE EARNINGS"] = _as_cell(
+            vp.get("PROJECTED RACE EARNINGS", "")
+        )
         if progress_every and (i + 1) % progress_every == 0:
             print(f"  ValueProjector: {i + 1:,}/{total:,} hips…")
 
@@ -1202,7 +1282,7 @@ def enrich_catalog_csv(csv_path: str, inplace: bool = True) -> str:
 
     path = Path(csv_path)
     df = pd.read_csv(path, dtype=str, keep_default_na=False)
-    for col in ("VALUE PROJECTOR", "VP LOW", "VP HIGH", "VP POINT"):
+    for col in VP_CATALOG_COLUMNS:
         if col not in df.columns:
             df[col] = ""
         df[col] = df[col].astype(str)

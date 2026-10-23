@@ -149,6 +149,7 @@ def analyze_dataframe(df):
         "CROSS SUCCESS", "DAM SUCCESS (RACER)", "DAM SUCCESS (PRODUCER)",
         "RACING SUCCESS", "STARRED", "COVERING SIRE", "NOTES",
         "VALUE PROJECTOR", "VP LOW", "VP HIGH", "VP POINT",
+        "PROJECTED RACE EARNINGS",
     ]:
         if col not in df.columns:
             df[col] = ""
@@ -253,11 +254,12 @@ def analyze_dataframe(df):
         if racing_success_strings:
             df.at[idx, "RACING SUCCESS"] = " ".join(racing_success_strings)
 
-    # Breeding-value projections (point estimate or range when sample is large)
+    # Weanling/yearling → BV + race earnings; broodmare → BV only; else blank
+    needs_race_col = "PROJECTED RACE EARNINGS" not in df.columns
     vp_series = df["VALUE PROJECTOR"].astype(str).str.strip().replace(
         {"nan": "", "None": "", "NaN": ""}
     )
-    if vp_series.eq("").mean() > 0.5:
+    if needs_race_col or vp_series.eq("").mean() > 0.5:
         print("Running ValueProjector across catalog hips…")
         ValueProjector.enrich_sales_dataframe(df)
             
@@ -514,9 +516,10 @@ def run_interactive_viewer(csv_path):
             lambda r: determine_sold_as(r['YEAR OF BIRTH'], r['SEX'], sale_year, os.path.basename(csv_path), r.get('COVERING SIRE', '')), axis=1
         )
 
-    # Backfill Value Projector if this catalog was analyzed before VP existed
+    # Backfill Value Projector if columns are missing / stale
     needs_vp = (
         "VALUE PROJECTOR" not in base_df.columns
+        or "PROJECTED RACE EARNINGS" not in base_df.columns
         or base_df["VALUE PROJECTOR"].astype(str).str.strip().replace({"nan": "", "None": ""}).eq("").all()
     )
     if needs_vp:
@@ -624,6 +627,8 @@ def run_interactive_viewer(csv_path):
 
             if "VALUE PROJECTOR" in row and str(row.get("VALUE PROJECTOR", "")).strip() not in ("", "nan", "NaN", "None"):
                 base_cols.append("VALUE PROJECTOR")
+            if "PROJECTED RACE EARNINGS" in row and str(row.get("PROJECTED RACE EARNINGS", "")).strip() not in ("", "nan", "NaN", "None"):
+                base_cols.append("PROJECTED RACE EARNINGS")
                 
             base_cols.append("SOLD AS")
             
