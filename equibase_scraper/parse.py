@@ -458,16 +458,53 @@ def _parent_matches(row: dict, sire_key: str, dam_key: str) -> bool:
     return True
 
 
+SIRE_SEXES = {"horse", "colt", "ridgling"}
+DAM_SEXES = {"mare", "filly"}
+
+
+def narrow_yearless(
+    matches: list[dict],
+    yob_range: tuple[int, int] | None,
+    role: str | None,
+) -> list[dict]:
+    """Narrow hits for a horse searched without a foal year.
+
+    Each filter applies only when it leaves at least one hit: thoroughbreds,
+    then sex for the role, then foal year inside ``yob_range``.
+    """
+    def keep(rows, test):
+        kept = [row for row in rows if test(row)]
+        return kept or rows
+
+    rows = keep(matches, lambda row: (row.get("breed") or "").upper() == "TB")
+    if role == "sire":
+        rows = keep(rows, lambda row: (row.get("sex") or "").lower() in SIRE_SEXES)
+    elif role == "dam":
+        rows = keep(rows, lambda row: (row.get("sex") or "").lower() in DAM_SEXES)
+    if yob_range:
+        low, high = yob_range
+        rows = keep(
+            rows,
+            lambda row: str(row.get("yob") or "").isdigit() and low <= int(row["yob"]) <= high,
+        )
+    return rows
+
+
 def resolve_html(
     html: str,
     foal_year: str | None,
     sire: str | None = None,
     dam: str | None = None,
+    yob_range: tuple[int, int] | None = None,
+    role: str | None = None,
 ) -> dict:
     """Decide what an Equibase response is for a pedigree foal year.
 
     Optional sire and dam, cleaned like horse names, narrow search hits after
     the year filter. Callers that pass only the year keep the old behavior.
+    With no foal year, ``yob_range`` (first, last) keeps hits foaled in it,
+    for a sale parent whose year is unknown but bounded by its foals, and
+    ``role`` ("sire" or "dam") keeps thoroughbreds of the matching sex.
 
     kind is one of: blocked, profile, candidate, not_found, year_mismatch,
     ambiguous, unknown.
@@ -494,6 +531,8 @@ def resolve_html(
     if not candidates:
         return {"kind": "not_found", "candidates": [], "detail": "no search hits"}
     matches = [row for row in candidates if row["yob"] == year] if year else list(candidates)
+    if not year and len(matches) > 1:
+        matches = narrow_yearless(matches, yob_range, role)
     if not matches:
         years = ", ".join(sorted({row["yob"] for row in candidates}))
         return {
