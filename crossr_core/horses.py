@@ -180,6 +180,7 @@ def build_stallion_roster(profiles=None):
     return roster
 
 
+
 def crop_label(entered_stud, current_year=None):
     if not entered_stud:
         return None
@@ -282,19 +283,31 @@ def _race_index():
     return _RACE_INDEX
 
 
+def _pedigree_foal_year(name):
+    entry = main.PEDIGREE_DATABASE.get(main.clean_horse_name(name or "")) or {}
+    found = re.search(r"\((\d{4})\)", str(entry.get("Horse") or ""))
+    return int(found.group(1)) if found else None
+
+
 def race_seasons_for(name, foal_year=None):
-    """Season-by-season race record from race_horses / race_seasons (career row skipped)."""
+    """Season-by-season race record from race_horses / race_seasons (career row skipped).
+
+    Names are reused across generations, so a record only counts when its foaling year
+    matches the horse's; with no known foaling year there is no safe match.
+    """
     horses, seasons = _race_index()
-    matches = horses.get(main.clean_horse_name(name or ""), [])
-    if foal_year:
-        matches = [m for m in matches if m[1] == foal_year] or matches
+    foal_year = foal_year or _pedigree_foal_year(name)
+    if not foal_year:
+        return []
+    matches = [m for m in horses.get(main.clean_horse_name(name or ""), []) if m[1] == foal_year]
     if not matches:
         return []
     horse_id, born = matches[0]
     rows = []
     for row in seasons.get(horse_id, []):
         year = _intish(row.get("year"))
-        if not year:
+        # Thoroughbreds first race at two; anything earlier is another horse's record.
+        if not year or year < born + 2:
             continue
         earnings = _intish(row.get("earnings"))
         rows.append({
@@ -1808,7 +1821,9 @@ def get_horse_profile(search_name, profiles=None):
 
     # Stallion-stats race records are often empty; fall back to scraped race seasons.
     if not race_rows:
-        birth_hint = _intish((data or {}).get("Year Born")) or None
+        # Prefer the year this profile was resolved to (search or matched pedigree), then stats.
+        year_in_name = re.search(r"\((\d{4})\)", f"{search_name} {horse_name}")
+        birth_hint = (int(year_in_name.group(1)) if year_in_name else None) or _intish((data or {}).get("Year Born")) or None
         for season in race_seasons_for(clean_search, foal_year=birth_hint):
             race_totals["starts"] += season["starts"]
             race_totals["firsts"] += season["firsts"]
