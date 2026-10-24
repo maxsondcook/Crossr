@@ -17,6 +17,58 @@ import FemaleFamily from "../../components/FemaleFamily";
 import HorseText from "../../components/HorseText";
 import HypofoalDetail from "../../components/HypofoalDetail";
 
+const STATUS_ORDER = ["MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW"];
+const GRADE_ORDER = { G1: 0, G2: 1, G3: 2 };
+
+function sortCrosses(crosses) {
+  return [...crosses].sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
+}
+
+// Racing-age sex: stallions raced as colts, mares as fillies.
+const SEX_AT_RACING = { C: "C.", H: "C.", F: "F.", M: "F.", G: "G.", R: "R." };
+
+function sexAbbrev(sex) {
+  const letter = String(sex || "").trim().charAt(0).toUpperCase();
+  return SEX_AT_RACING[letter] || (letter ? `${letter}.` : "");
+}
+
+function HorseLink({ name }) {
+  if (!name) return null;
+  return <Link className="horse-inline-link" href={horseHref(name)}>{horseCaps(name)}</Link>;
+}
+
+/** PRACTICAL JOKE [MG1W] (C. BY INTO MISCHIEF) OUT OF THE MARE HALO HUMOR (M. BY DISTORTED HUMOR), then its wins. */
+function CrossSuccess({ cross }) {
+  const sex = sexAbbrev(cross.sex);
+  const wins = [...(cross.wins || [])].sort((a, b) => {
+    const ga = GRADE_ORDER[String(a.grade).toUpperCase()] ?? 9;
+    const gb = GRADE_ORDER[String(b.grade).toUpperCase()] ?? 9;
+    return ga - gb || String(a.year).localeCompare(String(b.year));
+  });
+  return (
+    <div className="cross-success">
+      <p className="cross-head">
+        <HorseLink name={cross.name} /> <span className="cross-status">[{cross.status}]</span>
+        {cross.sire ? <> ({sex ? `${sex} ` : ""}BY <HorseLink name={cross.sire} />)</> : null}
+        {cross.dam ? <> OUT OF THE MARE <HorseLink name={cross.dam} /></> : null}
+        {cross.damsire ? <> (M. BY <HorseLink name={cross.damsire} />)</> : null}
+      </p>
+      {wins.length ? (
+        <ul className="cross-wins">
+          {wins.map((w, i) => (
+            <li key={`${w.race}-${w.year}-${i}`}>
+              {[w.grade, horseCaps(w.race)].filter(Boolean).join(" ")}
+              {w.year ? <span className="cross-year"> · {w.year}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : cross.prose ? (
+        <p className="cross-prose">{cross.prose}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function HypomatingInner() {
   const params = useSearchParams();
   const sireFromPage = params.get("sire") || "";
@@ -296,37 +348,36 @@ function HypomatingInner() {
                         <div className="parents">RANK #{s.rank} · {horseCaps(s.stud_fee)}</div>
                         {openLogic === s.name ? (
                           <div className="logic">
-                            {(s.cross_meta || []).map((m) => {
-                              const linkNames = [
-                                m.foal_name,
-                                m.actual_sire_name,
-                                result.mare,
-                                result.damsire,
-                                ...(brood?.progeny || []).map((p) => p.name),
-                              ].filter(Boolean);
-                              return (
-                                <p key={m.foal_name}>
-                                  <HorseText text={m.races_sentence} names={linkNames} />
-                                  <br />
-                                  <HorseText text={m.bio_sentence} names={linkNames} />
-                                </p>
-                              );
-                            })}
+                            {[...(s.cross_meta || []).map((m) => ({
+                              name: m.foal_name,
+                              status: m.status,
+                              sex: m.sex,
+                              sire: m.sire || m.actual_sire_name,
+                              dam: m.dam,
+                              damsire: m.damsire,
+                              wins: m.wins,
+                              prose: m.wins ? null : m.races_sentence,
+                            })), ...sortCrosses(s.crosses || [])].map((c) => (
+                              <CrossSuccess key={`${c.name}-${c.status}`} cross={c} />
+                            ))}
                             {Object.entries(s.reasons_by_tier || {}).flatMap(([tier, msgs]) =>
-                              msgs.map((msg) => {
-                                const linkNames = [
-                                  s.name,
-                                  result.mare,
-                                  result.damsire,
-                                  ...(s.cross_meta || []).map((m) => m.foal_name),
-                                  ...(brood?.progeny || []).map((p) => p.name),
-                                ].filter(Boolean);
-                                return (
-                                  <p key={msg}>
-                                    {horseCaps(tier)}: <HorseText text={msg} names={linkNames} />
-                                  </p>
-                                );
-                              })
+                              msgs
+                                // Cross successes are listed above in structured form.
+                                .filter((msg) => !(s.crosses || []).length || !msg.startsWith("Cross Success"))
+                                .map((msg) => {
+                                  const linkNames = [
+                                    s.name,
+                                    result.mare,
+                                    result.damsire,
+                                    ...(s.cross_meta || []).map((m) => m.foal_name),
+                                    ...(brood?.progeny || []).map((p) => p.name),
+                                  ].filter(Boolean);
+                                  return (
+                                    <p key={msg}>
+                                      {horseCaps(tier)}: <HorseText text={msg} names={linkNames} />
+                                    </p>
+                                  );
+                                })
                             )}
                           </div>
                         ) : null}
