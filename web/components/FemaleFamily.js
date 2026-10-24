@@ -39,7 +39,10 @@ function FoalLine({ p, hrefFor }) {
       {p.sire ? <> ({sexBit}BY <Link href={link(p.sire)}>{horseCaps(p.sire)}</Link>)</> : null}
       {trailer}
       {(p.races || []).length ? ` ${horseCaps((p.races).join(", "))}.` : null}
-      {(p.produce || []).map((g) => (
+      {(p.produce || [])
+        // The same grand-foal can arrive twice from different sources; list it once.
+        .filter((g, i, all) => all.findIndex((o) => String(o.name).toUpperCase() === String(g.name).toUpperCase()) === i)
+        .map((g) => (
         <div className="ff-grand" key={`${g.name}-${g.sire}`}>
           DAM OF <Link href={link(g.name)}>{horseCaps(g.name)}</Link>
           {g.sire ? <> ({g.sex ? `${horseCaps(g.sex)}. ` : ""}BY <Link href={link(g.sire)}>{horseCaps(g.sire)}</Link>)</> : null}
