@@ -5,8 +5,11 @@ Three services in one Railway project:
 | Service | What it is | Built from |
 | --- | --- | --- |
 | **Postgres** | All Crossr data: the 8 tables, pedigrees, accounts | Railway's Postgres template |
-| **api** | FastAPI (`crossr_api`) | `Dockerfile` + `railway.json` |
-| **web** | Next.js site | `web/Dockerfile` + `web/railway.json` |
+| **api** | FastAPI (`crossr_api`) | `Dockerfile` |
+| **web** | Next.js site | `web/Dockerfile` |
+
+Live project: `vigilant-strength` (production). Build settings live on the
+services themselves; Railway no longer accepts `railway.json` config files.
 
 When `DATABASE_URL` is set the app reads and writes Postgres. Without it, it
 falls back to the local `data/*.csv` files and `pedigrees_database.py`, so local
@@ -28,11 +31,12 @@ is over GitHub's 100 MB limit, and the data belongs in Postgres anyway.
 2. In that project: **+ Create → GitHub Repo → maxsondcook/Crossr**. Rename the
    service to `api`.
    - Settings → Source → branch: `unified` (or `main` after merging).
-   - Settings → Config-as-code path: `railway.json`.
+   - Settings → Build → Dockerfile path: `Dockerfile`; Deploy → healthcheck
+     path `/api/health`, timeout 300.
    - Variables → add `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`
      and `CROSSR_FRONTEND_ORIGIN` = `https://<your web domain>` (fill in after step 3).
 3. **+ Create → GitHub Repo → maxsondcook/Crossr** again. Rename it to `web`.
-   - Settings → Config-as-code path: `web/railway.json`.
+   - Settings → Build → Dockerfile path: `web/Dockerfile` (build context stays the repo root).
    - Variables → `API_INTERNAL` = `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:8000`
      and `PORT` = `3000`.
    - Settings → Networking → **Generate Domain** — this is the public site.
@@ -40,7 +44,14 @@ is over GitHub's 100 MB limit, and the data belongs in Postgres anyway.
 
 ## 3. Load the data (once, from your Mac)
 
-Railway → Postgres → **Connect** → copy the **public** connection URL.
+Easiest, with the Railway CLI logged in and this folder linked (`railway link`):
+
+```bash
+railway tcp-proxy create -s Postgres --port 5432   # once: public access
+railway run -s Postgres -- ./scripts/load_via_railway_cli.sh
+```
+
+Or by hand: Railway → Postgres → **Connect** → copy the **public** connection URL.
 
 ```bash
 cd ~/Desktop/Crossr
