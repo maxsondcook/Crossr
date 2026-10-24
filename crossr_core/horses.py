@@ -1590,10 +1590,17 @@ def _race_labels(records):
 
 
 def load_stakes_index():
-    """Index of graded/group stakes *winners* from placeholderdatabase/graded_stakes_winners.csv."""
+    """Race winners by cleaned name, from the graded_stakes table.
+
+    ``status`` is set only for black-type winners; horses with just allowance /
+    maiden wins carry their ``races`` with status None. Rebuilt when the table changes.
+    """
     global _STAKES_BY_KEY
-    if _STAKES_BY_KEY is not None:
-        return _STAKES_BY_KEY
+    from crossr_core import sample_db
+
+    version = sample_db.table_version("graded_stakes")
+    if _STAKES_BY_KEY is not None and _STAKES_BY_KEY[0] == version:
+        return _STAKES_BY_KEY[1]
     raw = hypomating_engine.load_stakes_data()
     summaries = hypomating_engine.build_horse_summaries(raw)
     grouped = {}
@@ -1612,8 +1619,8 @@ def load_stakes_index():
             "status": summary.get("status"),
             "races": _race_labels(recs),
         }
-    _STAKES_BY_KEY = by_key
-    return _STAKES_BY_KEY
+    _STAKES_BY_KEY = (version, by_key)
+    return by_key
 
 
 def dam_produce_index():

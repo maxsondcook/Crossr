@@ -232,6 +232,11 @@ def _mtime(table: str) -> float:
         return 0.0
 
 
+def table_version(table: str) -> float:
+    """Changes whenever the table is rewritten (cheap; cached for a few seconds)."""
+    return _mtime(table)
+
+
 def load_table(table: str, refresh: bool = False) -> list[dict]:
     """Return rows for one of the 8 CSVs. Reloads when the file mtime changes."""
     with _LOCK:

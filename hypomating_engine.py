@@ -6,7 +6,7 @@ import re
 import main
 import hypofoals_manager
 import placeholder_store
-from graded_stakes import load_stakes_data
+from graded_stakes import graded_level, is_black_type, load_stakes_data
 
 # Broodmare sire ranks from data/stallion_rankings.csv (Broodmare list).
 BROODMARE_DATABASE = placeholder_store.load_broodmare_database()
@@ -425,7 +425,12 @@ def _surface_from_distance(dist_str):
 
 
 def build_horse_summaries(records):
-    """Build per-horse win summaries. Only Place==1 rows are counted as wins."""
+    """Per-horse summaries of black-type winners. Only Place==1 rows are wins.
+
+    The race table also holds non-stakes wins (allowance, maiden, ...). Those
+    are listed in ``races`` but never earn a status, and a horse with no
+    G1/G2/G3/Listed/Stakes win is left out (its status would be meaningless here).
+    """
     horses = {}
     for r in records:
         h_name = str(r.get("Horse Name") or "").strip()
@@ -442,7 +447,8 @@ def build_horse_summaries(records):
                 'sex': sex_val,
                 'races': [],
                 'wins': [],
-                'g1_count': 0, 'g2_count': 0, 'g3_count': 0, 'ungraded_count': 0
+                'g1_count': 0, 'g2_count': 0, 'g3_count': 0, 'ungraded_count': 0,
+                'other_wins': 0,
             }
         
         dist_str = str(r.get('Distance') or "")
@@ -454,14 +460,19 @@ def build_horse_summaries(records):
         race_year = r.get('Race Year') or ""
         
         race_line = f"{h_name} won the {race_year} edition of the {purse} {grade} {race_name} over {clean_dist} on the {surface}"
-        horses[h_name]['races'].append(race_line)
+        horses[h_name]['races'].append(" ".join(race_line.split()))
         horses[h_name]['wins'].append({"year": str(race_year), "grade": grade, "race": race_name})
         
-        grade_upper = grade.upper()
-        if 'G1' in grade_upper: horses[h_name]['g1_count'] += 1
-        elif 'G2' in grade_upper: horses[h_name]['g2_count'] += 1
-        elif 'G3' in grade_upper: horses[h_name]['g3_count'] += 1
-        else: horses[h_name]['ungraded_count'] += 1
+        level = graded_level(grade)
+        if level == 1: horses[h_name]['g1_count'] += 1
+        elif level == 2: horses[h_name]['g2_count'] += 1
+        elif level == 3: horses[h_name]['g3_count'] += 1
+        elif is_black_type(grade): horses[h_name]['ungraded_count'] += 1
+        else: horses[h_name]['other_wins'] += 1
+
+    for h_name in [n for n, h in horses.items()
+                   if not (h['g1_count'] or h['g2_count'] or h['g3_count'] or h['ungraded_count'])]:
+        del horses[h_name]
 
     for h_name, h in horses.items():
         if h['g1_count'] > 1: h['status'] = 'MG1W'
