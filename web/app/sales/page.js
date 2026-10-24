@@ -755,6 +755,9 @@ function SalesPage() {
                     <div data-meta="expected-market">
                       <span className="meta-label">Expected Market Value</span>
                       <b className="money">{ready ? expectedMarketLabel(detail, current) : "…"}</b>
+                      {ready && detail?.expected_market?.rule ? (
+                        <span className="meta-sub">{detail.expected_market.rule}</span>
+                      ) : null}
                     </div>
                     {mode === "past" ? (
                       <div><span className="meta-label">Auction price</span><b className="money">{priceLabel(current)}</b></div>
@@ -767,6 +770,7 @@ function SalesPage() {
                   <h4>PROJECTED VALUE</h4>
                   <ProjectedValue
                     valueProjector={ready ? detail?.expected_market?.value_projector : null}
+                    expectedMarket={ready ? detail?.expected_market : null}
                     lot={ready ? (detail?.lot || current) : current}
                     showSold={mode === "past"}
                   />
