@@ -33,7 +33,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import pedigrees_database
+from crossr_core import pedigree_store
 from crossr_core import sample_db
 
 
@@ -212,11 +212,11 @@ def _profile_lookup(name: str) -> Tuple[Optional[str], Optional[dict]]:
 
 def _pedigree_for(name: str) -> Optional[dict]:
     key = clean_horse_name(name)
-    ped = pedigrees_database.pedigree_map.get(key)
+    ped = pedigree_store.get_pedigree_map().get(key)
     if ped:
         return ped
     # Soft match
-    for k, v in pedigrees_database.pedigree_map.items():
+    for k, v in pedigree_store.get_pedigree_map().items():
         if clean_horse_name(k) == key:
             return v
     return None
@@ -674,7 +674,7 @@ def _header_map(fieldnames: Optional[List[str]]) -> Dict[str, str]:
 def _dam_to_sire_cache() -> Dict[str, str]:
     """Map dam name → her sire (catalog 'sire of dam') from the pedigree DB."""
     cache: Dict[str, str] = {}
-    for key, ped in pedigrees_database.pedigree_map.items():
+    for key, ped in pedigree_store.get_pedigree_map().items():
         if not isinstance(ped, dict):
             continue
         dam_key = clean_horse_name(key)

@@ -71,7 +71,26 @@ def backup_database_once() -> Path:
     return dest
 
 
+def _railway():
+    try:
+        import sys
+        if str(PROJECT_ROOT) not in sys.path:
+            sys.path.insert(0, str(PROJECT_ROOT))
+        from crossr_core import railway_db
+    except Exception:
+        return None
+    return railway_db if railway_db.enabled() else None
+
+
 def load_pedigree_map() -> dict:
+    """Railway pedigrees table when DATABASE_URL is set, else pedigrees_database.py."""
+    pg = _railway()
+    if pg is not None:
+        return pg.read_pedigree_map()
+    return _load_file_map()
+
+
+def _load_file_map() -> dict:
     if not DB_FILE.is_file() or DB_FILE.stat().st_size == 0:
         return {}
     ns: dict = {}
@@ -92,9 +111,14 @@ def save_pedigree_map(pedigree_map: dict, overwrite_keys: set[str] | None = None
         fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
         try:
             disk = load_pedigree_map()
+            changed: dict = {}
             for horse, tree in pedigree_map.items():
                 if horse not in disk or horse in overwrite_keys:
                     disk[horse] = tree
+                    changed[horse] = tree
+            pg = _railway()
+            if pg is not None and changed:
+                pg.upsert_pedigrees(changed)
             pedigree_map.clear()
             pedigree_map.update(disk)
             tmp = DB_FILE.with_suffix(".py.tmp")

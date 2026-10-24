@@ -202,10 +202,9 @@ def load_and_sync_all_data():
     combined_database = {}
 
     try:
-        import pedigrees_database as dpd
-        if "pedigrees_database" in sys.modules:
-            importlib.reload(sys.modules["pedigrees_database"])
-        db_map = getattr(dpd, "pedigree_map", {})
+        from crossr_core import pedigree_store
+
+        db_map = pedigree_store.get_pedigree_map(refresh=True)
         if isinstance(db_map, dict):
             for k, v in db_map.items():
                 if not (isinstance(v, dict) and "Horse" in v):
@@ -245,13 +244,7 @@ for alias_key, standard_key in aliases.items():
 def save_database_to_file():
     """Writes the updated PEDIGREE_DATABASE back to pedigrees_database.py."""
     try:
-        try:
-            import pedigrees_database as dpd
-            db_file_path = dpd.__file__
-            if db_file_path.endswith('.pyc'):
-                db_file_path = db_file_path[:-1]
-        except Exception:
-            db_file_path = "pedigrees_database.py"
+        db_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pedigrees_database.py")
 
         with open(db_file_path, "w", encoding="utf-8") as f:
             f.write('"""\nAutomatically compiled pedigree database\n"""\n\n')
@@ -274,6 +267,14 @@ def save_database_to_file():
                     
             f.write("}\n")
         print("\n💾 Database successfully updated and written to disk!")
+        try:
+            from crossr_core import pedigree_store
+
+            synced = pedigree_store.sync_to_railway(PEDIGREE_DATABASE)
+            if synced:
+                print(f"☁️  Synced {synced} pedigrees to Railway.")
+        except Exception as sync_err:
+            print(f"⚠️  Railway pedigree sync failed: {sync_err}")
     except Exception as e:
         print(f"\n⚠️  Warning: Could not auto-save database changes to disk: {e}")
 

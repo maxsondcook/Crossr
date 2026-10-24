@@ -14,6 +14,12 @@ The public UI never sees Keeneland/Fasig-Tipton CSVs or `graded_stakes_winners.c
 
 Horses are stored as `NAME (YYYY)`. If a search hits two or more foaling years, the app asks which horse you mean.
 
+## Data on Railway
+
+Crossr's data lives in **Railway Postgres**. Set `DATABASE_URL` (see `.env.example`) and the
+API, CLI and scrapers all use it; leave it unset to run from local `data/*.csv` files.
+Setup, data loading and deployment: [`docs/RAILWAY.md`](docs/RAILWAY.md).
+
 ## Run locally
 
 Python 3.11+ and Node 18+.

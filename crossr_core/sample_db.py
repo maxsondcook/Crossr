@@ -1,4 +1,7 @@
-"""Canonical runtime store: the 8 sample CSVs under data/ (+ pedigrees_database.py).
+"""Canonical runtime store: the 8 Crossr tables (+ pedigrees).
+
+Backend: Railway Postgres when DATABASE_URL is set (crossr_core.railway_db),
+otherwise the 8 CSVs under data/ and pedigrees_database.py.
 
 Scrapers and export scripts write here with atomic replace. The API reloads when
 mtime changes so :8000 can keep serving while scrapes merge new rows.
@@ -128,7 +131,20 @@ def _cell(value) -> str:
     return str(value)
 
 
+def _pg():
+    from crossr_core import railway_db
+
+    return railway_db if railway_db.enabled() else None
+
+
+def backend() -> str:
+    return "postgres" if _pg() else "csv"
+
+
 def _read_csv(table: str) -> list[dict]:
+    pg = _pg()
+    if pg:
+        return pg.read_table(table, TABLES[table])
     path = csv_path(table)
     columns = TABLES[table]
     if not path.exists():
@@ -142,6 +158,9 @@ def _read_csv(table: str) -> list[dict]:
 
 
 def _mtime(table: str) -> float:
+    pg = _pg()
+    if pg:
+        return pg.table_version(table)
     path = csv_path(table)
     try:
         return path.stat().st_mtime
@@ -189,8 +208,20 @@ def invalidate(table: str | None = None) -> None:
 
 
 def atomic_write_table(table: str, rows: list[dict]) -> int:
-    """Replace the whole CSV atomically (tmp + os.replace). Safe mid-scrape."""
+    """Replace the whole table atomically. Safe mid-scrape.
+
+    Postgres: one transaction (DELETE + COPY). CSV: tmp file + os.replace.
+    """
     columns = TABLES[table]
+    pg = _pg()
+    if pg:
+        normalized = [
+            {col: _cell(row.get(col) if isinstance(row, dict) else "") for col in columns}
+            for row in rows
+        ]
+        count = pg.replace_table(table, columns, normalized)
+        invalidate(table)
+        return count
     path = csv_path(table)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + f".{os.getpid()}.{time.time_ns()}.tmp")
@@ -319,10 +350,9 @@ def _truthy(val) -> int:
 def sales_connection() -> sqlite3.Connection | None:
     """In-memory SQLite built from sales_lots.csv; rebuilds on mtime change."""
     global _SALES_MEM, _SALES_MTIME
-    path = csv_path("sales_lots")
-    if not path.exists():
+    mtime = _mtime("sales_lots")
+    if not mtime:
         return None
-    mtime = path.stat().st_mtime
     with _LOCK:
         if _SALES_MEM is not None and _SALES_MTIME == mtime:
             return _SALES_MEM
@@ -399,10 +429,9 @@ def sales_connection() -> sqlite3.Connection | None:
 def rankings_connection() -> sqlite3.Connection | None:
     """In-memory SQLite built from stallion_rankings.csv."""
     global _RANK_MEM, _RANK_MTIME
-    path = csv_path("stallion_rankings")
-    if not path.exists():
+    mtime = _mtime("stallion_rankings")
+    if not mtime:
         return None
-    mtime = path.stat().st_mtime
     with _LOCK:
         if _RANK_MEM is not None and _RANK_MTIME == mtime:
             return _RANK_MEM

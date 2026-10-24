@@ -20,7 +20,57 @@ def db_path():
     return os.environ.get("USERS_DB_PATH", DEFAULT_DB)
 
 
+class _PgCursor:
+    def __init__(self, cur, lastrowid=None):
+        self._cur = cur
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        return self._cur.fetchone()
+
+    def fetchall(self):
+        return self._cur.fetchall()
+
+
+class _PgConn:
+    """Tiny sqlite3-style wrapper so the queries below run on Railway Postgres."""
+
+    def __init__(self):
+        import psycopg
+        from psycopg.rows import dict_row
+        from crossr_core import railway_db
+
+        railway_db.ensure_schema()  # creates users / sessions / preferences
+        self._conn = psycopg.connect(railway_db.database_url(), row_factory=dict_row, connect_timeout=10)
+
+    def execute(self, sql, params=()):
+        sql = sql.replace("?", "%s")
+        returning = sql.lstrip().upper().startswith("INSERT INTO USERS")
+        if returning:
+            sql = sql.rstrip().rstrip(";") + " RETURNING id"
+        cur = self._conn.execute(sql, params)
+        lastrowid = cur.fetchone()["id"] if returning else None
+        return _PgCursor(cur, lastrowid)
+
+    def executescript(self, _script):
+        return None  # schema is managed by railway_db.ensure_schema()
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
+
+
+def _use_postgres() -> bool:
+    from crossr_core import railway_db
+
+    return railway_db.enabled() and not os.environ.get("USERS_DB_PATH")
+
+
 def connect():
+    if _use_postgres():
+        return _PgConn()
     conn = sqlite3.connect(db_path())
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")

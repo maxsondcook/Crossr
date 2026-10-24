@@ -39,11 +39,20 @@ redundant_files/
 redundant_folders/
 package-lock.json
 
-# Entity CSVs built for Railway. Rebuild with scripts/export_entity_csvs.py
+# Runtime data lives in Railway Postgres (load with scripts/load_railway.py).
+# Local copies stay on disk but are never pushed.
 data/
+pedigrees_database.py
+pedigrees_database.py.tmp
 
 # Secrets / local scrapes
 **/cookies.txt
 **/rp_cookies.txt
 stallion_rankings_data/stallion_rankings.db
 equibase_new_horses.csv
+
+# Local env / retired files
+.env
+Going_to_delete/
+crossr_core/__pycache__/
+.mplconfig/

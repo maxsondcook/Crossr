@@ -168,7 +168,9 @@ def _clear_session(response: Response):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "sales_index": os.path.exists(sales_svc.db_path())}
+    from crossr_core import sample_db
+
+    return {"ok": True, "backend": sample_db.backend(), "sales_index": os.path.exists(sales_svc.db_path())}
 
 
 @app.post("/api/auth/register")

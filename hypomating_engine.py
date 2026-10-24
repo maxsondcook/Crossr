@@ -725,10 +725,8 @@ def execute_suggestion_wizard(pedigree_db, all_profiles):
                 pedigree_db.update(main.PEDIGREE_DATABASE)
                 
             try:
-                import pedigrees_database
-                importlib.reload(pedigrees_database)
-                if hasattr(pedigrees_database, 'pedigree_map'):
-                    pedigree_db.update(pedigrees_database.pedigree_map)
+                from crossr_core import pedigree_store
+                pedigree_db.update(pedigree_store.get_pedigree_map(refresh=True))
             except Exception:
                 pass
                 
