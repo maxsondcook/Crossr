@@ -43,13 +43,20 @@ _NON_YW_TOKENS = (
 )
 
 
-def kind_from_foaling_age(birth_year: Any = None, sale_year: Any = None) -> Optional[str]:
-    """sale_year − foal_year: 0 → Weanling, 1 → Yearling; else None (2yo+ / unknown)."""
+def foaling_age_years(birth_year: Any = None, sale_year: Any = None) -> Optional[int]:
+    """Whole years of age at sale: sale_year − foal_year, or None if unknown."""
     by = _parse_sale_year(birth_year)
     sy = _parse_sale_year(sale_year)
     if by is None or sy is None:
         return None
-    age = int(sy) - int(by)
+    return int(sy) - int(by)
+
+
+def kind_from_foaling_age(birth_year: Any = None, sale_year: Any = None) -> Optional[str]:
+    """sale_year − foal_year: 0 → Weanling, 1 → Yearling; else None (2yo+ / unknown)."""
+    age = foaling_age_years(birth_year, sale_year)
+    if age is None:
+        return None
     if age == 0:
         return "Weanling"
     if age == 1:
@@ -94,15 +101,21 @@ def _sold_as_kind(
     """Return Yearling/Weanling for EMV / ValueProjector; else None.
 
     Order (Maxson): explicit non-Y/W role → foaling age vs sale year → explicit
-    Y/W sold_as → catalog modal age default → title keywords last.
+    Y/W sold_as → catalog modal age (only if age unknown) → title keywords last.
+    Known age ≥ 2 never inherits the catalog modal Yearling/Weanling default.
     """
     sold_u = (sold_as or "").strip().upper()
     if sold_u and any(tok in sold_u for tok in _NON_YW_TOKENS):
         return None
 
-    age_kind = kind_from_foaling_age(birth_year, sale_year)
-    if age_kind:
-        return age_kind
+    age = foaling_age_years(birth_year, sale_year)
+    if age is not None:
+        if age == 0:
+            return "Weanling"
+        if age == 1:
+            return "Yearling"
+        # Known 2yo+ / older breeding stock — do not apply Y/W modal or title.
+        return None
 
     if "WEANLING" in sold_u:
         return "Weanling"
@@ -149,6 +162,9 @@ def annotate_lot_kinds(
         )
         lot["sold_as_kind"] = kind
         lot["sale_year_resolved"] = _parse_sale_year(sy)
+        lot["foaling_age"] = foaling_age_years(
+            lot.get("birth_year") or lot.get("birth_date"), sy
+        )
         if kind and not (lot.get("sold_as") or "").strip():
             lot["sold_as"] = kind
     return modal
