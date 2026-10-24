@@ -220,14 +220,69 @@ function mergeRegionalLists(meta) {
       ...regional.map((r) => ({ key: r.key, label: r.label, type: "money" })),
     ];
   }
+  return combineCropLists({ lists, columns, rows });
+}
+
+// First/second/third-crop lists cover one year each, so they show as one list with a Crop column.
+const CROP_LIST_GROUPS = [
+  {
+    id: "leading_crop_sires",
+    label: "Leading 1st–3rd Crop Sires",
+    parts: [
+      ["leading_first_crop_sires", "1st"],
+      ["leading_second_crop_sires", "2nd"],
+      ["leading_third_crop_sires", "3rd"],
+    ],
+  },
+  {
+    id: "leading_international_crop_sires",
+    label: "Leading International 1st–3rd Crop Sires",
+    parts: [
+      ["leading_international_first_crop_sires", "1st"],
+      ["leading_international_2nd_crop_sires", "2nd"],
+      ["leading_international_3rd_crop_sires", "3rd"],
+    ],
+  },
+];
+
+function cropGroupFor(listId) {
+  return CROP_LIST_GROUPS.find((g) => g.parts.some(([id]) => id === listId)) || null;
+}
+
+function combineCropLists(meta) {
+  let lists = [...meta.lists];
+  const columns = { ...meta.columns };
+  const rows = { ...meta.rows };
+  for (const group of CROP_LIST_GROUPS) {
+    const present = group.parts.filter(([id]) => lists.some((l) => l.id === id));
+    if (!present.length) continue;
+    const merged = [];
+    const cols = [
+      { key: "year", label: "Year", type: "number" },
+      { key: "crop", label: "Crop", type: "text" },
+    ];
+    for (const [id, crop] of present) {
+      for (const row of rows[id] || []) merged.push({ ...row, crop, crop_num: parseInt(crop, 10) });
+      for (const col of columns[id] || []) {
+        if (!cols.some((c) => c.key === col.key)) cols.push(col);
+      }
+    }
+    const at = lists.findIndex((l) => l.id === present[0][0]);
+    const firstList = lists[at];
+    lists = lists.filter((l) => !present.some(([id]) => id === l.id));
+    lists.splice(at, 0, { ...firstList, id: group.id, label: group.label });
+    columns[group.id] = cols;
+    rows[group.id] = merged;
+  }
   return { lists, columns, rows };
 }
 
 function StallionRankingsPanel({ rankingMeta: rawRankingMeta, rankList: rawRankList, setRankList }) {
   const rankingMeta = useMemo(() => mergeRegionalLists(rawRankingMeta), [rawRankingMeta]);
-  const rankList = regionalParent(rawRankList) && rankingMeta.lists.some((l) => l.id === regionalParent(rawRankList))
+  const parentList = regionalParent(rawRankList) && rankingMeta.lists.some((l) => l.id === regionalParent(rawRankList))
     ? regionalParent(rawRankList)
     : rawRankList;
+  const rankList = cropGroupFor(parentList)?.id || parentList;
   const lists = rankingMeta.lists || [];
   const bloodhorseLists = lists.filter((list) => list.group !== "book");
   const bookLists = lists.filter((list) => list.group === "book");
