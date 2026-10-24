@@ -1269,7 +1269,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
     max-width: none;
     min-width: 0;
   }
-  .stallion-card, .dash, .sales-layout, .lot-dash, .lot-head, .filters, .barn-grid, .sales-columns, .sale-meta {
+  .stallion-card, .sales-layout, .lot-dash, .lot-head, .filters, .barn-grid, .sales-columns, .sale-meta {
     grid-template-columns: 1fr;
   }
   .shell-sales { height: auto; overflow: visible; }
@@ -1280,6 +1280,10 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   .nav a { font-size: 12px; letter-spacing: 0.08em; }
   .brand-name { font-size: 22px; }
   .nav-search { min-width: 120px; }
+}
+/* Horse page: pedigree and info stay side by side until there is no room for both. */
+@media (max-width: 800px) {
+  .dash { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 900px) {
   .topbar { flex-wrap: wrap; }
