@@ -758,7 +758,9 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .pv-grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .pv-grid.cols-1 { grid-template-columns: minmax(0, 1fr); }
 .pv-grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pv-grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .pv-item { min-width: 0; }
+.pv-item[data-pv="total"] b { color: var(--text, inherit); font-weight: 650; }
 .pv-label {
   display: block;
   color: var(--muted);
@@ -779,7 +781,8 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   .pv-grid,
   .pv-grid.with-sold,
   .pv-grid.cols-2,
-  .pv-grid.cols-3 { grid-template-columns: 1fr; }
+  .pv-grid.cols-3,
+  .pv-grid.cols-4 { grid-template-columns: 1fr; }
 }
 .auction-row { cursor: pointer; }
 .auction-more td { color: var(--muted); }

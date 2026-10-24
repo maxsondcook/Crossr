@@ -269,6 +269,23 @@ def _value_projector_payload(lot: dict) -> Dict[str, Any]:
     high = raw.get("high")
     display = raw.get("display") or raw.get("VALUE PROJECTOR") or ""
     race = (raw.get("PROJECTED RACE EARNINGS") or "").strip()
+    kind = raw.get("kind") or ""
+    role = raw.get("role") or ""
+    sex_u = (lot.get("sex_letter") or lot.get("sex") or "").strip().upper()
+
+    # Colts / horses / ridglings / geldings as youngstock: never surface a
+    # breeding-value number in the sales UI (stallion-prospect or BMS-style).
+    male_youngstock = role == "youngstock" and (
+        kind in ("colt", "gelding")
+        or sex_u[:1] in ("C", "H", "R", "G")
+        or sex_u.startswith(("COLT", "HORSE", "RIDGLING", "GELDING"))
+    )
+    if male_youngstock:
+        point = None
+        low = None
+        high = None
+        display = ""
+
     breeding_ok = bool(point) or bool(display)
     race_ok = bool(race)
     return {
@@ -276,8 +293,8 @@ def _value_projector_payload(lot: dict) -> Dict[str, Any]:
         "ok": breeding_ok or race_ok,
         "breeding_ok": breeding_ok,
         "race_ok": race_ok,
-        "kind": raw.get("kind"),
-        "role": raw.get("role"),
+        "kind": kind,
+        "role": role,
         "point": point,
         "low": low,
         "high": high,
