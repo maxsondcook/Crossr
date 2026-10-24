@@ -441,6 +441,7 @@ def build_horse_summaries(records):
                 'foaling_year': r.get('Foaling Year') or "",
                 'sex': sex_val,
                 'races': [],
+                'wins': [],
                 'g1_count': 0, 'g2_count': 0, 'g3_count': 0, 'ungraded_count': 0
             }
         
@@ -454,6 +455,7 @@ def build_horse_summaries(records):
         
         race_line = f"{h_name} won the {race_year} edition of the {purse} {grade} {race_name} over {clean_dist} on the {surface}"
         horses[h_name]['races'].append(race_line)
+        horses[h_name]['wins'].append({"year": str(race_year), "grade": grade, "race": race_name})
         
         grade_upper = grade.upper()
         if 'G1' in grade_upper: horses[h_name]['g1_count'] += 1
@@ -1067,6 +1069,11 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
                 proven_cross_sires[clean_sire] = {
                     "foal_name": h_name,
                     "status": h["status"],
+                    "sex": h["sex"],
+                    "sire": clean_display_sire,
+                    "dam": clean_display_mare,
+                    "damsire": clean_display_damsire,
+                    "wins": h["wins"],
                     "races_sentence": " ".join(h["races"]),
                     "bio_sentence": (
                         f"{h_name} was foaled in {h['foaling_year']} and is a "
@@ -1102,6 +1109,7 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
             "reasons_by_tier": {t: [] for t in ["MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW"]},
             "direct_hit": False,
             "cross_meta": [],
+            "crosses": [],
         }
 
     status_weights = {"MG1W": 500, "G1W": 400, "MGSW": 300, "G2W": 250, "G3W": 200, "MSW": 150, "SW": 100}
@@ -1109,7 +1117,7 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
         clean_h = main.clean_horse_name(h_name)
         if clean_h in direct_progeny_clean_names:
             continue
-        h_damsire, h_sire = "", ""
+        h_damsire, h_sire, h_dam = "", "", ""
         if clean_h in pedigree_db:
             h_ped = pedigree_db[clean_h]
             sire_node = h_ped.get("Sire", {})
@@ -1117,6 +1125,7 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
             dam_node = h_ped.get("Dam", {})
             if isinstance(dam_node, dict):
                 h_damsire = get_mare_sire_from_pedigree(dam_node)
+                h_dam = dam_node.get("Horse", "")
         if h_damsire and main.clean_horse_name(h_damsire) in mare_sire_ancestry:
             clean_hsire = main.clean_horse_name(h_sire)
             base_points = status_weights.get(h["status"], 100)
@@ -1133,6 +1142,15 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
                     )
                     if msg not in cand_dict["reasons_by_tier"][h["status"]]:
                         cand_dict["reasons_by_tier"][h["status"]].append(msg)
+                        cand_dict["crosses"].append({
+                            "name": h_name,
+                            "status": h["status"],
+                            "sex": h["sex"],
+                            "sire": clean_display_hsire,
+                            "dam": re.sub(r'\s*\(\d{4}\)', '', h_dam).strip(),
+                            "damsire": clean_display_h_ds,
+                            "wins": h["wins"],
+                        })
 
     for clean_st, cand_dict in candidates.items():
         for clean_cross_sire, meta in proven_cross_sires.items():
@@ -1181,6 +1199,7 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
             "fee_num": meta["fee_num"],
             "has_lineage": has_lineage_options(cand["name"], all_profiles, budget_filter=fee_cap if fee_cap != sys.maxsize else None),
             "cross_meta": cand["cross_meta"],
+            "crosses": cand.get("crosses", []),
             "reasons_by_tier": cand["reasons_by_tier"],
         })
 
