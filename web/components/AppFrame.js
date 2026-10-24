@@ -14,7 +14,7 @@ export default function AppFrame({ children }) {
     refreshAuth();
   }, []);
 
-  if (path === "/" || path === "/signin") {
+  if (path === "/signin") {
     return children;
   }
 
