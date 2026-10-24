@@ -404,8 +404,8 @@ button, input, select { font: inherit; color: inherit; }
 
 .dash {
   display: grid;
-  /* Pedigree column stays wide enough for 5×20ch cells at a readable font. */
-  grid-template-columns: minmax(720px, 2.1fr) minmax(260px, 1fr) minmax(220px, 0.85fr) 48px;
+  /* Pedigree column hugs the chart so no dead space sits beside it. */
+  grid-template-columns: max-content minmax(260px, 1fr) minmax(220px, 0.85fr) 48px;
   gap: 12px;
   align-items: start;
 }
@@ -686,6 +686,8 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .horse-inline-link:hover { color: var(--gold); }
 
 .family-panel { overflow: auto; }
+/* Horse page: family panel follows the pedigree's width instead of widening the column. */
+.dash .family-panel { contain: inline-size; }
 .ff-block { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #243049; }
 .ff-block:last-child { border-bottom: 0; margin-bottom: 0; }
 .ff-ord { color: var(--gold); font-size: 11px; letter-spacing: 0.1em; font-weight: 800; text-transform: uppercase; margin-bottom: 4px; }
