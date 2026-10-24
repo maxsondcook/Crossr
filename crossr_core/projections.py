@@ -31,6 +31,57 @@ def _fee_amount(raw: Any) -> int:
         return 0
 
 
+_NON_YW_TOKENS = (
+    "BROODMARE",
+    "RACING AGE",
+    "RACING PROSPECT",
+    "TWO-YEAR",
+    "2-YEAR",
+    "2YO",
+    "THREE-YEAR",
+    "HORSE OF RACING",
+)
+
+
+def kind_from_foaling_age(birth_year: Any = None, sale_year: Any = None) -> Optional[str]:
+    """sale_year − foal_year: 0 → Weanling, 1 → Yearling; else None (2yo+ / unknown)."""
+    by = _parse_sale_year(birth_year)
+    sy = _parse_sale_year(sale_year)
+    if by is None or sy is None:
+        return None
+    age = int(sy) - int(by)
+    if age == 0:
+        return "Weanling"
+    if age == 1:
+        return "Yearling"
+    return None
+
+
+def modal_catalog_kind(
+    lots: Optional[list] = None,
+    *,
+    sale_year: Any = None,
+) -> Optional[str]:
+    """Most common Y/W kind among hips with a readable foaling age in this catalog."""
+    from collections import Counter
+
+    counts: Counter = Counter()
+    for lot in lots or []:
+        kind = kind_from_foaling_age(
+            lot.get("birth_year") or lot.get("birth_date"),
+            sale_year
+            or lot.get("sale_year")
+            or lot.get("catalog_year")
+            or lot.get("year"),
+        )
+        if kind:
+            counts[kind] += 1
+    if not counts:
+        return None
+    # Prefer Yearling on ties (commercial select sales skew yearling).
+    return sorted(counts.items(), key=lambda kv: (-kv[1], 0 if kv[0] == "Yearling" else 1))[0][0]
+
+
 def _sold_as_kind(
     sold_as: str = "",
     catalog_title: str = "",
@@ -38,50 +89,69 @@ def _sold_as_kind(
     *,
     birth_year: Any = None,
     sale_year: Any = None,
+    catalog_default_kind: Optional[str] = None,
 ) -> Optional[str]:
-    """Return Yearling/Weanling for PriceProjection scope; else None.
+    """Return Yearling/Weanling for EMV / ValueProjector; else None.
 
-    Prefer explicit sold_as. Then catalog title tokens. Then foaling age vs sale
-    year (age 0 → weanling, age 1 → yearling). Never override broodmare /
-    racing-age labels when sold_as already says so.
+    Order (Maxson): explicit non-Y/W role → foaling age vs sale year → explicit
+    Y/W sold_as → catalog modal age default → title keywords last.
     """
     sold_u = (sold_as or "").strip().upper()
+    if sold_u and any(tok in sold_u for tok in _NON_YW_TOKENS):
+        return None
+
+    age_kind = kind_from_foaling_age(birth_year, sale_year)
+    if age_kind:
+        return age_kind
+
     if "WEANLING" in sold_u:
         return "Weanling"
     if "YEARLING" in sold_u:
         return "Yearling"
-    if sold_u and any(
-        tok in sold_u
-        for tok in (
-            "BROODMARE",
-            "RACING AGE",
-            "RACING PROSPECT",
-            "TWO-YEAR",
-            "2-YEAR",
-            "2YO",
-            "THREE-YEAR",
-            "HORSE OF RACING",
-        )
-    ):
-        return None
+
+    if catalog_default_kind in ("Yearling", "Weanling"):
+        return catalog_default_kind
+
     blob = f"{catalog_title} {sex}".upper()
+    if any(tok in blob for tok in _NON_YW_TOKENS):
+        return None
     if "WEANLING" in blob:
         return "Weanling"
     if "YEARLING" in blob:
         return "Yearling"
-    # Select sales often omit "Yearling" in the catalog title (e.g. The Saratoga Sale).
-    by = _parse_sale_year(birth_year)
-    sy = _parse_sale_year(sale_year)
-    if by is not None and sy is not None:
-        age = int(sy) - int(by)
-        if age == 0:
-            return "Weanling"
-        if age == 1:
-            return "Yearling"
-    title_u = (catalog_title or "").upper()
-    if "SARATOGA SALE" in title_u and "FALL" not in title_u:
-        return "Yearling"
     return None
+
+
+def annotate_lot_kinds(
+    lots: Optional[list] = None,
+    *,
+    sale_year: Any = None,
+    catalog_title: str = "",
+) -> Optional[str]:
+    """Stamp ``sold_as_kind`` / fill blank ``sold_as`` from age; return modal catalog kind."""
+    lots = lots or []
+    year = sale_year
+    modal = modal_catalog_kind(lots, sale_year=year)
+    for lot in lots:
+        sy = (
+            year
+            or lot.get("sale_year")
+            or lot.get("catalog_year")
+            or lot.get("year")
+        )
+        kind = _sold_as_kind(
+            lot.get("sold_as") or "",
+            catalog_title or lot.get("catalog_title") or lot.get("sale_title") or "",
+            lot.get("sex_letter") or lot.get("sex") or "",
+            birth_year=lot.get("birth_year") or lot.get("birth_date"),
+            sale_year=sy,
+            catalog_default_kind=modal,
+        )
+        lot["sold_as_kind"] = kind
+        lot["sale_year_resolved"] = _parse_sale_year(sy)
+        if kind and not (lot.get("sold_as") or "").strip():
+            lot["sold_as"] = kind
+    return modal
 
 
 def warm_price_model(force: bool = False) -> Dict[str, Any]:
@@ -383,6 +453,7 @@ def project_lot_market(
     covering_sire: str = "",
     sale_year: Optional[int] = None,
     birth_year: Any = None,
+    catalog_default_kind: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Combined Expected Market Value + Market Prediction for one hip."""
     lot = dict(lot or {})
@@ -422,12 +493,14 @@ def project_lot_market(
         lot.get("sex_letter") or lot.get("sex") or "",
         birth_year=foaled,
         sale_year=year,
+        catalog_default_kind=catalog_default_kind or lot.get("catalog_default_kind"),
     )
-    # ValueProjector sale-type gates on sold_as; fill from catalog when missing.
+    # ValueProjector sale-type gates on sold_as; fill from age/kind when missing.
     if kind and "YEARLING" not in (lot.get("sold_as") or "").upper() and "WEANLING" not in (
         lot.get("sold_as") or ""
     ).upper():
         lot["sold_as"] = kind
+    lot["sold_as_kind"] = kind
 
     fee = resolve_stud_fee(lot.get("sire") or "", sire_profile, sale_year=year)
     value = _value_projector_payload(lot)
@@ -576,6 +649,7 @@ def expected_market_mid_for_filter(
     sire_profile: Optional[dict] = None,
     sale_year: Optional[int] = None,
     birth_year: Any = None,
+    catalog_default_kind: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Cheap band for catalog price filters (empirical fee-band mid when possible)."""
     kind = (
@@ -585,6 +659,7 @@ def expected_market_mid_for_filter(
             sex,
             birth_year=birth_year,
             sale_year=sale_year,
+            catalog_default_kind=catalog_default_kind,
         )
         or "Yearling"
     )

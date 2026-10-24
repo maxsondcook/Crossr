@@ -192,12 +192,12 @@ def _price_num(raw):
         return 0
 
 
-def _sold_as(row):
+def _sold_as(row, birth_year=None, sale_year=None):
     sold = _blank(_col(row, "SOLD AS", "SOLD AS DESCRIPTION", "DESCRIPTION"))
     if sold:
         return sold
     code = _blank(_col(row, "SOLD AS CODE")).upper()
-    return {
+    mapped = {
         "Y": "Yearling",
         "W": "Weanling",
         "B": "Broodmare",
@@ -205,9 +205,18 @@ def _sold_as(row):
         "2": "Two-Year-Old",
         "3": "Three-Year-Old",
     }.get(code, code)
+    if mapped:
+        return mapped
+    # Foaling age vs catalog year when the CSV leaves sold-as blank.
+    try:
+        from crossr_core.projections import kind_from_foaling_age
+
+        return kind_from_foaling_age(birth_year, sale_year) or ""
+    except Exception:
+        return ""
 
 
-def _lot_from_csv(row):
+def _lot_from_csv(row, sale_year=None):
     sex = _blank(_col(row, "SEX"))
     price_raw = _blank(_col(row, "PRICE", "PRICE_RAW", "SALE PRICE", "AUCTION PRICE"))
     starred = _blank(_col(row, "STARRED")).lower()
@@ -232,7 +241,7 @@ def _lot_from_csv(row):
         "birth_year": birth_year,
         "birth_date": _birth_date(yob_raw),
         "foaled": _blank(_col(row, "FOALED", "STATE")),
-        "sold_as": _sold_as(row),
+        "sold_as": _sold_as(row, birth_year=birth_year, sale_year=sale_year),
         "covering_sire": _blank(_col(row, "COVERING SIRE")),
         "color": color_raw,
         "color_label": _color_word(color_raw),
@@ -276,12 +285,23 @@ def list_lots(catalog_id):
     path = _path_for(catalog_id)
     if not path:
         return None
+    sale_year = _year(catalog_id)
     _, rows = _read_rows(path)
     lots = []
     for row in rows:
-        lot = _lot_from_csv(row)
+        lot = _lot_from_csv(row, sale_year=sale_year)
+        lot["sale_year"] = sale_year
         if lot["hip"] or lot["name"]:
             lots.append(lot)
+    # Catalog modal age fills any remaining blank sold_as (mixed/untitled sales).
+    try:
+        from crossr_core import projections as proj_svc
+
+        proj_svc.annotate_lot_kinds(
+            lots, sale_year=sale_year, catalog_title=str(catalog_id or "")
+        )
+    except Exception:
+        pass
     lots.sort(key=lambda lot: (_hip_sort(lot["hip"]), lot["hip"]))
     return lots
 

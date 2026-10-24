@@ -631,6 +631,7 @@ def expected_market_value(
     catalog_title=None,
     sale_year=None,
     birth_year=None,
+    catalog_default_kind=None,
 ):
     """Expected Market Value from empirical fee-band sales / ValueProjector fallback."""
     from crossr_core import projections as proj_svc
@@ -648,6 +649,7 @@ def expected_market_value(
         covering_sire=covering_sire or "",
         sale_year=sale_year,
         birth_year=birth_year,
+        catalog_default_kind=catalog_default_kind,
     )
     return bundled["expected_market"]
 
@@ -667,6 +669,7 @@ def sale_workspace(
     catalog_title=None,
     sale_year=None,
     birth_year=None,
+    catalog_default_kind=None,
 ):
     """Pedigree, female family, similar crosses for one sale horse. Physical stays blank."""
     from crossr_core import projections as proj_svc
@@ -695,6 +698,7 @@ def sale_workspace(
         covering_sire=covering_sire or "",
         sale_year=sale_year,
         birth_year=birth_year if birth_year is not None else year,
+        catalog_default_kind=catalog_default_kind,
     )
     return {
         "year": year_s,

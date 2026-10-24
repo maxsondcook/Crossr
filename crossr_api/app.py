@@ -414,6 +414,12 @@ def _attach_filter_prices(lots, book, catalog_title="", sale_year=None):
     from crossr_core import projections as proj_svc
 
     lookup = horse_svc.profile_lookup(book or {})
+    year = sale_year
+    if year is None and lots:
+        year = _sale_year_from(lots[0], catalog_title=catalog_title)
+    modal = proj_svc.annotate_lot_kinds(
+        lots, sale_year=year, catalog_title=catalog_title or ""
+    )
     for lot in lots:
         sale = lot.get("price_num") or 0
         try:
@@ -425,15 +431,16 @@ def _attach_filter_prices(lots, book, catalog_title="", sale_year=None):
             lot["filter_price_source"] = "sale_price"
             continue
         profile = lookup.get(main.clean_horse_name(lot.get("sire") or ""))
-        year = sale_year or _sale_year_from(lot, catalog_title=catalog_title)
+        lot_year = year or _sale_year_from(lot, catalog_title=catalog_title)
         band = proj_svc.expected_market_mid_for_filter(
             lot.get("sire") or "",
-            sold_as=lot.get("sold_as") or "",
+            sold_as=lot.get("sold_as") or lot.get("sold_as_kind") or "",
             catalog_title=catalog_title or lot.get("catalog_title") or "",
             sex=lot.get("sex_letter") or lot.get("sex") or "",
             sire_profile=profile,
-            sale_year=year,
+            sale_year=lot_year,
             birth_year=lot.get("birth_year") or lot.get("birth_date"),
+            catalog_default_kind=modal,
         )
         mid = band.get("mid")
         low, high = band.get("low"), band.get("high")
@@ -461,9 +468,19 @@ def _lot_catalog_title(lot, catalog_title=""):
     )
 
 
-def _workspace(lot, book, catalog_title="", catalog=None):
+def _workspace(lot, book, catalog_title="", catalog=None, catalog_default_kind=None):
+    from crossr_core import projections as proj_svc
+
     title = _lot_catalog_title(lot, catalog_title)
     sale_year = _sale_year_from(lot, catalog=catalog, catalog_title=title)
+    modal = catalog_default_kind
+    if modal is None and lot.get("sold_as_kind") in ("Yearling", "Weanling"):
+        modal = lot.get("sold_as_kind")
+    if modal is None:
+        # Single-hip path: still prefer age; title only as last resort inside classifier.
+        modal = proj_svc.kind_from_foaling_age(
+            lot.get("birth_year") or lot.get("birth_date"), sale_year
+        )
     ctx = horse_svc.sale_workspace(
         name=lot.get("name") or lot.get("raw_name"),
         sire=lot.get("sire"),
@@ -472,15 +489,17 @@ def _workspace(lot, book, catalog_title="", catalog=None):
         sex=lot.get("sex_letter") or lot.get("sex"),
         color=lot.get("color"),
         foaled=lot.get("foaled") or lot.get("foaled_location"),
-        sold_as=lot.get("sold_as"),
+        sold_as=lot.get("sold_as") or lot.get("sold_as_kind") or "",
         covering_sire=lot.get("covering_sire"),
         damsire=lot.get("damsire") or lot.get("sire_of_dam"),
         profiles=book,
         catalog_title=title,
         sale_year=sale_year,
         birth_year=lot.get("birth_year") or lot.get("birth_date"),
+        catalog_default_kind=modal,
     )
     ctx["auction_history"] = sales_svc.auctions_for_horses(ctx.get("similar_crosses") or [])
+    ctx["catalog_default_kind"] = modal
     return ctx
 
 
