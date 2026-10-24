@@ -621,7 +621,7 @@ function HorsePage() {
               {(data.race_record || []).map((r) => (
                 <tr key={r.age}>
                   <td>{r.season}</td>
-                  <td>{r.age}</td>
+                  <td>{String(r.age ?? "").match(/\d+/)?.[0] || r.age}</td>
                   <td>{r.starts}</td>
                   <td>{r.firsts}</td>
                   <td>{r.seconds}</td>
