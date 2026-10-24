@@ -1,3 +1,4 @@
+import datetime
 import sys
 import os
 import copy
@@ -553,7 +554,14 @@ def get_profile_meta(name, all_profiles):
     
     # SIMPLIFICATION RULE: Check if horse is in profiles AND status is not pensioned
     is_pensioned = str(profile.get("Status", "")).strip().lower() == "pensioned"
-    is_active = (len(profile) > 0) and not is_pensioned
+    # Only suggest stallions standing now: a published fee and a recent stud season.
+    # Dead or retired sires keep "active" status but lose their fee / duty year.
+    try:
+        duty_year = int(str(profile.get("Stud Duty Year") or "").strip()[:4])
+    except ValueError:
+        duty_year = None
+    is_standing = fee_num > 0 and (duty_year is None or duty_year >= datetime.date.today().year - 1)
+    is_active = (len(profile) > 0) and not is_pensioned and is_standing
 
     return {"rank": rank_val, "fee_str": fee_str, "fee_num": fee_num, "has_progeny": has_progeny, "is_active": is_active}
 
