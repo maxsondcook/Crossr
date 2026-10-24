@@ -3,16 +3,31 @@
 import Link from "next/link";
 import { horseHref } from "../lib/api";
 
+/** Stakes-win (or better) codes from the graded/group winners index. */
+const BLACK_TYPE_STATUS = new Set(["MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW"]);
+
+function isBlackTypeWinner(p) {
+  return Boolean(p?.status && BLACK_TYPE_STATUS.has(String(p.status).toUpperCase()));
+}
+
 function FoalLine({ p, hrefFor }) {
   const sexBit = p.sex ? `${p.sex}. ` : "";
-  const name = p.status || p.is_subject ? (p.name || "").toUpperCase() : p.name;
+  const blackType = isBlackTypeWinner(p);
+  // Uppercase stakes winners (and the subject when they qualify as black-type).
+  const displayName = blackType || p.status ? (p.name || "").toUpperCase() : p.name;
   const link = (label) => (hrefFor ? hrefFor(label) : horseHref(label));
+  // "Black-type winner, above." only for the profile subject when they have a stakes-win status.
+  const trailer = p.is_subject && blackType
+    ? ". Black-type winner, above."
+    : p.status
+      ? `. ${p.status}.`
+      : ".";
   return (
-    <div className={`ff-foal${p.is_subject ? " subject" : ""}${p.status ? " stakes" : ""}`}>
-      <Link href={link(p.name)}>{name}</Link>
+    <div className={`ff-foal${p.is_subject ? " subject" : ""}${blackType ? " stakes" : ""}`}>
+      <Link href={link(p.name)}>{displayName}</Link>
       {p.year ? <span className="yr"> ({p.year})</span> : null}
       {p.sire ? <> ({sexBit}by <Link href={link(p.sire)}>{p.sire}</Link>)</> : null}
-      {p.is_subject ? ". Black-type winner, above." : p.status ? `. ${p.status}.` : "."}
+      {trailer}
       {(p.races || []).length ? ` ${(p.races).join(", ")}.` : null}
       {(p.produce || []).map((g) => (
         <div className="ff-grand" key={`${g.name}-${g.sire}`}>

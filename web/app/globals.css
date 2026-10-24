@@ -419,18 +419,16 @@ button, input, select { font: inherit; color: inherit; }
 .panel:has(.catalog-ped),
 .panel:has(.pedigree-fit) {
   min-width: 0;
-  overflow-x: hidden;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
   overflow-y: auto;
 }
-/* Fit full pedigree in panel width: N × 20ch columns, font scales with container. */
+/* Content-sized pedigree: columns are N×ch (≤20ch), chart does not stretch. */
 .pedigree-fit {
-  --ped-cols: 5;
-  --ped-chars: 20;
-  width: 100%;
+  width: max-content;
   max-width: 100%;
-  overflow: hidden;
-  container-type: inline-size;
-  container-name: pedigree;
+  overflow: visible;
 }
 .panel select, .panel input {
   width: 100%;
@@ -531,14 +529,13 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 
 .catalog-ped {
   /*
-    Each generation column is exactly --ped-chars (20) wide in ch units.
-    Font size = container width / (cols × 20) so the full tree fills the panel
-    with no horizontal scroll and no clipped glyphs against generation lines.
+    Content-sized: each gen column is ≤20ch (shrinks when names are shorter).
+    Long names wrap inside the cell; year stays on the line below the name block.
   */
   display: grid;
-  grid-template-columns: repeat(var(--ped-cols, 5), minmax(0, 1fr));
-  grid-template-rows: repeat(32, minmax(1.85em, auto));
-  width: 100%;
+  grid-template-columns: var(--ped-grid-cols);
+  grid-template-rows: repeat(32, minmax(1.7em, auto));
+  width: max-content;
   max-width: 100%;
   min-height: 0;
   border: 1px solid var(--line);
@@ -546,7 +543,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   overflow: hidden;
   box-sizing: border-box;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: calc(100cqw / (var(--ped-cols, 5) * var(--ped-chars, 20)));
+  font-size: 11px;
   font-variant-ligatures: none;
   letter-spacing: 0;
   line-height: 1.2;
@@ -563,28 +560,28 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   flex-direction: column;
   justify-content: center;
   align-items: flex-start;
-  gap: 0.15em;
+  gap: 0.1em;
   min-width: 0;
   width: 100%;
   overflow: hidden;
-  padding: 0.4em 1ch;
+  padding: 0.35em 1ch;
   border-right: 1px solid var(--line);
   background: #121a2b;
   font-weight: 800;
   text-transform: uppercase;
 }
 .cat-subject .cat-name {
-  display: block;
-  width: 18ch;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: clip;
-  white-space: nowrap;
+  color: #ffffff;
 }
 .cat-subject a:hover { color: var(--gold); }
 .cat-subject .yr {
   display: block;
-  color: var(--muted);
+  color: #b6c3d6;
   font-size: 0.92em;
   font-weight: 600;
   letter-spacing: 0;
@@ -600,8 +597,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   width: 100%;
   min-height: 0;
   overflow: hidden;
-  /* 1ch gutters inside the 20ch column → ~18ch for the name between “pipes” */
-  padding: 0.15em 1ch;
+  padding: 0.12em 1ch;
   border-bottom: 1px solid #243049;
   border-left: 1px solid #243049;
 }
@@ -612,7 +608,6 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   justify-content: center;
   gap: 0;
   width: 100%;
-  max-width: 18ch;
   min-width: 0;
   overflow: hidden;
 }
@@ -620,21 +615,26 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   min-height: 1em;
 }
 .cat-cell .cat-name {
-  display: block;
-  width: 18ch;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: clip;
-  white-space: nowrap;
   font-weight: 700;
   line-height: 1.15;
   text-transform: uppercase;
-  color: #f5f8fc;
+  color: #ffffff;
+}
+.cat-name-line {
+  display: block;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
 }
 .cat-cell .cat-name:hover { color: var(--teal); }
 .cat-cell .yr {
   display: block;
-  color: #a7b6cc;
+  color: #b6c3d6;
   font-size: 0.92em;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -642,25 +642,13 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   line-height: 1.15;
   flex-shrink: 0;
 }
-/* Sales pedigree: left column owns extra width → larger 20ch-scaled type. */
-.sales-col-pedigree .catalog-ped {
-  font-weight: 600;
-}
-.sales-col-pedigree .cat-name {
-  color: #ffffff;
-  -webkit-font-smoothing: antialiased;
-}
-.sales-col-pedigree .yr {
-  color: #b6c3d6;
-}
-/* Uniform scale — do not enlarge early gens (that re-breaks the 20ch budget). */
 .cat-g1,
 .cat-g2,
 .cat-g3,
 .cat-g4,
 .cat-g5 { font-size: 1em; }
-.cat-cell.sire { border-left: 0.22em solid var(--teal); }
-.cat-cell.dam { border-left: 0.22em solid var(--pink); }
+.cat-cell.sire { border-left: 2px solid var(--teal); }
+.cat-cell.dam { border-left: 2px solid var(--pink); }
 .horse-inline-link {
   color: var(--teal);
   text-decoration: underline;
