@@ -49,6 +49,7 @@ function CrossSuccess({ cross }) {
     <div className="cross-success">
       <p className="cross-head">
         <HorseLink name={cross.name} /> <span className="cross-status">[{cross.status}]</span>
+        {cross.similarity != null ? <span className="cross-sim"> {cross.similarity}% similar</span> : null}
         {cross.sire ? <> ({sex ? `${sex} ` : ""}BY <HorseLink name={cross.sire} />)</> : null}
         {cross.dam ? <> OUT OF THE MARE <HorseLink name={cross.dam} /></> : null}
         {cross.damsire ? <> (M. BY <HorseLink name={cross.damsire} />)</> : null}
@@ -350,41 +351,6 @@ function HypomatingInner() {
                           <Link href={horseHref(s.name)}>{horseCaps(s.name)}</Link>
                         </strong>
                         <div className="parents">RANK #{s.rank} · {horseCaps(s.stud_fee)}</div>
-                        {openLogic === s.name ? (
-                          <div className="logic">
-                            {[...(s.cross_meta || []).map((m) => ({
-                              name: m.foal_name,
-                              status: m.status,
-                              sex: m.sex,
-                              sire: m.sire || m.actual_sire_name,
-                              dam: m.dam,
-                              damsire: m.damsire,
-                              wins: m.wins,
-                              prose: m.wins ? null : m.races_sentence,
-                            })), ...sortCrosses(s.crosses || [])].map((c) => (
-                              <CrossSuccess key={`${c.name}-${c.status}`} cross={c} />
-                            ))}
-                            {Object.entries(s.reasons_by_tier || {}).flatMap(([tier, msgs]) =>
-                              msgs
-                                // Cross successes are listed above in structured form.
-                                .filter((msg) => !(s.crosses || []).length || !msg.startsWith("Cross Success"))
-                                .map((msg) => {
-                                  const linkNames = [
-                                    s.name,
-                                    result.mare,
-                                    result.damsire,
-                                    ...(s.cross_meta || []).map((m) => m.foal_name),
-                                    ...(brood?.progeny || []).map((p) => p.name),
-                                  ].filter(Boolean);
-                                  return (
-                                    <p key={msg}>
-                                      {horseCaps(tier)}: <HorseText text={msg} names={linkNames} />
-                                    </p>
-                                  );
-                                })
-                            )}
-                          </div>
-                        ) : null}
                       </div>
                       <div className="suggest-actions">
                         <Link
@@ -404,6 +370,42 @@ function HypomatingInner() {
                         <button className="primary" onClick={() => makeReport(s.name)}>CREATE HYPOFOAL</button>
                       </div>
                     </div>
+                    {openLogic === s.name ? (
+                      <div className="logic logic-wide">
+                        {[...(s.cross_meta || []).map((m) => ({
+                          name: m.foal_name,
+                          status: m.status,
+                          sex: m.sex,
+                          sire: m.sire || m.actual_sire_name,
+                          dam: m.dam,
+                          damsire: m.damsire,
+                          wins: m.wins,
+                          similarity: m.similarity,
+                          prose: m.wins ? null : m.races_sentence,
+                        })), ...sortCrosses(s.crosses || [])].map((c) => (
+                          <CrossSuccess key={`${c.name}-${c.status}`} cross={c} />
+                        ))}
+                        {Object.entries(s.reasons_by_tier || {}).flatMap(([tier, msgs]) =>
+                          msgs
+                            // Cross successes are listed above in structured form.
+                            .filter((msg) => !(s.crosses || []).length || !msg.startsWith("Cross Success"))
+                            .map((msg) => {
+                              const linkNames = [
+                                s.name,
+                                result.mare,
+                                result.damsire,
+                                ...(s.cross_meta || []).map((m) => m.foal_name),
+                                ...(brood?.progeny || []).map((p) => p.name),
+                              ].filter(Boolean);
+                              return (
+                                <p key={msg}>
+                                  {horseCaps(tier)}: <HorseText text={msg} names={linkNames} />
+                                </p>
+                              );
+                            })
+                        )}
+                      </div>
+                    ) : null}
                     {s.has_lineage ? (
                       <div className="suggest-alts">
                         <button className="ghost alts-btn" type="button" onClick={() => toggleLineage(s.name)}>

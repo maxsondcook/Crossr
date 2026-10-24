@@ -792,6 +792,8 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .cross-success { margin: 12px 0; }
 .cross-head { margin: 0; color: var(--text); line-height: 1.45; }
 .cross-status { color: var(--gold); font-weight: 700; }
+.cross-sim { color: var(--teal); font-weight: 700; }
+.logic-wide { margin-top: 10px; padding-top: 4px; border-top: 1px solid var(--line); }
 .cross-wins { margin: 4px 0 0; padding-left: 20px; color: var(--muted); line-height: 1.5; }
 .cross-year { color: #6d7d96; }
 .cross-prose { margin: 4px 0 0 20px; color: var(--muted); }
