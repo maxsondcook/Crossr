@@ -414,7 +414,6 @@ function HorsePage() {
   const hasProgenyStats = racingCards.length || earningsCards.length || legacyCards.length;
   const totals = data.race_totals || {};
   const family = data.female_family || [];
-  const bmsRank = s.broodmare_rank || (data.broodmare_sire || []).find((row) => row.rank)?.rank;
   const bmsCountLabel = (data.broodmare_sire || []).find((row) => row.count_label)?.count_label || "Runners";
   const rankingMeta = data.sire_rankings || {};
   const RANK_LISTS = rankingMeta.lists || [];
@@ -453,10 +452,6 @@ function HorsePage() {
             <div className="kpi">
               <span>Sire Rank</span>
               <b className="muted">{s.rank ? `#${s.rank}` : "NA"}</b>
-            </div>
-            <div className="kpi">
-              <span>BMS Rank</span>
-              <b className="muted">{bmsRank ? `#${bmsRank}` : "NA"}</b>
             </div>
           </div>
         </div>
