@@ -600,7 +600,12 @@ def similar_cross_rows(
             rows.append(row)
     tier = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "SW": 6}
     rows.sort(key=lambda row: (-(row["similarity"] if row["similarity"] is not None else -1), tier.get(row["class"], 9)))
-    return rows[:limit]
+    rows = rows[:limit]
+    earn_lookup = _progeny_earnings_lookup()
+    for row in rows:
+        earnings = earn_lookup.get(main.clean_horse_name(row.get("name") or "")) or 0
+        row["earnings"] = earnings or None
+    return rows
 
 
 def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, limit=25):
@@ -1800,6 +1805,18 @@ def get_horse_profile(search_name, profiles=None):
     else:
         payload_top = []
     entered_stud = data.get("Stud Duty Year") if data else None
+    # "Stud Duty Year" is often the current season; use the first season with book data if earlier.
+    if data:
+        fees_hist, mares_hist = load_book_stats()
+        book_key = main.clean_horse_name(matched_key or search_name)
+        book_years = set(fees_hist.get(book_key, {})) | set(mares_hist.get(book_key, {}))
+        first_book_year = min(book_years) if book_years else None
+        duty_year = _intish(entered_stud)
+        if first_book_year and (not duty_year or first_book_year < duty_year):
+            entered_stud = str(first_book_year)
+            if stallion:
+                stallion["entered_stud"] = entered_stud
+                stallion["crop"] = crop_label(entered_stud)
     bms_rows = broodmare_sire_history(matched_key or search_name)
     try:
         ranking_rows = stallion_ranking_history(matched_key or search_name, entered_stud=entered_stud)
