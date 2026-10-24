@@ -67,9 +67,6 @@ export default function HypofoalDetail({ report, onBack = null, loading = false,
       <h2 className="hypofoal-title">{title}</h2>
       <p className="sub">
         {horseCaps(report.sire)} × {horseCaps(report.dam)}
-        {report.inbreeding?.coefficient_pct != null
-          ? ` · INBREEDING ${report.inbreeding.coefficient_pct}%`
-          : ""}
       </p>
 
       <div className="dash hypofoal-panels" style={{ marginTop: 12, gridTemplateColumns: "max-content minmax(360px, 1fr)" }}>
@@ -89,7 +86,7 @@ export default function HypofoalDetail({ report, onBack = null, loading = false,
         </div>
 
         <div>
-          <div className="panel">
+          <div className="panel scroll-panel">
             <h4>SIMILAR SUCCESSFUL CROSSES</h4>
             {!crosses.length ? (
               <p className="empty">No similar successful crosses on file yet.</p>
@@ -100,6 +97,7 @@ export default function HypofoalDetail({ report, onBack = null, loading = false,
                     <th>HORSE</th>
                     <th>CLASS</th>
                     <th>SIMILARITY</th>
+                    <th>EARNINGS</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -110,6 +108,7 @@ export default function HypofoalDetail({ report, onBack = null, loading = false,
                       </td>
                       <td>{horseCaps(row.class) || "—"}</td>
                       <td>{row.similarity != null ? `${row.similarity}%` : "—"}</td>
+                      <td className="money">{row.earnings ? money(row.earnings) : "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -117,7 +116,7 @@ export default function HypofoalDetail({ report, onBack = null, loading = false,
             )}
           </div>
 
-          <div className="panel" style={{ marginTop: 12 }}>
+          <div className="panel scroll-panel" style={{ marginTop: 12 }}>
             <h4>SIMILAR AUCTION RESULTS</h4>
             {!auctions.length ? (
               <p className="empty">No auction history on file for these crosses yet.</p>
@@ -169,7 +168,7 @@ export default function HypofoalDetail({ report, onBack = null, loading = false,
             )}
           </div>
 
-          <div className="panel" style={{ marginTop: 12 }}>
+          <div className="panel scroll-panel" style={{ marginTop: 12 }}>
             <h4>CURRENT-DAY STALLIONS SIMILARITY</h4>
             {!stallions.length ? (
               <p className="empty">No similar active stallions on file yet.</p>
