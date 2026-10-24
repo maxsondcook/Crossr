@@ -322,10 +322,15 @@ function StallionRankingsPanel({ rankingMeta: rawRankingMeta, rankList: rawRankL
   const parentList = regionalParent(rawRankList) && rankingMeta.lists.some((l) => l.id === regionalParent(rawRankList))
     ? regionalParent(rawRankList)
     : rawRankList;
-  const rankList = cropGroupFor(parentList)?.id || parentList;
+  const groupedList = cropGroupFor(parentList)?.id || parentList;
+  const isBook = (id) => (rankingMeta.lists || []).some((l) => l.id === id && l.group === "book");
+  const rankList = isBook(groupedList)
+    ? ((rankingMeta.lists || []).find((l) => l.group !== "book")?.id || groupedList)
+    : groupedList;
   const lists = rankingMeta.lists || [];
   const bloodhorseLists = lists.filter((list) => list.group !== "book");
-  const bookLists = lists.filter((list) => list.group === "book");
+  // Book ranks (stud fee, mares bred) live in the Stud Fee & Mares Bred panel.
+  const bookLists = [];
   const { columns, rows } = useMemo(
     () => shapeRankingTable(
       (rankingMeta.columns && rankingMeta.columns[rankList]) || [
@@ -552,6 +557,11 @@ function HorsePage() {
   const bmsCountLabel = (data.broodmare_sire || []).find((row) => row.count_label)?.count_label || "Runners";
   const rankingMeta = data.sire_rankings || {};
   const RANK_LISTS = rankingMeta.lists || [];
+  // Stud fee / mares bred ranks show beside the book figures, not in the rankings list.
+  const bookRank = { stud_fee: {}, mares_bred: {} };
+  for (const id of Object.keys(bookRank)) {
+    for (const row of (rankingMeta.rows || {})[id] || []) bookRank[id][row.year] = row.rank;
+  }
 
   return (
     <div className="dash">
@@ -652,7 +662,9 @@ function HorsePage() {
                 <tr>
                   <th>Year</th>
                   <th>Stud Fee</th>
+                  <th>Fee Rank</th>
                   <th>Mares Bred</th>
+                  <th>MB Rank</th>
                   <th>Live Foals</th>
                   <th>Live Foal %</th>
                 </tr>
@@ -662,7 +674,9 @@ function HorsePage() {
                   <tr key={row.year}>
                     <td>{row.year}</td>
                     <td className="money">{row.stud_fee || "—"}</td>
+                    <td>{bookRank.stud_fee[row.year] ? `#${bookRank.stud_fee[row.year]}` : "—"}</td>
                     <td>{row.mares_bred ?? "—"}</td>
+                    <td>{bookRank.mares_bred[row.year] ? `#${bookRank.mares_bred[row.year]}` : "—"}</td>
                     <td>{row.live_foals ?? "—"}</td>
                     <td>{row.live_foal_pct || "—"}</td>
                   </tr>
