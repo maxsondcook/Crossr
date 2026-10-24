@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import threading
 
 import main
 from crossr_core import sample_db
@@ -167,6 +168,10 @@ def _db_path():
     return str(sample_db.csv_path("stallion_rankings"))
 
 
+# The in-memory rankings DB is one shared connection; concurrent requests must not query it at once.
+_QUERY_LOCK = threading.Lock()
+
+
 def _conn():
     return sample_db.rankings_connection()
 
@@ -235,16 +240,17 @@ def rich_rankings_from_db(stallion_name, entered_stud=None):
         start = None
 
     try:
-        raw_rows = conn.execute(
-            """
-            SELECT *
-            FROM stallion_rankings
-            WHERE upper(stallion) = upper(?)
-               OR upper(stallion) LIKE upper(?) || ' (%'
-            ORDER BY year DESC, list, table_name
-            """,
-            (key, key),
-        ).fetchall()
+        with _QUERY_LOCK:
+            raw_rows = conn.execute(
+                """
+                SELECT *
+                FROM stallion_rankings
+                WHERE upper(stallion) = upper(?)
+                   OR upper(stallion) LIKE upper(?) || ' (%'
+                ORDER BY year DESC, list, table_name
+                """,
+                (key, key),
+            ).fetchall()
     except sqlite3.Error:
         return {"lists": [], "rows": {}, "columns": {}}
 
