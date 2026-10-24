@@ -170,6 +170,7 @@ def replay(yw: pd.DataFrame, hist: sm.History, events: pd.DataFrame) -> np.ndarr
                     "sire_k": r.sire_k, "dam_k": r.dam_k, "damsire_k": raw["damsire_k"],
                     "sale_key": r.sale_key, "kind": r.kind, "lp": r.lp, "rel": r.rel,
                     "sire_rel": f["sire_rel"], "damsire_rel": f["damsire_rel"],
+                    "hip_pct": None if pd.isna(r.hip_pct) else float(r.hip_pct),
                 })
         hist.add_sale(sold_rows, int(year))
     while ei < len(ev):
@@ -579,6 +580,7 @@ FEATURE_DOC = {
     "dam_log_gsp": "Log(1 + dam's graded-placed foals to date)",
     "dam_own_gsw": "Dam herself a graded winner",
     "dam_own_gsp": "Dam herself graded placed",
+    "hip_signal": "This sale's earlier-years price curve by hip position, at this hip (shrunk)",
     "hip_pct": "Hip position within the catalog (0 = first, 1 = last)",
     "hip_pct_sq": "Hip position squared",
 }

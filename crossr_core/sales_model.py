@@ -32,6 +32,8 @@ ARTIFACT_PATH = ROOT / "Analyzed Sales" / "sales_model.json.gz"
 SALE_LEVEL_MAX_LAG = 2
 # Nearest prior stud fee allowed when the exact year is missing.
 FEE_MAX_LAG = 2
+# Per-sale hip curves are shrunk toward "no effect" by n / (n + HIP_K) lots.
+HIP_K = 200.0
 
 Z80 = 1.2815515655446004  # standard-normal 90th percentile -> 80% interval
 Z50 = 0.6744897501960817  # 75th percentile -> 50% (p25-p75) interval
@@ -57,10 +59,11 @@ PRICE_FEATURES = [
     "dam_log_gsp",
     "dam_own_gsw",
     "dam_own_gsp",
+    "hip_signal",
     "hip_pct",
     "hip_pct_sq",
 ]
-HIP_FEATURES = ("hip_pct", "hip_pct_sq")
+HIP_FEATURES = ("hip_signal", "hip_pct", "hip_pct_sq")
 
 
 def name_key(name: Any) -> str:
@@ -113,6 +116,9 @@ class History:
         # sale levels: "sale_key|kind" -> {year: mean log price}; market: kind -> {year: mean}
         self.sale_level: Dict[str, Dict[int, float]] = defaultdict(dict)
         self.market_level: Dict[str, Dict[int, float]] = defaultdict(dict)
+        # per "sale_key|kind": moments for regressing rel on (h, h^2), h = hip_pct - 0.5.
+        # Some sales run best-first (Keeneland books); others are alphabetical.
+        self.hip_moments: Dict[str, List[float]] = defaultdict(lambda: [0.0] * 9)
         self.lfee_fill: float = 9.5
         self.through_year: Optional[int] = None
 
@@ -153,6 +159,23 @@ class History:
                 best, best_score = key, score
         return best if best_score >= 0.6 else None
 
+    def hip_curve(self, skey: Optional[str], hip_pct: Optional[float]) -> float:
+        """Earlier years' price-vs-hip curve at this sale, evaluated at this hip (0 when unknown)."""
+        if not skey or hip_pct is None or skey not in self.hip_moments:
+            return 0.0
+        n, s1, s2, s11, s12, s22, sr, s1r, s2r = self.hip_moments[skey]
+        if n < 30:
+            return 0.0
+        a = [[n, s1, s2], [s1, s11, s12], [s2, s12, s22]]
+        rhs = [sr, s1r, s2r]
+        coef = _solve3(a, rhs)
+        if coef is None:
+            return 0.0
+        h = float(hip_pct) - 0.5
+        # centre so the curve averages 0 over the sale's own hips
+        fitted = coef[1] * (h - s1 / n) + coef[2] * (h * h - s2 / n)
+        return fitted * n / (n + HIP_K)
+
     def raw_stats(self, lot: Dict[str, Any]) -> Dict[str, Any]:
         """As-of stats for one lot. Keys: sire_k, dam_k, damsire_k, sale_key, kind, year, sex, hip_pct."""
         year = int(lot["year"])
@@ -180,6 +203,7 @@ class History:
             "dam_gsp": self.dam_gsp.get(dam_k, 0),
             "dam_own": self.own.get(dam_k, 0),
             "hip_pct": lot.get("hip_pct"),
+            "hip_signal": self.hip_curve(skey, lot.get("hip_pct")),
             "damsire_k": ds_k,
         }
 
@@ -222,6 +246,7 @@ class History:
             "dam_log_gsp": math.log1p(raw["dam_gsp"]),
             "dam_own_gsw": float(raw["dam_own"] == 2),
             "dam_own_gsp": float(raw["dam_own"] == 1),
+            "hip_signal": raw.get("hip_signal", 0.0),
             "hip_pct": hip,
             "hip_pct_sq": hip * hip,
         }
@@ -245,7 +270,14 @@ class History:
         levels: Dict[str, List[float]] = defaultdict(list)
         market: Dict[str, List[float]] = defaultdict(list)
         for r in rows:
-            levels[f"{r['sale_key']}|{r['kind']}"].append(r["lp"])
+            skey = f"{r['sale_key']}|{r['kind']}"
+            levels[skey].append(r["lp"])
+            hip = r.get("hip_pct")
+            if hip is not None:
+                h = hip - 0.5
+                m = self.hip_moments[skey]
+                for j, v in enumerate((1.0, h, h * h, h * h, h ** 3, h ** 4, r["rel"], h * r["rel"], h * h * r["rel"])):
+                    m[j] += v
             market[r["kind"]].append(r["lp"])
             rel = r["rel"]
             for table, key in ((self.sire, r["sire_k"]), (self.dam, r["dam_k"])):
@@ -290,6 +322,7 @@ class History:
             "dam_sire": dam_sire,
             "sale_level": {k: {str(y): round(v, 5) for y, v in t.items()} for k, t in self.sale_level.items()},
             "market_level": {k: {str(y): round(v, 5) for y, v in t.items()} for k, t in self.market_level.items()},
+            "hip_moments": dict(self.hip_moments),
         }
 
     @classmethod
@@ -305,12 +338,28 @@ class History:
         h.dam_gsw.update(blob["dam_gsw"])
         h.dam_gsp.update(blob["dam_gsp"])
         h.own = dict(blob["own"])
+        h.hip_moments.update({k: list(v) for k, v in blob.get("hip_moments", {}).items()})
         h.dam_sire = dict(blob["dam_sire"])
         for name in ("sale_level", "market_level"):
             getattr(h, name).update(
                 {k: {int(y): v for y, v in t.items()} for k, t in blob[name].items()}
             )
         return h
+
+
+def _solve3(a: List[List[float]], b: List[float]) -> Optional[List[float]]:
+    """Solve a 3x3 linear system (Gaussian elimination with partial pivoting)."""
+    m = [row[:] + [b[i]] for i, row in enumerate(a)]
+    for col in range(3):
+        piv = max(range(col, 3), key=lambda r: abs(m[r][col]))
+        if abs(m[piv][col]) < 1e-12:
+            return None
+        m[col], m[piv] = m[piv], m[col]
+        for r in range(3):
+            if r != col:
+                f = m[r][col] / m[col][col]
+                m[r] = [x - f * y for x, y in zip(m[r], m[col])]
+    return [m[i][3] / m[i][i] for i in range(3)]
 
 
 # --------------------------------------------------------------------- scoring

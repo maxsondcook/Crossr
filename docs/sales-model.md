@@ -44,13 +44,20 @@ fee at conception (+ missing flag), fee change from conception to sale, sire /
 damsire / dam earlier-foal prices relative to their sale (empirical-Bayes shrunk;
 k estimated from pre-2010 data: sire 2.3, dam 1.8, damsire 7.9), sire × damsire
 cross (nick) residual, counts of earlier foals and graded winners/placed, dam's
-own graded record, hip position within the catalog (proxy for book/session).
+own graded record, and hip position (proxy for book/session).
+
+Hip position is **per sale**: Keeneland sells best-first in books, so late hips
+sell far lower, while Fasig-Tipton's single-session sales are alphabetical and
+show no hip gradient once pedigree is accounted for. `hip_signal` is each sale's
+own earlier-years price curve by hip (quadratic, refit as of every sale, shrunk
+by n / (n + 200) lots; 0 for a sale with no history). A single pooled hip curve
+was also a candidate and the rule dropped it.
 
 **Selection rule (agreed):** a feature (or pair, e.g. fee + missing flag) is kept
 only if p < 0.01 with sire-clustered standard errors **and** dropping it lowers
 held-out log-likelihood (train ≤ 2017, test 2018–2025). Market trend, weanling,
 number of sire foals, missing damsire and dam's graded-winner/placed foal counts
-failed for price.
+and the pooled hip curve failed for price.
 
 ## Models
 
@@ -72,29 +79,30 @@ Rolling by sale year 2010–2025 (train on all earlier years, score the next):
 
 | | With hip | No hip | Current fee bands |
 |---|---|---|---|
-| R² (log price) | **0.50** | 0.45 | — |
-| R² on lots the fee bands can price (n=70,647) | **0.53** | 0.49 | 0.43 |
-| Median absolute error | 60% | 63% | — |
-| p25–p75 range contains price | 51.1% (target 50) | 50.8% | — |
-| p10–p90 range contains price | 81.0% (target 80) | 81.1% | — |
+| R² (log price) | **0.54** | 0.45 | — |
+| R² on lots the fee bands can price (n=70,647) | **0.56** | 0.49 | 0.43 |
+| Median absolute error | 58% | 63% | — |
+| p25–p75 range contains price | 51.3% (target 50) | 50.8% | — |
+| p10–p90 range contains price | 81.1% (target 80) | 81.1% | — |
 
-Honest noise level: a single horse's 80% range is about ÷/× 4. The data has no
+Honest noise level: a single horse's 80% range is about ÷/× 3.8. The data has no
 conformation, vet or consignor information for most lots, so most of the spread is
 irreducible from what we hold. Remaining bias: prices run ~6% above prediction on
-average, which is the market's year-over-year growth the model can't foresee.
+average (+0.07 log), which is the market's year-over-year growth the model can't foresee.
 
-Boom%, crops 2008–2021: AUC 0.68 (with hip) / 0.65; the top predicted decile
-produced graded winners at 3.3% vs 0.45% in the bottom decile (base 1.2%), and
+Boom%, crops 2008–2021: AUC 0.69 (with hip) / 0.65; the top predicted decile
+produced graded winners at 3.5% vs 0.54% in the bottom decile (base 1.2%), and
 predicted rates match observed rates decile by decile.
 
-## Key effects (price, with hip; all p ≤ 0.001)
+## Key effects (price, with hip; all p < 0.0001)
 
-- Filly: −18% vs colt
-- Stud fee at conception: +10% fee → +2.5% price, on top of the sire's track record
+- Filly: −16% vs colt
+- Stud fee at conception: +10% fee → +1.8% price, on top of the sire's track record
   (the sire's earlier-foal prices carry most of the fee signal)
-- Sire fee rising between conception and sale: +10% → +4.8%
-- Dam herself graded winner: +16%; graded placed: +15%
-- Hip position: lots at the end of a catalog sell for well under half of lots at the front
+- Sire fee rising between conception and sale: +10% → +3.9%
+- Dam herself graded winner: +10%; graded placed: +12%
+- Hip position: same pedigree at Keeneland September, hip 5% vs 95% of the catalog:
+  ~$690k vs ~$69k; at Fasig-Tipton October: ~$110k vs ~$117k (no effect)
 - Each sire / damsire / dam / cross track-record term is strongly positive (see results)
 
 ## Retraining
