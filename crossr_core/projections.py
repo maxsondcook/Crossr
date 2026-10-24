@@ -267,16 +267,23 @@ def _value_projector_payload(lot: dict) -> Dict[str, Any]:
     point = raw.get("point")
     low = raw.get("low")
     high = raw.get("high")
+    display = raw.get("display") or raw.get("VALUE PROJECTOR") or ""
+    race = (raw.get("PROJECTED RACE EARNINGS") or "").strip()
+    breeding_ok = bool(point) or bool(display)
+    race_ok = bool(race)
     return {
-        "ok": bool(point) or bool(raw.get("display")),
+        # Ready if either breeding value or race earnings is available.
+        "ok": breeding_ok or race_ok,
+        "breeding_ok": breeding_ok,
+        "race_ok": race_ok,
         "kind": raw.get("kind"),
         "role": raw.get("role"),
         "point": point,
         "low": low,
         "high": high,
-        "display": raw.get("display") or raw.get("VALUE PROJECTOR") or "",
+        "display": display,
         "detail": raw.get("detail") or "",
-        "projected_race_earnings": raw.get("PROJECTED RACE EARNINGS") or "",
+        "projected_race_earnings": race,
         "race_detail": raw.get("race_detail") or "",
     }
 

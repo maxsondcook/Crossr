@@ -324,10 +324,10 @@ function SalesPage() {
     if (!lots.length) return "";
     const sources = new Set(lots.map((lot) => lot.filter_price_source).filter(Boolean));
     if (sources.has("sale_price") && (sources.has("expected_market_mid") || sources.has("unknown"))) {
-      return "Price uses sale price when sold; otherwise Expected Market mid (historical sales × fee-at-sale).";
+      return "Price uses sale price when sold; otherwise Expected Market mid.";
     }
     if (sources.has("sale_price")) return "Price uses catalog sale price.";
-    return "Price uses Expected Market mid (historical sales × fee-at-sale) — no sale prices yet.";
+    return "Price uses Expected Market mid — no sale prices yet.";
   }, [lots]);
 
   function lotIsStarred(lot) {
@@ -755,9 +755,6 @@ function SalesPage() {
                     <div data-meta="expected-market">
                       <span className="meta-label">Expected Market Value</span>
                       <b className="money">{ready ? expectedMarketLabel(detail, current) : "…"}</b>
-                      {ready && detail?.expected_market?.rule ? (
-                        <span className="meta-sub">{detail.expected_market.rule}</span>
-                      ) : null}
                     </div>
                     {mode === "past" ? (
                       <div><span className="meta-label">Auction price</span><b className="money">{priceLabel(current)}</b></div>
@@ -770,7 +767,6 @@ function SalesPage() {
                   <h4>PROJECTED VALUE</h4>
                   <ProjectedValue
                     valueProjector={ready ? detail?.expected_market?.value_projector : null}
-                    expectedMarket={ready ? detail?.expected_market : null}
                     lot={ready ? (detail?.lot || current) : current}
                     showSold={mode === "past"}
                   />
