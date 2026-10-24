@@ -34,7 +34,7 @@ function CompareInner() {
         <h2>{d.name}</h2>
         <p>{s.farm} · {s.stud_fee} · Rank {s.rank || "NA"}</p>
         <p>Foaled {s.year_foaled} · Stud {s.entered_stud}</p>
-        <PedigreeChart tree={d.pedigree} />
+        <PedigreeChart tree={d.pedigree} showSubject={false} />
       </div>
     );
   }

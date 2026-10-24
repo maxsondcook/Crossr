@@ -655,10 +655,10 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .cat-g5 { font-size: 1em; }
 .cat-cell.sire { border-left: 2px solid var(--teal); }
 .cat-cell.dam { border-left: 2px solid var(--pink); }
-/* Hypomating results: pedigree content-sized; suggested stallions get the wider column. */
+/* Hypomating results: pedigree column hugs the chart; suggested stallions take the rest. */
 .hypo-results {
   display: grid;
-  grid-template-columns: minmax(380px, 0.9fr) minmax(560px, 1.55fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 12px;
   align-items: start;
   margin-top: 12px;
@@ -676,7 +676,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 }
 .hypo-results .family-panel {
   margin-top: 10px;
-  max-width: min(100%, 42rem);
+  contain: inline-size;
 }
 .horse-inline-link {
   color: var(--teal);

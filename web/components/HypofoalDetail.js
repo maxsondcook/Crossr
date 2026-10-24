@@ -72,12 +72,12 @@ export default function HypofoalDetail({ report, onBack = null, loading = false,
           : ""}
       </p>
 
-      <div className="dash hypofoal-panels" style={{ marginTop: 12, gridTemplateColumns: "minmax(640px, 1.4fr) minmax(360px, 1fr)" }}>
+      <div className="dash hypofoal-panels" style={{ marginTop: 12, gridTemplateColumns: "max-content minmax(360px, 1fr)" }}>
         <div>
           <div className="panel">
             <h4>PEDIGREE</h4>
             {report.pedigree ? (
-              <PedigreeChart tree={report.pedigree} />
+              <PedigreeChart tree={report.pedigree} showSubject={false} />
             ) : (
               <p className="empty">No pedigree on file for this mating.</p>
             )}
