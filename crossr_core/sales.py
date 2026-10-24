@@ -1,4 +1,6 @@
 """Sales hub queries over data/sales_lots.csv (via sample_db in-memory index)."""
+import re
+
 import sales_history
 from crossr_core import sample_db
 
@@ -285,6 +287,12 @@ def _sale_price_num(raw):
         return 0
 
 
+def _is_catalog_label(horse_name):
+    """Unnamed hips are listed as 'SIRE x DAM' (sometimes with a crop year)."""
+    text = str(horse_name or "").strip()
+    return not text or bool(re.search(r"\s[xX]\s", text)) or text.upper().startswith(("UNNAMED", "NAME"))
+
+
 def auctions_for_horses(crosses, limit=40):
     """Sale rows from placeholderdatabase/sale_results.csv for similar-cross horses.
 
@@ -306,8 +314,10 @@ def auctions_for_horses(crosses, limit=40):
         seen.add(key)
         sire = row.get("sire") or ""
         dam = row.get("dam") or ""
+        ped = main.PEDIGREE_DATABASE.get(main.clean_horse_name(name)) or {}
+        year_match = re.search(r"\((\d{4})\)", str(ped.get("Horse") or ""))
+        foal_year = row.get("year") or (year_match.group(1) if year_match else "")
         if not sire or not dam:
-            ped = main.PEDIGREE_DATABASE.get(main.clean_horse_name(name)) or {}
             sire_node = ped.get("Sire") or {}
             dam_node = ped.get("Dam") or {}
             if not sire:
@@ -320,6 +330,7 @@ def auctions_for_horses(crosses, limit=40):
             "name_key": key,
             "sire_key": placeholder_store.name_key(sire),
             "dam_key": placeholder_store.name_key(dam),
+            "foal_year": str(foal_year or "").strip()[:4],
         })
     if not targets:
         return []
@@ -338,7 +349,18 @@ def auctions_for_horses(crosses, limit=40):
         hk = placeholder_store.name_key(horse)
         sk = placeholder_store.name_key(sale.get("sire") or "")
         dk = placeholder_store.name_key(sale.get("dam") or "")
-        match = by_name.get(hk) or by_pair.get((sk, dk))
+        # Same name must also be the same parents (older horses reuse names), and a
+        # sire/dam match only counts for an unnamed hip of the same foal crop, not a sibling.
+        match = by_name.get(hk)
+        if match and match["sire_key"] and match["dam_key"] and sk and dk and (sk, dk) != (match["sire_key"], match["dam_key"]):
+            match = None
+        if not match:
+            pair = by_pair.get((sk, dk))
+            named_other = hk and pair and hk != pair["name_key"] and not _is_catalog_label(horse)
+            born = str(sale.get("birth_year") or "").strip()[:4]
+            wrong_crop = pair and pair["foal_year"] and born and born != pair["foal_year"]
+            if pair and not named_other and not wrong_crop:
+                match = pair
         if not match:
             continue
         price_num = _sale_price_num(sale.get("price_num"))
