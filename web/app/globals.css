@@ -700,6 +700,9 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .horse-inline-link:hover { color: var(--gold); }
 
 .family-panel { overflow: auto; }
+/* Long result lists scroll inside their panel; table headers stay visible. */
+.scroll-panel { max-height: min(60vh, 520px); overflow-y: auto; }
+.scroll-panel thead th { position: sticky; top: -12px; background: var(--panel); z-index: 1; }
 /* Horse page: family panel follows the pedigree's width instead of widening the column. */
 .dash .family-panel { contain: inline-size; }
 .ff-block { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #243049; }
@@ -953,6 +956,8 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   letter-spacing: 0.01em;
 }
 .pv-item[data-pv="sold"] b { color: var(--gold); }
+.pv-price { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.pv-price b { display: block; margin-top: 4px; font-size: 18px; font-variant-numeric: tabular-nums; }
 .pv-note { color: var(--muted); font-size: 13px; margin: 10px 0 0; line-height: 1.45; }
 @media (max-width: 720px) {
   .pv-grid,

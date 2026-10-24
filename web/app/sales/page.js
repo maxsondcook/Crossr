@@ -813,12 +813,7 @@ function SalesPage() {
                       </b>
                     </div>
                     <div><span className="meta-label">Hip</span><b>{current.hip || "—"}</b></div>
-                    {(!ready || projectionPanels(detail, current).showPrice) ? (
-                      <div data-meta="projected-price">
-                        <span className="meta-label">Projected Price</span>
-                        <b className="money">{ready ? projectedPriceLabel(detail) : "…"}</b>
-                      </div>
-                    ) : null}
+                    <div><span className="meta-label">Barn</span><b>{blank(current.barn) || "—"}</b></div>
                     {mode === "past" ? (
                       <div><span className="meta-label">Auction price</span><b className="money">{priceLabel(current)}</b></div>
                     ) : null}
@@ -826,14 +821,22 @@ function SalesPage() {
                   {jumpError ? <p className="error">{jumpError}</p> : null}
                 </div>
 
-                {(!ready || projectionPanels(detail, current).showValue) ? (
+                {(!ready || projectionPanels(detail, current).showValue || projectionPanels(detail, current).showPrice) ? (
                   <div className="panel" data-panel="projected-value">
                     <h4>PROJECTED VALUE</h4>
-                    <ProjectedValue
-                      valueProjector={ready ? detail?.expected_market?.value_projector : null}
-                      lot={ready ? (detail?.lot || current) : current}
-                      showSold={mode === "past"}
-                    />
+                    {(!ready || projectionPanels(detail, current).showPrice) ? (
+                      <div className="pv-price" data-meta="projected-price">
+                        <span className="pv-label">Projected Price</span>
+                        <b className="money">{ready ? projectedPriceLabel(detail) : "…"}</b>
+                      </div>
+                    ) : null}
+                    {(!ready || projectionPanels(detail, current).showValue) ? (
+                      <ProjectedValue
+                        valueProjector={ready ? detail?.expected_market?.value_projector : null}
+                        lot={ready ? (detail?.lot || current) : current}
+                        showSold={mode === "past"}
+                      />
+                    ) : null}
                   </div>
                 ) : null}
 
