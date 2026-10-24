@@ -36,29 +36,31 @@ button, input, select { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   gap: 28px;
-  min-height: 72px;
   background: linear-gradient(180deg, #162033, #121a2b);
   border: 1px solid var(--line);
   border-radius: 18px;
-  padding: 8px 16px;
+  padding: 6px 16px;
   box-shadow: var(--shadow);
 }
 .brand-wrap {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 .home-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2px 4px;
+  padding: 0;
   border-radius: 10px;
+  line-height: 0;
 }
 .home-btn:hover { background: rgba(212, 175, 55, 0.08); }
 .home-btn img {
-  width: 88px;
-  height: 88px;
+  /* Tight-cropped mark: ~150px wide, height follows horse aspect (no empty pad). */
+  width: 150px;
+  height: auto;
+  max-height: 96px;
   object-fit: contain;
   object-position: center;
   display: block;
@@ -472,6 +474,60 @@ th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 4px; 
 td { padding: 7px 4px; border-top: 1px solid #243049; }
 td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .history-wrap { max-height: 280px; overflow: auto; margin-top: 6px; }
+
+.stallion-rankings-panel .rankings-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 6px;
+}
+.stallion-rankings-panel select,
+.stallion-rankings-panel .rankings-search,
+.stallion-rankings-panel .rankings-range {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.stallion-rankings-panel .rankings-search { min-width: 160px; flex: 1 1 160px; }
+.stallion-rankings-panel .rankings-range { width: 72px; }
+.stallion-rankings-panel .rankings-meta {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.rankings-rich-wrap {
+  max-height: min(52vh, 420px);
+  overflow: auto;
+}
+.rankings-rich-table {
+  min-width: 720px;
+  white-space: nowrap;
+}
+.rankings-rich-table th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+  padding: 0;
+}
+.rankings-sort {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  padding: 6px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rankings-sort.active,
+.rankings-sort:hover { color: var(--text); }
+.rankings-empty { color: var(--muted); font-style: italic; }
 
 .catalog-ped {
   /*
