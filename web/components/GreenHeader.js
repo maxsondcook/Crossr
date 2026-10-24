@@ -26,7 +26,7 @@ export default function GreenHeader({ compact = false }) {
   return (
     <header className={`home-header${compact ? " compact" : ""}`}>
       <Link href="/" className="home-brand" aria-label="Crossr home">
-        <img className="home-brand-mark" src="/crossr-app-mark.png" alt="" />
+        <img className="home-brand-mark" src="/crossr-stallion-mark-orange.png" alt="" />
         <span className="home-wordmark">CROSSR</span>
       </Link>
       <nav className="home-nav">
