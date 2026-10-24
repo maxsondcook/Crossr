@@ -35,7 +35,7 @@ button, input, select { font: inherit; color: inherit; }
 .topbar {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: clamp(12px, 2vw, 28px);
   background: linear-gradient(180deg, #162033, #121a2b);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -80,7 +80,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .nav {
   display: flex;
-  gap: 28px;
+  gap: clamp(14px, 2.2vw, 28px);
   flex: 1;
   justify-content: center;
 }
@@ -91,12 +91,14 @@ button, input, select { font: inherit; color: inherit; }
   color: var(--muted);
   padding: 10px 0 8px;
   border-bottom: 2px solid transparent;
+  white-space: nowrap;
 }
 .nav a.active, .nav a:hover {
   color: var(--teal);
   border-bottom-color: var(--teal);
 }
-.nav-search { position: relative; min-width: 220px; }
+.nav-search { position: relative; flex: 0 1 240px; min-width: 140px; }
+.topbar > .ghost, .nav-account { white-space: nowrap; flex-shrink: 0; }
 .nav-search input {
   width: 100%;
   background: #10182a;
@@ -1176,7 +1178,14 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   .shell-sales { height: auto; overflow: visible; }
   .sales-root.workspace { overflow: visible; }
   .sales-col, .sales-rail, .sales-rail.open { width: 100%; overflow: visible; }
+}
+@media (max-width: 1100px) {
+  .nav a { font-size: 12px; letter-spacing: 0.08em; }
+  .brand-name { font-size: 22px; }
+  .nav-search { min-width: 120px; }
+}
+@media (max-width: 900px) {
   .topbar { flex-wrap: wrap; }
   .nav { justify-content: flex-start; flex-wrap: wrap; gap: 14px; }
-  .nav-search { width: 100%; min-width: 0; }
+  .nav-search { flex-basis: 100%; min-width: 0; }
 }
