@@ -176,9 +176,76 @@ def build_stallion_roster(profiles=None):
             "state": row.get("state"),
             "avatar": (display or row["name"] or "?")[:1].upper(),
         })
+    roster.extend(_abroad_roster_rows(profiles, {r["key"] for r in roster}, parents, ranks))
     _STALLION_ROSTER = roster
     return roster
 
+
+_US_STATES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA",
+    "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM",
+    "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA",
+    "WV", "WI", "WY", "PR",
+}
+
+
+def _farm_region(farm):
+    """Trailing location code of a farm string ('Shizunai Stallion Station, JPN' -> 'JPN')."""
+    text = str(farm or "").strip().rstrip(".")
+    if not text:
+        return ""
+    return text.rsplit(",", 1)[-1].strip().upper()
+
+
+def _abroad_roster_rows(profiles, existing_keys, parents, ranks):
+    """Stallions standing outside the US: not in the US mares-bred report, but in stallion stats."""
+    rows = []
+    min_year = datetime.datetime.now().year - 1
+    for name, data in (profiles or {}).items():
+        key = main.clean_horse_name(name)
+        if not key or key in existing_keys or not isinstance(data, dict):
+            continue
+        region = _farm_region(data.get("Farm"))
+        if not region or region in _US_STATES:
+            continue
+        if str(data.get("Status", "")).strip().lower() == "pensioned":
+            continue
+        fee = data.get("Stud Fee", 0)
+        fee_n = int((fee if isinstance(fee, int) else _fee_num(fee)) or 0)
+        try:
+            stud_year = int(data.get("Stud Duty Year") or 0)
+        except (TypeError, ValueError):
+            stud_year = 0
+        if fee_n <= 0 or stud_year < min_year:
+            continue
+        existing_keys.add(key)
+        sire, dam = parents.get(key, (None, None))
+        rank = ranks.get(key)
+        # Duty year is the current season; a relocated sire's crops date from his first book.
+        fees_hist, mares_hist = load_book_stats()
+        book_years = set(fees_hist.get(key, {})) | set(mares_hist.get(key, {}))
+        if book_years and min(book_years) < stud_year:
+            stud_year = min(book_years)
+        crop_l = crop_label(stud_year)
+        rows.append({
+            "name": name,
+            "key": key,
+            "sire": sire,
+            "dam": dam,
+            "farm": str(data.get("Farm", "")).replace("_", " ").strip(),
+            "stud_fee": f"${fee_n:,}",
+            "stud_fee_num": fee_n,
+            "year_foaled": data.get("Year Born"),
+            "entered_stud": stud_year,
+            "rank": rank if rank is not None else 9999,
+            "crop": crop_l,
+            "badge": stallion_badge({"rank": rank, "crop": crop_l, "major_wins": data.get("Major Wins", "")}),
+            "surface": data.get("Surface", "Both"),
+            "mares_bred_2026": None,
+            "state": region,
+            "avatar": (name or "?")[:1].upper(),
+        })
+    return rows
 
 
 def crop_label(entered_stud, current_year=None):
