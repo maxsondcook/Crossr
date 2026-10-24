@@ -351,8 +351,9 @@ function HypomatingInner() {
                     </div>
                     {s.has_lineage ? (
                       <div className="suggest-alts">
-                        <button className="ghost" type="button" onClick={() => toggleLineage(s.name)}>
-                          {openLineage === s.name ? "HIDE ALTERNATIVES" : "ALTERNATIVES"}
+                        <button className="ghost alts-btn" type="button" onClick={() => toggleLineage(s.name)}>
+                          <span>ALTERNATIVES</span>
+                          <span className="alts-toggle">{openLineage === s.name ? "CLOSE" : "OPEN"}</span>
                         </button>
                         {openLineage === s.name ? (
                           <div className="lineage-inline">
@@ -392,8 +393,9 @@ function HypomatingInner() {
                           <strong>{horseCaps(g.anchor)}</strong>
                           <div className="parents">{g.variant ? "CROSS VARIANT" : "RELATED SIRES IN BUDGET"}</div>
                         </div>
-                        <button className="ghost" type="button" onClick={() => toggleLineage(g.anchor)}>
-                          {openLineage === g.anchor ? "HIDE ALTERNATIVES" : "ALTERNATIVES"}
+                        <button className="ghost alts-btn" type="button" onClick={() => toggleLineage(g.anchor)}>
+                          <span>ALTERNATIVES</span>
+                          <span className="alts-toggle">{openLineage === g.anchor ? "CLOSE" : "OPEN"}</span>
                         </button>
                       </div>
                       {openLineage === g.anchor ? (
