@@ -116,11 +116,14 @@ def due(item: dict, states: dict, now_ts: float) -> bool:
     return now_ts - state["last_attempt"].timestamp() >= days * 86400
 
 
-def build_queue(conn, index: dict, states: dict, now_ts: float, limit: int | None = None) -> tuple[list[dict], Counter]:
+def build_queue(conn, index: dict, states: dict, now_ts: float, limit: int | None = None,
+                role: str | None = None) -> tuple[list[dict], Counter]:
     """Items still to do, in order, plus counts of why the others were skipped."""
     skipped: Counter = Counter()
     todo = []
     for item in load_parents(conn):
+        if role and item["role"] != role:
+            continue
         if not item["name_key"]:
             skipped["no name"] += 1
         elif not due(item, states, now_ts):
@@ -160,6 +163,13 @@ def pick_row(rows: list[dict], item: dict) -> tuple[dict | None, str]:
     ok = [row for row in plausible if row.get("status") == "ok"]
     if len(ok) == 1:
         return ok[0], ""
+    if not ok:
+        # Older queue imports can hold one horse twice (with and without a
+        # year). One distinct foal year among the rows means one horse.
+        years = {row.get("foal_year") for row in plausible if row.get("foal_year")}
+        if len(years) == 1:
+            dated = [row for row in plausible if row.get("foal_year")]
+            return dated[0], ""
     return None, "ambiguous rows"
 
 

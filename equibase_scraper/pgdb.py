@@ -404,7 +404,8 @@ def load_pedigree_map(conn: PgConn) -> dict:
     from psycopg.rows import tuple_row
 
     out: dict = {}
-    with conn.raw().cursor(name="pedigree_stream", row_factory=tuple_row) as cur:
+    raw = conn.raw()
+    with raw.transaction(), raw.cursor(name="pedigree_stream", row_factory=tuple_row) as cur:
         cur.itersize = 2000
         cur.execute("SELECT key, tree::text FROM pedigrees")
         for key, text in cur:
