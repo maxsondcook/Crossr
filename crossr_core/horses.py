@@ -259,6 +259,59 @@ def _progeny_earnings_lookup():
     return earn
 
 
+_RACE_INDEX = None
+
+
+def _race_index():
+    """name_key -> [(horse_id, foal_year)] and horse_id -> season rows, built once."""
+    global _RACE_INDEX
+    if _RACE_INDEX is None:
+        from crossr_core import sample_db
+
+        horses = {}
+        for row in sample_db.load_table("race_horses"):
+            if (row.get("status") or "") != "ok":
+                continue
+            key = main.clean_horse_name(row.get("name_key") or row.get("display_name") or "")
+            if key:
+                horses.setdefault(key, []).append((row.get("id"), _intish(row.get("foal_year")) or None))
+        seasons = {}
+        for row in sample_db.load_table("race_seasons"):
+            seasons.setdefault(row.get("horse_id"), []).append(row)
+        _RACE_INDEX = (horses, seasons)
+    return _RACE_INDEX
+
+
+def race_seasons_for(name, foal_year=None):
+    """Season-by-season race record from race_horses / race_seasons (career row skipped)."""
+    horses, seasons = _race_index()
+    matches = horses.get(main.clean_horse_name(name or ""), [])
+    if foal_year:
+        matches = [m for m in matches if m[1] == foal_year] or matches
+    if not matches:
+        return []
+    horse_id, born = matches[0]
+    rows = []
+    for row in seasons.get(horse_id, []):
+        year = _intish(row.get("year"))
+        if not year:
+            continue
+        earnings = _intish(row.get("earnings"))
+        rows.append({
+            "season": year,
+            "age": f"{year - born}YO" if born else "—",
+            "starts": _intish(row.get("starts")),
+            "firsts": _intish(row.get("firsts")),
+            "seconds": _intish(row.get("seconds")),
+            "thirds": _intish(row.get("thirds")),
+            "earnings": earnings,
+            "earnings_display": f"${earnings:,}" if earnings else "$0",
+            "accomplishments": "n/a",
+        })
+    rows.sort(key=lambda r: r["season"])
+    return rows
+
+
 def top_progeny_for_sire(sire_name, limit=12):
     payload = hypomating_engine.top_crosses_payload(main.PEDIGREE_DATABASE, sire_name, limit=40)
     earn_lookup = _progeny_earnings_lookup()
@@ -1751,6 +1804,18 @@ def get_horse_profile(search_name, profiles=None):
                     "accomplishments": stats.get("Major Accomplishments", "n/a"),
                 })
 
+    # Stallion-stats race records are often empty; fall back to scraped race seasons.
+    if not race_rows:
+        birth_hint = _intish((data or {}).get("Year Born")) or None
+        for season in race_seasons_for(clean_search, foal_year=birth_hint):
+            race_totals["starts"] += season["starts"]
+            race_totals["firsts"] += season["firsts"]
+            race_totals["seconds"] += season["seconds"]
+            race_totals["thirds"] += season["thirds"]
+            race_totals["earnings"] += season["earnings"]
+            race_rows.append(season)
+
+    if data:
         mares_bred_val = None
         lf_2025_val = None
         lf_2024_val = None
