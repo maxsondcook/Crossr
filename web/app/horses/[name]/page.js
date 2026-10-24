@@ -140,49 +140,18 @@ function StallionRankingsPanel({ rankingMeta, rankList, setRankList }) {
     { key: "year", label: "Year", type: "number" },
     { key: "rank", label: "Rank", type: "number" },
   ];
-  const metricOptions = columns.filter((c) => c.key !== "year");
 
-  const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState("year");
   const [sortDir, setSortDir] = useState("desc");
-  const [filterMetric, setFilterMetric] = useState("");
-  const [filterMin, setFilterMin] = useState("");
-  const [filterMax, setFilterMax] = useState("");
 
   useEffect(() => {
-    setQuery("");
     setSortKey("year");
     setSortDir("desc");
-    setFilterMetric("");
-    setFilterMin("");
-    setFilterMax("");
   }, [rankList]);
 
   const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const minN = filterMin !== "" ? Number(filterMin) : null;
-    const maxN = filterMax !== "" ? Number(filterMax) : null;
-    let next = rows.filter((row) => {
-      if (q) {
-        const hay = columns
-          .map((col) => String(row[col.key] ?? ""))
-          .join(" ")
-          .toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      if (filterMetric) {
-        const num = row[`${filterMetric}_num`] ?? parseMetricNumber(row[filterMetric]);
-        if (minN != null && !Number.isNaN(minN)) {
-          if (num == null || num < minN) return false;
-        }
-        if (maxN != null && !Number.isNaN(maxN)) {
-          if (num == null || num > maxN) return false;
-        }
-      }
-      return true;
-    });
     const dir = sortDir === "asc" ? 1 : -1;
-    const copy = [...next];
+    const copy = [...rows];
     copy.sort((a, b) => {
       const aNum = a[`${sortKey}_num`] ?? parseMetricNumber(a[sortKey]);
       const bNum = b[`${sortKey}_num`] ?? parseMetricNumber(b[sortKey]);
@@ -194,7 +163,7 @@ function StallionRankingsPanel({ rankingMeta, rankList, setRankList }) {
       return as.localeCompare(bs, undefined, { numeric: true }) * dir;
     });
     return copy;
-  }, [rows, columns, query, sortKey, sortDir, filterMetric, filterMin, filterMax]);
+  }, [rows, sortKey, sortDir]);
 
   function toggleSort(key) {
     if (sortKey === key) {
@@ -208,7 +177,7 @@ function StallionRankingsPanel({ rankingMeta, rankList, setRankList }) {
   if (!lists.length) return null;
 
   return (
-    <div className="stallion-rankings-panel" style={{ marginTop: 16 }}>
+    <div className="stallion-rankings-panel">
       <h4>STALLION RANKINGS</h4>
       <div className="rankings-toolbar">
         <select
@@ -227,44 +196,9 @@ function StallionRankingsPanel({ rankingMeta, rankList, setRankList }) {
             </optgroup>
           ) : null}
         </select>
-        <input
-          className="rankings-search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search metrics…"
-          aria-label="Search ranking rows"
-        />
-        <select
-          value={filterMetric}
-          onChange={(e) => setFilterMetric(e.target.value)}
-          aria-label="Filter metric"
-        >
-          <option value="">Filter metric…</option>
-          {metricOptions.map((col) => (
-            <option key={col.key} value={col.key}>{col.label}</option>
-          ))}
-        </select>
-        <input
-          className="rankings-range"
-          value={filterMin}
-          onChange={(e) => setFilterMin(e.target.value)}
-          placeholder="Min"
-          inputMode="decimal"
-          disabled={!filterMetric}
-          aria-label="Minimum metric value"
-        />
-        <input
-          className="rankings-range"
-          value={filterMax}
-          onChange={(e) => setFilterMax(e.target.value)}
-          placeholder="Max"
-          inputMode="decimal"
-          disabled={!filterMetric}
-          aria-label="Maximum metric value"
-        />
       </div>
       <p className="rankings-meta">
-        {visible.length} / {rows.length} years
+        {rows.length} {rows.length === 1 ? "year" : "years"}
         {sortKey ? ` · sorted by ${columns.find((c) => c.key === sortKey)?.label || sortKey} (${sortDir})` : ""}
       </p>
       <div className="history-wrap rankings-rich-wrap">
@@ -445,129 +379,109 @@ function HorsePage() {
         </div>
       </div>
 
-      <div className="panel">
-        <div className="hero">
-          <div className="farm">{s.farm || "PEDIGREE PROFILE"}</div>
-          <h1>{data.name.toUpperCase()}</h1>
-          <div className="sub">
-            Foaled: {s.year_foaled || data.year || "—"} · Entered Stud: {s.entered_stud || "—"}
-          </div>
-          <div className="kpi-row">
-            <div className="kpi">
-              <span>Stud Fee</span>
-              <b>{s.stud_fee || "—"}</b>
+      <div className="horse-panels">
+        <div className="panel">
+          <div className="hero">
+            <div className="farm">{s.farm || "PEDIGREE PROFILE"}</div>
+            <h1>{data.name.toUpperCase()}</h1>
+            <div className="sub">
+              Foaled: {s.year_foaled || data.year || "—"} · Entered Stud: {s.entered_stud || "—"}
             </div>
-            <div className="kpi">
-              <span>Sire Rank</span>
-              <b className="muted">{s.rank ? `#${s.rank}` : "NA"}</b>
+            <div className="kpi-row">
+              <div className="kpi">
+                <span>Stud Fee</span>
+                <b>{s.stud_fee || "—"}</b>
+              </div>
+              <div className="kpi">
+                <span>Sire Rank</span>
+                <b className="muted">{s.rank ? `#${s.rank}` : "NA"}</b>
+              </div>
             </div>
           </div>
-        </div>
-        <h4 style={{ marginTop: 16 }}>RACE RECORD & MAJOR WINS</h4>
-        <table>
-          <thead>
-            <tr>
-              <th>Season</th><th>Age</th><th>Starts</th><th>1st</th><th>2nd</th><th>3rd</th><th>Earnings</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(data.race_record || []).map((r) => (
-              <tr key={r.age}>
-                <td>{r.season}</td>
-                <td>{r.age}</td>
-                <td>{r.starts}</td>
-                <td>{r.firsts}</td>
-                <td>{r.seconds}</td>
-                <td>{r.thirds}</td>
-                <td className="money">{r.earnings_display}</td>
-              </tr>
-            ))}
-            <tr>
-              <td>TOTAL</td>
-              <td>—</td>
-              <td>{totals.starts || 0}</td>
-              <td>{totals.firsts || 0}</td>
-              <td>{totals.seconds || 0}</td>
-              <td>{totals.thirds || 0}</td>
-              <td className="money">{money(totals.earnings)}</td>
-            </tr>
-          </tbody>
-        </table>
-        {s.major_wins ? <div className="notes" style={{ marginTop: 12 }}>{s.major_wins}</div> : null}
-        {(data.stud_book || []).length ? (
+          {s.career_highlight ? (
+            <div className="notes" style={{ marginTop: 16 }}>{s.career_highlight}</div>
+          ) : null}
           <div style={{ marginTop: 16 }}>
-            <h4>STUD FEE & MARES BRED</h4>
-            <div className="history-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Year</th>
-                    <th>Stud Fee</th>
-                    <th>Mares Bred</th>
-                    <th>Live Foals</th>
-                    <th>Live Foal %</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.stud_book.map((row) => (
-                    <tr key={row.year}>
-                      <td>{row.year}</td>
-                      <td className="money">{row.stud_fee || "—"}</td>
-                      <td>{row.mares_bred ?? "—"}</td>
-                      <td>{row.live_foals ?? "—"}</td>
-                      <td>{row.live_foal_pct || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Link className="primary" href={data.has_profile ? `/hypomating?sire=${encodeURIComponent(data.name)}` : `/hypomating?mare=${encodeURIComponent(data.name)}`}>
+              {data.has_profile ? "Select for hypomating" : "Use as broodmare"}
+            </Link>
           </div>
-        ) : null}
-        {data.stallion && RANK_LISTS.length ? (
-          <StallionRankingsPanel
-            rankingMeta={rankingMeta}
-            rankList={rankList}
-            setRankList={setRankList}
-          />
-        ) : null}
-        {s.career_highlight ? (
-          <div className="notes" style={{ marginTop: 16 }}>{s.career_highlight}</div>
-        ) : null}
-        <div style={{ marginTop: 16 }}>
-          <Link className="primary" href={data.has_profile ? `/hypomating?sire=${encodeURIComponent(data.name)}` : `/hypomating?mare=${encodeURIComponent(data.name)}`}>
-            {data.has_profile ? "Select for hypomating" : "Use as broodmare"}
-          </Link>
         </div>
-      </div>
 
-      <div>
-        {(data.broodmare_sire || []).length ? (
-          <div className="panel" style={{ marginBottom: 12 }}>
-            <h4>BROODMARE SIRE</h4>
-            <div className="history-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Year</th>
-                    <th>Rank</th>
-                    <th>Earnings $</th>
-                    <th>{bmsCountLabel}</th>
+        <div className="panel">
+          <h4>RACE RECORD & MAJOR WINS</h4>
+          <table>
+            <thead>
+              <tr>
+                <th>Season</th><th>Age</th><th>Starts</th><th>1st</th><th>2nd</th><th>3rd</th><th>Earnings</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data.race_record || []).map((r) => (
+                <tr key={r.age}>
+                  <td>{r.season}</td>
+                  <td>{r.age}</td>
+                  <td>{r.starts}</td>
+                  <td>{r.firsts}</td>
+                  <td>{r.seconds}</td>
+                  <td>{r.thirds}</td>
+                  <td className="money">{r.earnings_display}</td>
+                </tr>
+              ))}
+              <tr>
+                <td>TOTAL</td>
+                <td>—</td>
+                <td>{totals.starts || 0}</td>
+                <td>{totals.firsts || 0}</td>
+                <td>{totals.seconds || 0}</td>
+                <td>{totals.thirds || 0}</td>
+                <td className="money">{money(totals.earnings)}</td>
+              </tr>
+            </tbody>
+          </table>
+          {s.major_wins ? <div className="notes" style={{ marginTop: 12 }}>{s.major_wins}</div> : null}
+        </div>
+
+        {(data.stud_book || []).length ? (
+          <div className="panel">
+            <h4>STUD FEE & MARES BRED</h4>
+          <div className="history-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Year</th>
+                  <th>Stud Fee</th>
+                  <th>Mares Bred</th>
+                  <th>Live Foals</th>
+                  <th>Live Foal %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.stud_book.map((row) => (
+                  <tr key={row.year}>
+                    <td>{row.year}</td>
+                    <td className="money">{row.stud_fee || "—"}</td>
+                    <td>{row.mares_bred ?? "—"}</td>
+                    <td>{row.live_foals ?? "—"}</td>
+                    <td>{row.live_foal_pct || "—"}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {data.broodmare_sire.map((row) => (
-                    <tr key={row.year}>
-                      <td>{row.year}</td>
-                      <td>{row.rank ? `#${row.rank}` : "—"}</td>
-                      <td className="money">{row.earnings != null ? money(row.earnings) : "—"}</td>
-                      <td>{row.count ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
           </div>
         ) : null}
+
+        {data.stallion && RANK_LISTS.length ? (
+          <div className="panel">
+            <StallionRankingsPanel
+              rankingMeta={rankingMeta}
+              rankList={rankList}
+              setRankList={setRankList}
+            />
+          </div>
+        ) : null}
+
         <div className="panel progeny-stats-panel">
           <h4>PROGENY STATISTICS</h4>
           {hasProgenyStats ? (
@@ -580,7 +494,8 @@ function HorsePage() {
             <p className="catalog-empty">No progeny statistics on file yet.</p>
           )}
         </div>
-        <div className="panel" style={{ marginTop: 12 }}>
+
+        <div className="panel">
           <h4>TOP PROGENY</h4>
           {(data.top_progeny || []).length ? (
             <table>
@@ -604,6 +519,34 @@ function HorsePage() {
             <p className="catalog-empty">No top progeny recorded for this stallion yet.</p>
           )}
         </div>
+
+        {(data.broodmare_sire || []).length ? (
+          <div className="panel">
+            <h4>BROODMARE SIRE</h4>
+          <div className="history-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Year</th>
+                  <th>Rank</th>
+                  <th>Earnings $</th>
+                  <th>{bmsCountLabel}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.broodmare_sire.map((row) => (
+                  <tr key={row.year}>
+                    <td>{row.year}</td>
+                    <td>{row.rank ? `#${row.rank}` : "—"}</td>
+                    <td className="money">{row.earnings != null ? money(row.earnings) : "—"}</td>
+                    <td>{row.count ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -405,9 +405,21 @@ button, input, select { font: inherit; color: inherit; }
 .dash {
   display: grid;
   /* Pedigree column hugs the chart so no dead space sits beside it. */
-  grid-template-columns: max-content minmax(260px, 1fr) minmax(220px, 0.85fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+}
+/* Horse page: info panels sit in pairs beside the pedigree; each row matches heights. */
+.horse-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+.horse-panels > .panel { min-width: 0; }
+.horse-panels .hero { padding-top: 6px; }
+@media (max-width: 1180px) {
+  .horse-panels { grid-template-columns: minmax(0, 1fr); }
 }
 .panel {
   background: var(--panel);
