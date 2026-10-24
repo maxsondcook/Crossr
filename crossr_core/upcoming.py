@@ -246,6 +246,7 @@ def _lot_from_csv(row, sale_year=None):
         "color": color_raw,
         "color_label": _color_word(color_raw),
         "consignor": _blank(_col(row, "CONSIGNOR", "CONSIGNED BY", "PROPERTY LINE")),
+        "barn": _blank(_col(row, "BARN")),
         "notes": _blank(_col(row, "NOTES")),
         "starred": starred in {"*", "1", "true", "yes"},
         "price_raw": price_raw,
