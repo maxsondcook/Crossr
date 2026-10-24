@@ -433,6 +433,7 @@ def _attach_filter_prices(lots, book, catalog_title="", sale_year=None):
             sex=lot.get("sex_letter") or lot.get("sex") or "",
             sire_profile=profile,
             sale_year=year,
+            birth_year=lot.get("birth_year") or lot.get("birth_date"),
         )
         mid = band.get("mid")
         low, high = band.get("low"), band.get("high")
@@ -477,6 +478,7 @@ def _workspace(lot, book, catalog_title="", catalog=None):
         profiles=book,
         catalog_title=title,
         sale_year=sale_year,
+        birth_year=lot.get("birth_year") or lot.get("birth_date"),
     )
     ctx["auction_history"] = sales_svc.auctions_for_horses(ctx.get("similar_crosses") or [])
     return ctx

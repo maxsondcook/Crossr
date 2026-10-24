@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import threading
 from typing import Any, Dict, Optional
 
@@ -30,11 +31,19 @@ def _fee_amount(raw: Any) -> int:
         return 0
 
 
-def _sold_as_kind(sold_as: str = "", catalog_title: str = "", sex: str = "") -> Optional[str]:
+def _sold_as_kind(
+    sold_as: str = "",
+    catalog_title: str = "",
+    sex: str = "",
+    *,
+    birth_year: Any = None,
+    sale_year: Any = None,
+) -> Optional[str]:
     """Return Yearling/Weanling for PriceProjection scope; else None.
 
-    Prefer explicit sold_as. Catalog title is only a fallback when sold_as is blank
-    or already yearling/weanling — never override broodmare / racing-age labels.
+    Prefer explicit sold_as. Then catalog title tokens. Then foaling age vs sale
+    year (age 0 → weanling, age 1 → yearling). Never override broodmare /
+    racing-age labels when sold_as already says so.
     """
     sold_u = (sold_as or "").strip().upper()
     if "WEANLING" in sold_u:
@@ -59,6 +68,18 @@ def _sold_as_kind(sold_as: str = "", catalog_title: str = "", sex: str = "") -> 
     if "WEANLING" in blob:
         return "Weanling"
     if "YEARLING" in blob:
+        return "Yearling"
+    # Select sales often omit "Yearling" in the catalog title (e.g. The Saratoga Sale).
+    by = _parse_sale_year(birth_year)
+    sy = _parse_sale_year(sale_year)
+    if by is not None and sy is not None:
+        age = int(sy) - int(by)
+        if age == 0:
+            return "Weanling"
+        if age == 1:
+            return "Yearling"
+    title_u = (catalog_title or "").upper()
+    if "SARATOGA SALE" in title_u and "FALL" not in title_u:
         return "Yearling"
     return None
 
@@ -338,7 +359,12 @@ def _parse_sale_year(raw: Any) -> Optional[int]:
     if raw is None or raw == "":
         return None
     try:
-        return int(str(raw).strip()[:4])
+        text = str(raw).strip()
+        # Prefer a 4-digit year token (handles "03/05/2025").
+        m = re.search(r"(19|20)\d{2}", text)
+        if m:
+            return int(m.group(0))
+        return int(text[:4])
     except (TypeError, ValueError):
         return None
 
@@ -356,6 +382,7 @@ def project_lot_market(
     damsire: str = "",
     covering_sire: str = "",
     sale_year: Optional[int] = None,
+    birth_year: Any = None,
 ) -> Dict[str, Any]:
     """Combined Expected Market Value + Market Prediction for one hip."""
     lot = dict(lot or {})
@@ -374,17 +401,8 @@ def project_lot_market(
         lot.setdefault("damsire", damsire)
     if covering_sire:
         lot.setdefault("covering_sire", covering_sire)
-
-    kind = _sold_as_kind(
-        lot.get("sold_as") or "",
-        catalog_title,
-        lot.get("sex_letter") or lot.get("sex") or "",
-    )
-    # ValueProjector sale-type gates on sold_as; fill from catalog when missing.
-    if kind and "YEARLING" not in (lot.get("sold_as") or "").upper() and "WEANLING" not in (
-        lot.get("sold_as") or ""
-    ).upper():
-        lot["sold_as"] = kind
+    if birth_year:
+        lot.setdefault("birth_year", birth_year)
 
     year = (
         _parse_sale_year(sale_year)
@@ -392,6 +410,25 @@ def project_lot_market(
         or _parse_sale_year(lot.get("catalog_year"))
         or _parse_sale_year(lot.get("year"))
     )
+    foaled = (
+        _parse_sale_year(birth_year)
+        or _parse_sale_year(lot.get("birth_year"))
+        or _parse_sale_year(lot.get("birth_date"))
+        or _parse_sale_year(lot.get("foaled"))
+    )
+    kind = _sold_as_kind(
+        lot.get("sold_as") or "",
+        catalog_title,
+        lot.get("sex_letter") or lot.get("sex") or "",
+        birth_year=foaled,
+        sale_year=year,
+    )
+    # ValueProjector sale-type gates on sold_as; fill from catalog when missing.
+    if kind and "YEARLING" not in (lot.get("sold_as") or "").upper() and "WEANLING" not in (
+        lot.get("sold_as") or ""
+    ).upper():
+        lot["sold_as"] = kind
+
     fee = resolve_stud_fee(lot.get("sire") or "", sire_profile, sale_year=year)
     value = _value_projector_payload(lot)
     empirical = (
@@ -538,9 +575,19 @@ def expected_market_mid_for_filter(
     sex: str = "",
     sire_profile: Optional[dict] = None,
     sale_year: Optional[int] = None,
+    birth_year: Any = None,
 ) -> Dict[str, Any]:
     """Cheap band for catalog price filters (empirical fee-band mid when possible)."""
-    kind = _sold_as_kind(sold_as, catalog_title, sex) or "Yearling"
+    kind = (
+        _sold_as_kind(
+            sold_as,
+            catalog_title,
+            sex,
+            birth_year=birth_year,
+            sale_year=sale_year,
+        )
+        or "Yearling"
+    )
     fee = resolve_stud_fee(sire_name, sire_profile, sale_year=sale_year)
     empirical = _empirical_market_payload(fee=fee, sold_as=kind)
     if empirical.get("ok") and empirical.get("mid"):
