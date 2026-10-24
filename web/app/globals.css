@@ -1057,6 +1057,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 }
 .pv-item[data-pv="sold"] b { color: var(--gold); }
 .pv-price { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.pv-section { margin-bottom: 6px; }
 .pv-price b { display: block; margin-top: 4px; font-size: 18px; font-variant-numeric: tabular-nums; }
 .pv-note { color: var(--muted); font-size: 13px; margin: 10px 0 0; line-height: 1.45; }
 @media (max-width: 720px) {
