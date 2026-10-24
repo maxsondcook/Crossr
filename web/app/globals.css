@@ -516,7 +516,9 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   overflow: auto;
 }
 .rankings-rich-table {
-  min-width: 720px;
+  /* Fit the panel when the columns allow; scroll only for wide lists (e.g. AEI). */
+  width: max-content;
+  min-width: 100%;
   white-space: nowrap;
 }
 .rankings-rich-table th {

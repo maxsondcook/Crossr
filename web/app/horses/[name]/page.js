@@ -131,15 +131,61 @@ function formatRankingCell(row, col) {
   return String(raw);
 }
 
+// Shown elsewhere on the page, so left out of the rankings table.
+const RANKING_HIDDEN_KEYS = new Set(["chief_earner", "chief_earner_earnings", "stud_fee", "farm"]);
+// Runner/winner column pairs collapsed into one Win% column.
+const WIN_PCT_PAIRS = [
+  { runners: "runners", winners: "winners", key: "win_pct", label: "Win%" },
+  { runners: "all_surfaces_runners", winners: "all_surfaces_winners", key: "all_win_pct", label: "All Win%" },
+  { runners: "turf_runners", winners: "turf_winners", key: "turf_win_pct", label: "Turf Win%" },
+];
+
+function shapeRankingTable(rawColumns, rawRows, rankList) {
+  const keys = new Set(rawColumns.map((c) => c.key));
+  const pairs = WIN_PCT_PAIRS.filter((p) => keys.has(p.runners) && keys.has(p.winners));
+  const columns = [];
+  for (const col of rawColumns) {
+    // The Stud Fee list ranks by fee, so it keeps that column.
+    if (RANKING_HIDDEN_KEYS.has(col.key) && !(rankList === "stud_fee" && col.key === "stud_fee")) continue;
+    const pairAsRunners = pairs.find((p) => p.runners === col.key);
+    if (pairAsRunners) {
+      columns.push({ key: pairAsRunners.key, label: pairAsRunners.label, type: "percent" });
+      continue;
+    }
+    if (pairs.some((p) => p.winners === col.key)) continue;
+    columns.push(col);
+  }
+  const rows = pairs.length
+    ? rawRows.map((row) => {
+        const next = { ...row };
+        for (const p of pairs) {
+          const r = row[`${p.runners}_num`] ?? parseMetricNumber(row[p.runners]);
+          const w = row[`${p.winners}_num`] ?? parseMetricNumber(row[p.winners]);
+          const pct = r && w != null ? (w / r) * 100 : null;
+          next[`${p.key}_num`] = pct;
+          next[p.key] = pct != null ? `${pct.toFixed(1)}%` : null;
+        }
+        return next;
+      })
+    : rawRows;
+  return { columns, rows };
+}
+
 function StallionRankingsPanel({ rankingMeta, rankList, setRankList }) {
   const lists = rankingMeta.lists || [];
   const bloodhorseLists = lists.filter((list) => list.group !== "book");
   const bookLists = lists.filter((list) => list.group === "book");
-  const rows = (rankingMeta.rows && rankingMeta.rows[rankList]) || [];
-  const columns = (rankingMeta.columns && rankingMeta.columns[rankList]) || [
-    { key: "year", label: "Year", type: "number" },
-    { key: "rank", label: "Rank", type: "number" },
-  ];
+  const { columns, rows } = useMemo(
+    () => shapeRankingTable(
+      (rankingMeta.columns && rankingMeta.columns[rankList]) || [
+        { key: "year", label: "Year", type: "number" },
+        { key: "rank", label: "Rank", type: "number" },
+      ],
+      (rankingMeta.rows && rankingMeta.rows[rankList]) || [],
+      rankList,
+    ),
+    [rankingMeta, rankList],
+  );
 
   const [sortKey, setSortKey] = useState("year");
   const [sortDir, setSortDir] = useState("desc");
