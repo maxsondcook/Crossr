@@ -146,6 +146,9 @@ function HypomatingInner() {
   const lineageOptions = (lineageData?.options || []).filter(
     (o) => o.rank != null && String(o.rank).toUpperCase() !== "N/A",
   );
+  // Lineage groups already shown on a suggestion card open there; only list the rest separately.
+  const suggestionNames = new Set((result?.suggestions || []).map((s) => s.name));
+  const extraLineageGroups = (result?.lineage_groups || []).filter((g) => !suggestionNames.has(g.anchor));
 
   if (sireFromPage) {
     return (
@@ -281,7 +284,7 @@ function HypomatingInner() {
               <div className="panel">
                 <h4>SUGGESTED STALLIONS</h4>
                 {(result.suggestions || []).length === 0 ? (
-                  <p className="empty">No stallions in this fee band. Check lineage alternatives below.</p>
+                  <p className="empty">No stallions in this fee band. Check the alternatives below.</p>
                 ) : null}
                 {(result.suggestions || []).map((s) => (
                   <div key={s.name} className="suggest-card suggest-card-stack">
@@ -348,13 +351,12 @@ function HypomatingInner() {
                     </div>
                     {s.has_lineage ? (
                       <div className="suggest-alts">
-                        <span className="meta-label">ALTERNATIVES</span>
                         <button className="ghost" type="button" onClick={() => toggleLineage(s.name)}>
-                          LINEAGE OPTIONS OF {horseCaps(s.name)}
+                          {openLineage === s.name ? "HIDE ALTERNATIVES" : "ALTERNATIVES"}
                         </button>
                         {openLineage === s.name ? (
                           <div className="lineage-inline">
-                            <h4>LINEAGE OPTIONS · {horseCaps(s.name)}</h4>
+                            <h4>ALTERNATIVES</h4>
                             {lineageLoading ? <p className="empty">Loading lineage…</p> : null}
                             {!lineageLoading && !lineageOptions.length ? (
                               <p className="empty">No ranked lineage options in this fee band.</p>
@@ -380,50 +382,45 @@ function HypomatingInner() {
                   </div>
                 ))}
               </div>
-              {(result.lineage_groups || []).length ? (
-                <div style={{ marginTop: 12 }}>
-                  {/* OPEN expands ABOVE the ALTERNATIVES list as LINEAGE OPTIONS OF {SIRE}. */}
-                  {openLineage
-                    && (result.lineage_groups || []).some((g) => g.anchor === openLineage)
-                    && !(result.suggestions || []).some((s) => s.name === openLineage) ? (
-                    <div className="panel" style={{ marginBottom: 12 }}>
-                      <h4>LINEAGE OPTIONS OF {horseCaps(openLineage)}</h4>
-                      {lineageLoading ? <p className="empty">Loading lineage…</p> : null}
-                      {!lineageLoading && !lineageOptions.length ? (
-                        <p className="empty">No ranked lineage options in this fee band.</p>
-                      ) : null}
-                      <div className="lineage-inline" style={{ border: "none", padding: 0, background: "transparent" }}>
-                        {lineageOptions.map((o) => (
-                          <div key={o.name} className="suggest-card">
-                            <div>
-                              <Link href={horseHref(o.name)}>{horseCaps(o.name)}</Link>
-                              <div className="parents">RANK #{o.rank} · {horseCaps(o.stud_fee)}</div>
-                            </div>
-                            <div className="suggest-actions">
-                              <Link className="ghost" href={horseHref(o.name)}>SEE PROFILE</Link>
-                              <button className="primary" type="button" onClick={() => makeReport(o.name)}>
-                                CREATE HYPOFOAL
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="panel">
-                    <h4>ALTERNATIVES</h4>
-                    {(result.lineage_groups || []).map((g) => (
-                      <div key={g.anchor} className="suggest-card">
+              {extraLineageGroups.length ? (
+                <div className="panel" style={{ marginTop: 12 }}>
+                  <h4>ALTERNATIVES</h4>
+                  {extraLineageGroups.map((g) => (
+                    <div key={g.anchor} className="suggest-card suggest-card-stack">
+                      <div className="suggest-card-main">
                         <div>
-                          <strong>LINEAGE ALTERNATIVES OF {horseCaps(g.anchor)}</strong>
+                          <strong>{horseCaps(g.anchor)}</strong>
                           <div className="parents">{g.variant ? "CROSS VARIANT" : "RELATED SIRES IN BUDGET"}</div>
                         </div>
                         <button className="ghost" type="button" onClick={() => toggleLineage(g.anchor)}>
-                          {openLineage === g.anchor ? "CLOSE" : "OPEN"}
+                          {openLineage === g.anchor ? "HIDE ALTERNATIVES" : "ALTERNATIVES"}
                         </button>
                       </div>
-                    ))}
-                  </div>
+                      {openLineage === g.anchor ? (
+                        <div className="lineage-inline">
+                          <h4>ALTERNATIVES</h4>
+                          {lineageLoading ? <p className="empty">Loading lineage…</p> : null}
+                          {!lineageLoading && !lineageOptions.length ? (
+                            <p className="empty">No ranked lineage options in this fee band.</p>
+                          ) : null}
+                          {lineageOptions.map((o) => (
+                            <div key={o.name} className="suggest-card">
+                              <div>
+                                <Link href={horseHref(o.name)}>{horseCaps(o.name)}</Link>
+                                <div className="parents">RANK #{o.rank} · {horseCaps(o.stud_fee)}</div>
+                              </div>
+                              <div className="suggest-actions">
+                                <Link className="ghost" href={horseHref(o.name)}>SEE PROFILE</Link>
+                                <button className="primary" type="button" onClick={() => makeReport(o.name)}>
+                                  CREATE HYPOFOAL
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
                 </div>
               ) : null}
               {error ? <p className="error">{error}</p> : null}
