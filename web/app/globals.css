@@ -971,8 +971,8 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   flex: 1;
   min-height: 0;
   display: grid;
-  /* Left pedigree grows with the window; right info stack stays fixed width. */
-  grid-template-columns: minmax(0, 1fr) var(--sales-info-width, 360px) auto;
+  /* Left column hugs the pedigree; the info stack takes the remaining width. */
+  grid-template-columns: max-content minmax(var(--sales-info-width, 360px), 1fr) auto;
   gap: 10px;
   align-items: stretch;
 }
@@ -985,11 +985,11 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   align-items: stretch;
 }
 .sales-col-info {
-  width: var(--sales-info-width, 360px);
-  max-width: var(--sales-info-width, 360px);
   min-width: var(--sales-info-width, 360px);
   justify-self: stretch;
 }
+/* Only the pedigree sets the left column's width; the panels under it follow. */
+.sales-col-pedigree > .panel:not(:has(.pedigree-fit)) { contain: inline-size; }
 /* Stack in document flow — never shrink panels over each other. */
 .sales-col > .panel {
   position: static;

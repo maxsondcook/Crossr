@@ -828,7 +828,7 @@ function SalesPage() {
 
                 {(!ready || projectionPanels(detail, current).showValue || projectionPanels(detail, current).showPrice) ? (
                   <div className="panel" data-panel="projected-value">
-                    <h4>PROJECTED VALUE</h4>
+                    <h4>MARKET PROJECTION</h4>
                     {(!ready || projectionPanels(detail, current).showPrice) ? (
                       <div className="pv-price" data-meta="projected-price">
                         <span className="pv-label">Projected Price</span>
