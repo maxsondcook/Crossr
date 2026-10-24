@@ -805,8 +805,13 @@ function SalesPage() {
                   <div className="sale-meta">
                     <div><span className="meta-label">Color</span><b>{colorWord(current) || "—"}</b></div>
                     <div><span className="meta-label">Sex</span><b>{sexWord(current) || "—"}</b></div>
-                    <div><span className="meta-label">Foaled</span><b>{blank(current.birth_date) || current.birth_year || "—"}</b></div>
-                    <div><span className="meta-label">Consigned by</span><b>{blank(current.consignor) || "—"}</b></div>
+                    <div><span className="meta-label">Foaled</span><b className={blank(current.birth_date) ? "meta-fit" : undefined}>{blank(current.birth_date) || current.birth_year || "—"}</b></div>
+                    <div>
+                      <span className="meta-label">Consigned by</span>
+                      <b className={(blank(current.consignor) || "").length > 14 ? "meta-fit" : undefined}>
+                        {blank(current.consignor) || "—"}
+                      </b>
+                    </div>
                     <div><span className="meta-label">Hip</span><b>{current.hip || "—"}</b></div>
                     {(!ready || projectionPanels(detail, current).showPrice) ? (
                       <div data-meta="projected-price">
