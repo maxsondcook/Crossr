@@ -12,6 +12,8 @@ import {
 } from "../../lib/appNav";
 import { saveHypofoal } from "../../lib/barn";
 import PedigreeChart from "../../components/PedigreeChart";
+import FemaleFamily from "../../components/FemaleFamily";
+import HorseText from "../../components/HorseText";
 
 function HypomatingInner() {
   const params = useSearchParams();
@@ -207,7 +209,7 @@ function HypomatingInner() {
           >
             ← New search
           </button>
-          <div className="dash" style={{ marginTop: 12, gridTemplateColumns: "1fr 1fr" }}>
+          <div className="dash" style={{ marginTop: 12, gridTemplateColumns: "minmax(720px, 1.55fr) minmax(360px, 1fr)" }}>
             <div className="panel">
               <h4>BROODMARE · {result.mare}</h4>
               {result.damsire ? <p className="sub">Damsire: {result.damsire}</p> : null}
@@ -227,6 +229,10 @@ function HypomatingInner() {
                   </div>
                 </div>
               ))}
+              <div className="family-panel" style={{ marginTop: 12 }}>
+                <h4>FEMALE FAMILY</h4>
+                <FemaleFamily family={brood?.female_family || []} />
+              </div>
             </div>
             <div>
               <div className="panel">
@@ -242,9 +248,37 @@ function HypomatingInner() {
                         <div className="parents">Rank #{s.rank} · {s.stud_fee}</div>
                         {openLogic === s.name ? (
                           <div className="logic">
-                            {(s.cross_meta || []).map((m) => <p key={m.foal_name}>{m.races_sentence}<br />{m.bio_sentence}</p>)}
+                            {(s.cross_meta || []).map((m) => {
+                              const linkNames = [
+                                m.foal_name,
+                                m.actual_sire_name,
+                                result.mare,
+                                result.damsire,
+                                ...(brood?.progeny || []).map((p) => p.name),
+                              ].filter(Boolean);
+                              return (
+                                <p key={m.foal_name}>
+                                  <HorseText text={m.races_sentence} names={linkNames} />
+                                  <br />
+                                  <HorseText text={m.bio_sentence} names={linkNames} />
+                                </p>
+                              );
+                            })}
                             {Object.entries(s.reasons_by_tier || {}).flatMap(([tier, msgs]) =>
-                              msgs.map((msg) => <p key={msg}>{tier}: {msg}</p>)
+                              msgs.map((msg) => {
+                                const linkNames = [
+                                  s.name,
+                                  result.mare,
+                                  result.damsire,
+                                  ...(s.cross_meta || []).map((m) => m.foal_name),
+                                  ...(brood?.progeny || []).map((p) => p.name),
+                                ].filter(Boolean);
+                                return (
+                                  <p key={msg}>
+                                    {tier}: <HorseText text={msg} names={linkNames} />
+                                  </p>
+                                );
+                              })
                             )}
                           </div>
                         ) : null}

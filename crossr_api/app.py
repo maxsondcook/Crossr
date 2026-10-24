@@ -314,6 +314,7 @@ def hypomating_suggest(body: SuggestBody):
             brood["race_record"] = profile.get("race_record")
             brood["race_totals"] = profile.get("race_totals")
             brood["inbreeding"] = profile.get("inbreeding")
+            brood["female_family"] = profile.get("female_family") or []
     return result
 
 

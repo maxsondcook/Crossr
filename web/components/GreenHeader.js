@@ -25,7 +25,10 @@ export default function GreenHeader({ compact = false }) {
 
   return (
     <header className={`home-header${compact ? " compact" : ""}`}>
-      <Link href="/" className="home-wordmark">CROSSR</Link>
+      <Link href="/" className="home-brand" aria-label="Crossr home">
+        <img className="home-brand-mark" src="/crossr-app-mark.png" alt="" />
+        <span className="home-wordmark">CROSSR</span>
+      </Link>
       <nav className="home-nav">
         {LINKS.map((l) => (
           <Link

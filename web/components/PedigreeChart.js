@@ -6,6 +6,8 @@ import { horseHref } from "../lib/api";
 
 const ANCESTOR_GENS = 5;
 const LEAF_ROWS = 2 ** ANCESTOR_GENS;
+/** Character slots per generation column (name ~18ch inside border “pipes”). */
+const CELL_CHARS = 20;
 
 function flatten(node, idx, depth, map) {
   if (!node || depth > ANCESTOR_GENS) return;
@@ -67,24 +69,32 @@ export default function PedigreeChart({ tree, showSubject = true, hrefFor = null
   }
 
   const subjectHref = tree.name ? (hrefFor ? hrefFor(tree.name) : horseHref(tree.name)) : "";
-
   const subjectYear = tree.year != null && tree.year !== "" ? String(tree.year) : "";
+  const cols = showSubject ? ANCESTOR_GENS + 1 : ANCESTOR_GENS;
 
   return (
-    <div className={`catalog-ped gen-5${showSubject ? "" : " no-subject"}`}>
-      {showSubject ? (
-        <div className="cat-subject">
-          <Link
-            className="cat-name"
-            href={subjectHref}
-            title={subjectYear ? `${tree.name} (${subjectYear})` : tree.name}
-          >
-            {tree.name}
-          </Link>
-          {subjectYear ? <span className="yr">{subjectYear}</span> : null}
-        </div>
-      ) : null}
-      {cells}
+    <div
+      className="pedigree-fit"
+      style={{
+        "--ped-cols": String(cols),
+        "--ped-chars": String(CELL_CHARS),
+      }}
+    >
+      <div className={`catalog-ped gen-5${showSubject ? "" : " no-subject"}`}>
+        {showSubject ? (
+          <div className="cat-subject">
+            <Link
+              className="cat-name"
+              href={subjectHref}
+              title={subjectYear ? `${tree.name} (${subjectYear})` : tree.name}
+            >
+              {tree.name}
+            </Link>
+            {subjectYear ? <span className="yr">{subjectYear}</span> : null}
+          </div>
+        ) : null}
+        {cells}
+      </div>
     </div>
   );
 }

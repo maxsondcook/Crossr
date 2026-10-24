@@ -55,7 +55,7 @@ export default function Nav() {
       ) : (
         <div className="brand-wrap">
           <Link href="/" className="home-btn" aria-label="Home">
-            <img src="/logo.png" alt="Crossr home" />
+            <img src="/crossr-app-mark.png" alt="Crossr home" />
           </Link>
           <Link href="/" className="brand-name">CROSSR</Link>
         </div>

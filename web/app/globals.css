@@ -36,16 +36,17 @@ button, input, select { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   gap: 28px;
+  min-height: 72px;
   background: linear-gradient(180deg, #162033, #121a2b);
   border: 1px solid var(--line);
   border-radius: 18px;
-  padding: 10px 16px;
+  padding: 8px 16px;
   box-shadow: var(--shadow);
 }
 .brand-wrap {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 .home-btn {
   display: flex;
@@ -56,8 +57,8 @@ button, input, select { font: inherit; color: inherit; }
 }
 .home-btn:hover { background: rgba(212, 175, 55, 0.08); }
 .home-btn img {
-  width: 64px;
-  height: 50px;
+  width: 88px;
+  height: 88px;
   object-fit: contain;
   object-position: center;
   display: block;
@@ -136,6 +137,21 @@ button, input, select { font: inherit; color: inherit; }
   text-align: center;
 }
 .home-header.compact { padding: 14px 24px 10px; }
+.home-brand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(10px, 1.6vw, 18px);
+  text-decoration: none;
+}
+.home-brand-mark {
+  width: clamp(52px, 8vw, 88px);
+  height: auto;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.28));
+}
+.home-header.compact .home-brand-mark { width: clamp(40px, 6vw, 64px); }
 .home-wordmark {
   display: inline-block;
   font-size: clamp(52px, 9vw, 92px);
@@ -385,7 +401,8 @@ button, input, select { font: inherit; color: inherit; }
 
 .dash {
   display: grid;
-  grid-template-columns: minmax(560px, 1.85fr) minmax(260px, 1fr) minmax(220px, 0.85fr) 48px;
+  /* Pedigree column stays wide enough for 5×20ch cells at a readable font. */
+  grid-template-columns: minmax(720px, 2.1fr) minmax(260px, 1fr) minmax(220px, 0.85fr) 48px;
   gap: 12px;
   align-items: start;
 }
@@ -397,8 +414,21 @@ button, input, select { font: inherit; color: inherit; }
   min-height: 0;
   overflow: auto;
 }
-.panel:has(.catalog-ped) {
+.panel:has(.catalog-ped),
+.panel:has(.pedigree-fit) {
   min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+/* Fit full pedigree in panel width: N × 20ch columns, font scales with container. */
+.pedigree-fit {
+  --ped-cols: 5;
+  --ped-chars: 20;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  container-type: inline-size;
+  container-name: pedigree;
 }
 .panel select, .panel input {
   width: 100%;
@@ -444,28 +474,31 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .history-wrap { max-height: 280px; overflow: auto; margin-top: 6px; }
 
 .catalog-ped {
-  /* ~18-char names + full 4-digit year on the line below */
-  --ped-col: minmax(7.75rem, 1fr);
+  /*
+    Each generation column is exactly --ped-chars (20) wide in ch units.
+    Font size = container width / (cols × 20) so the full tree fills the panel
+    with no horizontal scroll and no clipped glyphs against generation lines.
+  */
   display: grid;
-  grid-template-columns: repeat(5, var(--ped-col));
-  grid-template-rows: repeat(32, minmax(30px, auto));
-  min-height: 960px;
-  min-width: 100%;
+  grid-template-columns: repeat(var(--ped-cols, 5), minmax(0, 1fr));
+  grid-template-rows: repeat(32, minmax(1.85em, auto));
   width: 100%;
+  max-width: 100%;
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
-  overflow: visible;
-  font-size: 11px;
-  line-height: 1.15;
+  overflow: hidden;
   box-sizing: border-box;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: calc(100cqw / (var(--ped-cols, 5) * var(--ped-chars, 20)));
+  font-variant-ligatures: none;
+  letter-spacing: 0;
+  line-height: 1.2;
 }
 .catalog-ped *,
 .catalog-ped *::before,
 .catalog-ped *::after {
   box-sizing: border-box;
-}
-.catalog-ped:not(.no-subject) {
-  grid-template-columns: minmax(7.5rem, 0.9fr) repeat(5, var(--ped-col));
 }
 .cat-subject {
   grid-column: 1;
@@ -474,27 +507,29 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   flex-direction: column;
   justify-content: center;
   align-items: flex-start;
-  gap: 2px;
+  gap: 0.15em;
   min-width: 0;
-  overflow: visible;
-  padding: 8px 10px;
+  width: 100%;
+  overflow: hidden;
+  padding: 0.4em 1ch;
   border-right: 1px solid var(--line);
   background: #121a2b;
   font-weight: 800;
-  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 .cat-subject .cat-name {
   display: block;
-  max-width: 18ch;
-  overflow: visible;
+  width: 18ch;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: clip;
   white-space: nowrap;
 }
 .cat-subject a:hover { color: var(--gold); }
 .cat-subject .yr {
   display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.92em;
   font-weight: 600;
   letter-spacing: 0;
   text-transform: none;
@@ -506,9 +541,11 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   display: flex;
   align-items: center;
   min-width: 0;
+  width: 100%;
   min-height: 0;
-  overflow: visible;
-  padding: 2px 6px 2px 8px;
+  overflow: hidden;
+  /* 1ch gutters inside the 20ch column → ~18ch for the name between “pipes” */
+  padding: 0.15em 1ch;
   border-bottom: 1px solid #243049;
   border-left: 1px solid #243049;
 }
@@ -519,43 +556,48 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   justify-content: center;
   gap: 0;
   width: 100%;
+  max-width: 18ch;
   min-width: 0;
-  overflow: visible;
-  padding-right: 2px;
+  overflow: hidden;
 }
 .cat-cell-inner.empty {
   min-height: 1em;
 }
 .cat-cell .cat-name {
   display: block;
-  max-width: 18ch;
-  overflow: visible;
+  width: 18ch;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: clip;
   white-space: nowrap;
   font-weight: 650;
   line-height: 1.15;
+  text-transform: uppercase;
 }
 .cat-cell .cat-name:hover { color: var(--teal); }
 .cat-cell .yr {
   display: block;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 0.92em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   line-height: 1.15;
   flex-shrink: 0;
 }
-.cat-g1 { font-size: 12px; }
-.cat-g1 .yr { font-size: 11px; }
-.cat-g2 { font-size: 11px; }
-.cat-g2 .yr { font-size: 10px; }
-.cat-g3 { font-size: 10.5px; }
-.cat-g3 .yr { font-size: 10px; }
+/* Uniform scale — do not enlarge early gens (that re-breaks the 20ch budget). */
+.cat-g1,
+.cat-g2,
+.cat-g3,
 .cat-g4,
-.cat-g5 { font-size: 10px; }
-.cat-g4 .yr,
-.cat-g5 .yr { font-size: 10px; }
-.cat-cell.sire { border-left: 3px solid var(--teal); }
-.cat-cell.dam { border-left: 3px solid var(--pink); }
+.cat-g5 { font-size: 1em; }
+.cat-cell.sire { border-left: 0.22em solid var(--teal); }
+.cat-cell.dam { border-left: 0.22em solid var(--pink); }
+.horse-inline-link {
+  color: var(--teal);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.horse-inline-link:hover { color: var(--gold); }
 
 .family-panel { overflow: auto; }
 .ff-block { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #243049; }
@@ -737,8 +779,9 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .sales-col > .panel.family-panel {
   overflow: auto;
 }
-.sales-col .panel:has(.catalog-ped) {
-  overflow-x: auto;
+.sales-col .panel:has(.catalog-ped),
+.sales-col .panel:has(.pedigree-fit) {
+  overflow-x: hidden;
   overflow-y: auto;
 }
 .sales-root h4 {
