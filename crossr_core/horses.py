@@ -1262,13 +1262,28 @@ def load_stallion_ranking_tables():
 
 
 def stallion_ranking_history(stallion_name, entered_stud=None):
-    """Yearly ranks for lists this stallion actually appears on."""
+    """Yearly ranks + full BloodHorse metrics (AEI, CI, earnings, runners, …)."""
     key = main.clean_horse_name(stallion_name)
+    try:
+        from crossr_core.stallion_rankings_rich import rich_rankings_from_db
+        rich = rich_rankings_from_db(stallion_name, entered_stud=entered_stud)
+    except Exception:
+        rich = {"lists": [], "rows": {}, "columns": {}}
+
+    lists = list(rich.get("lists") or [])
+    rows = dict(rich.get("rows") or {})
+    columns = dict(rich.get("columns") or {})
+    have_rich = bool(lists)
+
     payload = load_stallion_ranking_tables()
-    lists = []
-    rows = {}
     for item in payload["lists"]:
         list_id = item["id"]
+        is_book = item.get("group") == "book"
+        # Prefer rich DB BloodHorse rows; only fall back to thin CSV when DB empty.
+        if not is_book and have_rich:
+            continue
+        if list_id in rows:
+            continue
         table = payload["tables"][list_id]
         by_name = table["ranks"]
         years = table["years"]
@@ -1294,7 +1309,25 @@ def stallion_ranking_history(stallion_name, entered_stud=None):
             continue
         lists.append(item)
         rows[list_id] = ranked
-    return {"lists": lists, "rows": rows}
+        if list_id == "stud_fee":
+            columns[list_id] = [
+                {"key": "year", "label": "Year", "type": "number"},
+                {"key": "rank", "label": "Rank", "type": "number"},
+                {"key": "stud_fee", "label": "Stud Fee", "type": "money"},
+            ]
+        elif list_id == "leading_sire":
+            columns[list_id] = [
+                {"key": "year", "label": "Year", "type": "number"},
+                {"key": "rank", "label": "Rank", "type": "number"},
+                {"key": "earnings", "label": "Total Progeny Earnings", "type": "money"},
+            ]
+        else:
+            columns[list_id] = [
+                {"key": "year", "label": "Year", "type": "number"},
+                {"key": "rank", "label": "Rank", "type": "number"},
+            ]
+
+    return {"lists": lists, "rows": rows, "columns": columns}
 
 
 def _broodmare_ranking_rows(stallion_name):

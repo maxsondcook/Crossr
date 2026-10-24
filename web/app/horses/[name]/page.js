@@ -103,6 +103,215 @@ function ProgenyStatSection({ title, cards }) {
   );
 }
 
+function parseMetricNumber(val) {
+  if (val == null || val === "") return null;
+  if (typeof val === "number" && Number.isFinite(val)) return val;
+  const text = String(val).trim();
+  const paren = text.match(/\(\s*\$?\s*([\d,]+(?:\.\d+)?)\s*\)\s*$/);
+  if (paren) {
+    const n = Number(paren[1].replace(/,/g, ""));
+    return Number.isFinite(n) ? n : null;
+  }
+  const cleaned = text.replace(/[,$%\s]/g, "").replace(/^\$/, "");
+  if (!cleaned || cleaned === "-" || cleaned === ".") return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatRankingCell(row, col) {
+  const key = col.key;
+  const raw = row[key];
+  if (raw == null || raw === "") return "—";
+  if (key === "rank") return `#${raw}`;
+  if (col.type === "money") {
+    if (typeof raw === "string" && /\$/.test(raw)) return raw;
+    const n = row[`${key}_num`] ?? parseMetricNumber(raw);
+    return n != null ? money(n) : String(raw);
+  }
+  return String(raw);
+}
+
+function StallionRankingsPanel({ rankingMeta, rankList, setRankList }) {
+  const lists = rankingMeta.lists || [];
+  const bloodhorseLists = lists.filter((list) => list.group !== "book");
+  const bookLists = lists.filter((list) => list.group === "book");
+  const rows = (rankingMeta.rows && rankingMeta.rows[rankList]) || [];
+  const columns = (rankingMeta.columns && rankingMeta.columns[rankList]) || [
+    { key: "year", label: "Year", type: "number" },
+    { key: "rank", label: "Rank", type: "number" },
+  ];
+  const metricOptions = columns.filter((c) => c.key !== "year");
+
+  const [query, setQuery] = useState("");
+  const [sortKey, setSortKey] = useState("year");
+  const [sortDir, setSortDir] = useState("desc");
+  const [filterMetric, setFilterMetric] = useState("");
+  const [filterMin, setFilterMin] = useState("");
+  const [filterMax, setFilterMax] = useState("");
+
+  useEffect(() => {
+    setQuery("");
+    setSortKey("year");
+    setSortDir("desc");
+    setFilterMetric("");
+    setFilterMin("");
+    setFilterMax("");
+  }, [rankList]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const minN = filterMin !== "" ? Number(filterMin) : null;
+    const maxN = filterMax !== "" ? Number(filterMax) : null;
+    let next = rows.filter((row) => {
+      if (q) {
+        const hay = columns
+          .map((col) => String(row[col.key] ?? ""))
+          .join(" ")
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (filterMetric) {
+        const num = row[`${filterMetric}_num`] ?? parseMetricNumber(row[filterMetric]);
+        if (minN != null && !Number.isNaN(minN)) {
+          if (num == null || num < minN) return false;
+        }
+        if (maxN != null && !Number.isNaN(maxN)) {
+          if (num == null || num > maxN) return false;
+        }
+      }
+      return true;
+    });
+    const dir = sortDir === "asc" ? 1 : -1;
+    const copy = [...next];
+    copy.sort((a, b) => {
+      const aNum = a[`${sortKey}_num`] ?? parseMetricNumber(a[sortKey]);
+      const bNum = b[`${sortKey}_num`] ?? parseMetricNumber(b[sortKey]);
+      if (aNum != null && bNum != null && aNum !== bNum) return (aNum - bNum) * dir;
+      if (aNum != null && bNum == null) return -1 * dir;
+      if (aNum == null && bNum != null) return 1 * dir;
+      const as = String(a[sortKey] ?? "");
+      const bs = String(b[sortKey] ?? "");
+      return as.localeCompare(bs, undefined, { numeric: true }) * dir;
+    });
+    return copy;
+  }, [rows, columns, query, sortKey, sortDir, filterMetric, filterMin, filterMax]);
+
+  function toggleSort(key) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir(key === "year" || key === "rank" ? "desc" : "desc");
+  }
+
+  if (!lists.length) return null;
+
+  return (
+    <div className="stallion-rankings-panel" style={{ marginTop: 16 }}>
+      <h4>STALLION RANKINGS</h4>
+      <div className="rankings-toolbar">
+        <select
+          value={rankList}
+          onChange={(e) => setRankList(e.target.value)}
+          aria-label="Ranking list"
+        >
+          {bloodhorseLists.map((list) => (
+            <option key={list.id} value={list.id}>{list.label}</option>
+          ))}
+          {bookLists.length ? (
+            <optgroup label="Book">
+              {bookLists.map((list) => (
+                <option key={list.id} value={list.id}>{list.label}</option>
+              ))}
+            </optgroup>
+          ) : null}
+        </select>
+        <input
+          className="rankings-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search metrics…"
+          aria-label="Search ranking rows"
+        />
+        <select
+          value={filterMetric}
+          onChange={(e) => setFilterMetric(e.target.value)}
+          aria-label="Filter metric"
+        >
+          <option value="">Filter metric…</option>
+          {metricOptions.map((col) => (
+            <option key={col.key} value={col.key}>{col.label}</option>
+          ))}
+        </select>
+        <input
+          className="rankings-range"
+          value={filterMin}
+          onChange={(e) => setFilterMin(e.target.value)}
+          placeholder="Min"
+          inputMode="decimal"
+          disabled={!filterMetric}
+          aria-label="Minimum metric value"
+        />
+        <input
+          className="rankings-range"
+          value={filterMax}
+          onChange={(e) => setFilterMax(e.target.value)}
+          placeholder="Max"
+          inputMode="decimal"
+          disabled={!filterMetric}
+          aria-label="Maximum metric value"
+        />
+      </div>
+      <p className="rankings-meta">
+        {visible.length} / {rows.length} years
+        {sortKey ? ` · sorted by ${columns.find((c) => c.key === sortKey)?.label || sortKey} (${sortDir})` : ""}
+      </p>
+      <div className="history-wrap rankings-rich-wrap">
+        <table className="rankings-rich-table">
+          <thead>
+            <tr>
+              {columns.map((col) => (
+                <th key={col.key}>
+                  <button
+                    type="button"
+                    className={`rankings-sort${sortKey === col.key ? " active" : ""}`}
+                    onClick={() => toggleSort(col.key)}
+                  >
+                    {col.label}
+                    {sortKey === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                  </button>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((row) => (
+              <tr key={`${rankList}-${row.year}-${row.table_name || ""}`}>
+                {columns.map((col) => (
+                  <td
+                    key={col.key}
+                    className={col.type === "money" || col.key === "aei" || col.key === "comparable_index" ? "money" : undefined}
+                  >
+                    {formatRankingCell(row, col)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {!visible.length ? (
+              <tr>
+                <td colSpan={Math.max(columns.length, 1)} className="rankings-empty">
+                  No ranking rows match this filter.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function HorsePage() {
   const { name } = useParams();
   const router = useRouter();
@@ -208,17 +417,7 @@ function HorsePage() {
   const bmsRank = s.broodmare_rank || (data.broodmare_sire || []).find((row) => row.rank)?.rank;
   const bmsCountLabel = (data.broodmare_sire || []).find((row) => row.count_label)?.count_label || "Runners";
   const rankingMeta = data.sire_rankings || {};
-  const RANK_LISTS = rankingMeta.lists || [
-    { id: "leading_sire", label: "Leading Sire Rankings", group: "bloodhorse" },
-    { id: "mares_bred", label: "Mares Bred Rankings", group: "book" },
-    { id: "stud_fee", label: "Stud Fee Rankings", group: "book" },
-  ];
-  const rankingRows = (rankingMeta.rows && rankingMeta.rows[rankList]) || [];
-  const bloodhorseLists = RANK_LISTS.filter((list) => list.group !== "book");
-  const bookLists = RANK_LISTS.filter((list) => list.group === "book");
-  const activeRankList = RANK_LISTS.find((list) => list.id === rankList) || {};
-  const metricKey = activeRankList.metric;
-  const metricLabel = activeRankList.metric_label;
+  const RANK_LISTS = rankingMeta.lists || [];
 
   return (
     <div className="dash">
@@ -322,51 +521,11 @@ function HorsePage() {
           </div>
         ) : null}
         {data.stallion && RANK_LISTS.length ? (
-          <div style={{ marginTop: 16 }}>
-            <h4>STALLION RANKINGS</h4>
-            <select
-              value={rankList}
-              onChange={(e) => setRankList(e.target.value)}
-              aria-label="Ranking list"
-              style={{ margin: "8px 0 12px", padding: "6px 10px" }}
-            >
-              {bloodhorseLists.map((list) => (
-                <option key={list.id} value={list.id}>{list.label}</option>
-              ))}
-              {bookLists.length ? (
-                <optgroup label="Book">
-                  {bookLists.map((list) => (
-                    <option key={list.id} value={list.id}>{list.label}</option>
-                  ))}
-                </optgroup>
-              ) : null}
-            </select>
-            <div className="history-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Year</th>
-                    <th>Rank</th>
-                    {metricLabel ? <th>{metricLabel}</th> : null}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rankingRows.map((row) => (
-                    <tr key={row.year}>
-                      <td>{row.year}</td>
-                      <td>{row.rank ? `#${row.rank}` : "N/A"}</td>
-                      {metricKey === "earnings" ? (
-                        <td className="money">{row.earnings != null ? money(row.earnings) : "—"}</td>
-                      ) : null}
-                      {metricKey === "stud_fee" ? (
-                        <td className="money">{row.stud_fee || (row.stud_fee_num != null ? money(row.stud_fee_num) : "—")}</td>
-                      ) : null}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <StallionRankingsPanel
+            rankingMeta={rankingMeta}
+            rankList={rankList}
+            setRankList={setRankList}
+          />
         ) : null}
         {s.career_highlight ? (
           <div className="notes" style={{ marginTop: 16 }}>{s.career_highlight}</div>
