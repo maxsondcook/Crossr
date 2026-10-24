@@ -171,7 +171,63 @@ function shapeRankingTable(rawColumns, rawRows, rankList) {
   return { columns, rows };
 }
 
-function StallionRankingsPanel({ rankingMeta, rankList, setRankList }) {
+// Regional international lists fold into their parent list as earnings columns.
+const RANKING_REGIONS = [
+  { suffix: "_north_america", key: "north_america_earnings", label: "NA" },
+  { suffix: "_japan_and_hong_kong", key: "japan_hong_kong_earnings", label: "HK/Japan" },
+  { suffix: "_europe_and_dubai", key: "europe_dubai_earnings", label: "Europe/ME" },
+];
+
+function regionalParent(listId) {
+  const region = RANKING_REGIONS.find((r) => listId.endsWith(r.suffix));
+  return region ? listId.slice(0, -region.suffix.length) : null;
+}
+
+function mergeRegionalLists(meta) {
+  const allLists = meta.lists || [];
+  const ids = new Set(allLists.map((l) => l.id));
+  const lists = allLists.filter((l) => {
+    const parent = regionalParent(l.id);
+    return !(parent && ids.has(parent));
+  });
+  const columns = { ...(meta.columns || {}) };
+  const rows = { ...(meta.rows || {}) };
+  for (const list of lists) {
+    const regional = RANKING_REGIONS.filter((r) => ids.has(list.id + r.suffix));
+    if (!regional.length) continue;
+    const byYear = new Map();
+    for (const row of rows[list.id] || []) byYear.set(row.year, { ...row });
+    for (const r of regional) {
+      for (const row of rows[list.id + r.suffix] || []) {
+        const merged = byYear.get(row.year) || {
+          year: row.year,
+          rank: row.rank,
+          year_earnings: row.year_earnings,
+          year_earnings_num: row.year_earnings_num,
+        };
+        if (merged[r.key] == null && row.region_earnings != null) {
+          merged[r.key] = row.region_earnings;
+          merged[`${r.key}_num`] = row.region_earnings_num;
+        }
+        byYear.set(row.year, merged);
+      }
+    }
+    rows[list.id] = [...byYear.values()];
+    columns[list.id] = [
+      { key: "year", label: "Year", type: "number" },
+      { key: "rank", label: "Rank", type: "number" },
+      { key: "year_earnings", label: "Earnings", type: "money" },
+      ...regional.map((r) => ({ key: r.key, label: r.label, type: "money" })),
+    ];
+  }
+  return { lists, columns, rows };
+}
+
+function StallionRankingsPanel({ rankingMeta: rawRankingMeta, rankList: rawRankList, setRankList }) {
+  const rankingMeta = useMemo(() => mergeRegionalLists(rawRankingMeta), [rawRankingMeta]);
+  const rankList = regionalParent(rawRankList) && rankingMeta.lists.some((l) => l.id === regionalParent(rawRankList))
+    ? regionalParent(rawRankList)
+    : rawRankList;
   const lists = rankingMeta.lists || [];
   const bloodhorseLists = lists.filter((list) => list.group !== "book");
   const bookLists = lists.filter((list) => list.group === "book");
