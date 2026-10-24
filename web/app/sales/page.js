@@ -841,12 +841,11 @@ function SalesPage() {
                       </div>
                     ) : null}
                     {ready && Number.isFinite(Number(detail?.market_prediction?.boom_pct)) && detail?.market_prediction?.boom_pct != null ? (
-                      // Boom %: chance of a graded / Group stakes win; ~1.2% is average.
+                      // Boom %: chance of a graded / Group stakes win.
                       <div className="pv-price pv-boom">
                         <span className="pv-label">Boom</span>
                         <b>
                           {Number(detail.market_prediction.boom_pct).toFixed(1)}%
-                          <span className="pv-boom-rel"> · {(Number(detail.market_prediction.boom_pct) / 1.2).toFixed(1)}× average</span>
                         </b>
                       </div>
                     ) : null}

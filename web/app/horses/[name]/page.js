@@ -654,19 +654,19 @@ function HorsePage() {
         </div>
 
         {(data.stud_book || []).length ? (
-          <div className="panel">
+          <div className="panel panel-wide">
             <h4>STUD FEE & MARES BRED</h4>
           <div className="history-wrap">
-            <table>
+            <table className="book-table">
               <thead>
                 <tr>
                   <th>Year</th>
-                  <th>Stud Fee</th>
-                  <th>Fee Rank</th>
-                  <th>Mares Bred</th>
-                  <th>MB Rank</th>
-                  <th>Live Foals</th>
-                  <th>Live Foal %</th>
+                  <th title="Stud fee">Fee</th>
+                  <th title="Stud fee rank">Fee Rk</th>
+                  <th title="Mares bred">Mares</th>
+                  <th title="Mares bred rank">MB Rk</th>
+                  <th title="Live foals">Foals</th>
+                  <th title="Live foal %">LF %</th>
                 </tr>
               </thead>
               <tbody>
@@ -688,7 +688,7 @@ function HorsePage() {
         ) : null}
 
         {data.stallion && RANK_LISTS.length ? (
-          <div className="panel">
+          <div className="panel panel-wide">
             <StallionRankingsPanel
               rankingMeta={rankingMeta}
               rankList={rankList}
