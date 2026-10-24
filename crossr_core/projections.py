@@ -200,7 +200,7 @@ def _annotate_hip_pct(lots: list) -> None:
 
 
 def warm_price_model(force: bool = False) -> Dict[str, Any]:
-    """Load empirical fee-band model from cache (rebuild only if missing/forced)."""
+    """Load the empirical fee-band model from Postgres (crossr_models)."""
     global _PRICE_ROWS, _PRICE_MODEL, _BAND_MODEL, _PRICE_ERROR, _WARMED
     with _LOCK:
         if _WARMED and not force:
@@ -213,13 +213,10 @@ def warm_price_model(force: bool = False) -> Dict[str, Any]:
         try:
             import PriceProjection as pp
 
-            band = None if force else pp.load_fee_band_model()
+            # Stored in Postgres by scripts/load_railway.py; never rebuilt from files at runtime.
+            band = pp.load_fee_band_model()
             if band is None or not (band.get("by_kind") or {}):
-                _rows, _stats, band = pp.build_fee_band_dataset(
-                    scrape_missing=False, max_scrapes=0
-                )
-                pp.save_fee_band_model(band)
-                _PRICE_ROWS = _rows
+                raise RuntimeError("fee-band model missing from crossr_models; run scripts/load_railway.py --only models")
             _BAND_MODEL = band
             _PRICE_ERROR = None
         except Exception as exc:  # pragma: no cover

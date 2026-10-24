@@ -1,7 +1,5 @@
 """Horse search, profiles, and pedigree trees as JSON."""
-import csv
 import datetime
-import glob
 import json
 import os
 import re

@@ -1,35 +1,18 @@
-"""Compatibility facade over the 8 sample CSVs (crossr_core.sample_db).
+"""Compatibility facade over the Crossr tables in Postgres (crossr_core.sample_db).
 
-Runtime horse/sales/race/rank/fee facts come only from data/*.csv.
-Account/client/notes rows are optional app-state CSVs under
-placeholderdatabase/ (not breeding facts) — empty if missing.
+Horse/sales/race/rank/fee facts are projected from the 8 runtime tables.
+Account/client/notes rows are app-state tables (sample_db.APP_TABLES), also in
+Postgres; they were placeholderdatabase/*.csv before.
 """
 
 from __future__ import annotations
 
-import csv
 import json
-import os
 import threading
-from pathlib import Path
 
 from crossr_core import sample_db
 
-ROOT = Path(__file__).resolve().parent
-APP_STATE_DIR = ROOT / "placeholderdatabase"
-
-# App-state only (not sample DB facts). Kept so auth/notes keep working.
-APP_TABLES = {
-    "industry_roles": ["role_name", "description"],
-    "accounts": ["account_id", "display_name", "email", "industry_role", "created_at"],
-    "clients": ["client_id", "account_id", "client_name"],
-    "client_preferences": [
-        "preference_id", "client_id", "sex", "foaled", "surface",
-        "min_stud_fee", "max_stud_fee", "sire_name", "requires_producer_note",
-    ],
-    "notes": ["note_id", "account_id", "sale_title", "hip", "body", "source", "updated_at"],
-    "hypothetical_matings": ["mating_key", "horse_name", "sire_name", "dam_name", "pedigree_json"],
-}
+APP_TABLES = sample_db.APP_TABLES
 
 _LOCK = threading.Lock()
 _APP_CACHE: dict[str, list[dict]] = {}
@@ -39,24 +22,21 @@ broodmare_clean_horse_name = sample_db.broodmare_clean_horse_name
 
 
 def use_postgres() -> bool:
-    return False
+    return True
 
 
-def _load_app_csv(table: str) -> list[dict]:
-    columns = APP_TABLES[table]
-    path = APP_STATE_DIR / f"{table}.csv"
-    if not path.exists():
-        return []
-    with path.open(encoding="utf-8", newline="") as handle:
-        return [{col: (raw.get(col) or "") for col in columns} for raw in csv.DictReader(handle)]
+def _load_app_table(table: str) -> list[dict]:
+    from crossr_core import railway_db
+
+    return railway_db.read_table(table, APP_TABLES[table])
 
 
 def load_table(table: str, refresh: bool = False) -> list[dict]:
-    """Load a logical table. Fact tables are projected from the 8 sample CSVs."""
+    """Load a logical table. Fact tables are projected from the 8 runtime tables."""
     if table in APP_TABLES:
         with _LOCK:
             if refresh or table not in _APP_CACHE:
-                _APP_CACHE[table] = _load_app_csv(table)
+                _APP_CACHE[table] = _load_app_table(table)
             return list(_APP_CACHE[table])
 
     if table == "graded_stakes_winners":
@@ -231,28 +211,21 @@ def load_table(table: str, refresh: bool = False) -> list[dict]:
         return rows
 
     if table == "pedigree_lines":
-        # Pedigrees live in pedigrees_database.py — no CSV mirror at runtime.
+        # Pedigrees live in the pedigrees table (crossr_core.pedigree_store).
         return []
 
     raise KeyError(f"Unknown table {table}")
 
 
 def write_table(table: str, rows: list[dict]) -> None:
-    """App-state writes only. Fact tables are owned by scripts/pipeline/run.py."""
+    """App-state writes only. Fact tables are owned by the pipeline (sample_db.upsert_rows)."""
     if table not in APP_TABLES:
-        raise RuntimeError(
-            f"Refusing to write fact table {table!r}; use scripts/pipeline/run.py → data/{table}.csv"
-        )
+        raise RuntimeError(f"Refusing to write fact table {table!r}; use the pipeline (sample_db.upsert_rows)")
+    from crossr_core import railway_db
+
     columns = APP_TABLES[table]
-    APP_STATE_DIR.mkdir(parents=True, exist_ok=True)
-    path = APP_STATE_DIR / f"{table}.csv"
-    tmp = path.with_suffix(path.suffix + ".tmp")
     normalized = [{col: "" if row.get(col) is None else str(row.get(col)) for col in columns} for row in rows]
-    with tmp.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns, lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(normalized)
-    os.replace(tmp, path)
+    railway_db.replace_table(table, columns, normalized)
     with _LOCK:
         _APP_CACHE[table] = normalized
 
@@ -272,7 +245,7 @@ def load_stallion_profiles() -> dict:
 
 
 def save_stallion_profiles(master_profiles: dict) -> None:
-    """No-op for legacy callers. Stud cards derive from data/stud_fees.csv."""
+    """No-op for legacy callers. Stud cards derive from the stud_fees table."""
     return None
 
 

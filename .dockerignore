@@ -6,9 +6,17 @@ web/.next
 .mypy_cache
 .pytest_cache
 .env
-# Data lives in Railway Postgres; keep it out of the image
+# All data lives in Postgres (loaded by scripts/load_railway.py); keep every
+# data file out of the image so the API cannot read one by accident.
 data/
 pedigrees_database.py
+hypofoals.py
+Analyzed Sales/
+Upcoming Sales/
+placeholderdatabase/
+stallion_rankings_data/
+live_foal_statistics/
+*.csv
 *.db
 *.db-wal
 *.db-shm

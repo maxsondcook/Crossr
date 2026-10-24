@@ -4,8 +4,8 @@ Train the yearling / weanling sale-price (Tobit) and Boom% (logistic) models.
     pip install -r requirements-model.txt
     python scripts/train_sales_model.py [--data-dir data] [--quick]
 
-Reads the local CSV copies in data/ (sales_lots, stud_fees, race_horses,
-graded_stakes), replays history year by year through crossr_core.sales_model.History
+Reads sales_lots, stud_fees, race_horses and graded_stakes from Postgres
+(DATABASE_URL; --data-dir reads CSV copies instead), replays history year by year through crossr_core.sales_model.History
 so every lot only sees earlier years, then:
 
   1. price: censored-normal regression of log hammer price; RNAs are upper bounds
@@ -15,7 +15,8 @@ so every lot only sees earlier years, then:
      drop-one feature tests, sire-clustered standard errors.
   4. keeps a feature only if p < 0.01 AND dropping it hurts held-out fit.
 
-Writes Analyzed Sales/sales_model.json.gz (runtime artifact) and
+Stores the runtime artifact in Postgres (crossr_models "sales_model", which the
+API loads), writes a local copy to Analyzed Sales/sales_model.json.gz and
 docs/sales-model-results.md (generated tables).
 """
 
@@ -54,20 +55,38 @@ def log(msg: str) -> None:
 
 
 # =============================================================== data assembly
-def load_sales(data: Path) -> pd.DataFrame:
+NUMERIC = {"catalog_year", "birth_year", "price_num", "is_rna", "is_out", "foal_year", "Year"}
+
+
+def read_table(data, table: str, cols: list) -> pd.DataFrame:
+    """One table's columns: from Postgres, or from data/<table>.csv when --data-dir is given."""
+    if data is not None:
+        return pd.read_csv(Path(data) / f"{table}.csv", usecols=cols, low_memory=False)
+    from crossr_core import railway_db
+
+    col_sql = ", ".join('"' + c + '"' for c in cols)
+    with railway_db.connect() as conn:
+        rows = conn.execute(f'SELECT {col_sql} FROM "{table}" ORDER BY _rid').fetchall()
+    df = pd.DataFrame(rows, columns=cols)
+    for c in cols:
+        if c in NUMERIC:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
+
+
+def load_sales(data) -> pd.DataFrame:
     cols = ["catalog_year", "catalog_title", "source_file", "hip", "name", "sex_letter",
             "sire", "dam", "damsire", "birth_year", "price_num", "is_rna", "is_out"]
-    df = pd.read_csv(data / "sales_lots.csv", usecols=cols, low_memory=False)
+    df = read_table(data, "sales_lots", cols)
     df["age"] = df.catalog_year - df.birth_year
     hipn = pd.to_numeric(df.hip.astype(str).str.extract(r"(\d+)")[0], errors="coerce")
     df["hip_pct"] = hipn.groupby(df.source_file).rank(pct=True)
     return df
 
 
-def build_maps(df: pd.DataFrame, data: Path):
+def build_maps(df: pd.DataFrame, data):
     """dam->sire map, graded events, per-horse own level, and Y/W boom outcomes."""
-    rh = pd.read_csv(data / "race_horses.csv", usecols=["name_key", "foal_year", "sex", "sire", "dam"],
-                     low_memory=False)
+    rh = read_table(data, "race_horses", ["name_key", "foal_year", "sex", "sire", "dam"])
     rh["k"] = rh.name_key.map(sm.name_key)
     rh["sire_k"] = rh.sire.map(sm.name_key)
     rh["dam_k"] = rh.dam.map(sm.name_key)
@@ -81,8 +100,7 @@ def build_maps(df: pd.DataFrame, data: Path):
         if k and s:
             dam_sire[k] = s
 
-    gs = pd.read_csv(data / "graded_stakes.csv", usecols=["Horse Name", "Place", "Race Year", "Foaling Year"],
-                     low_memory=False)
+    gs = read_table(data, "graded_stakes", ["Horse Name", "Place", "Race Year", "Foaling Year"])
     gs["k"] = gs["Horse Name"].map(sm.name_key)
     gs["fy"] = pd.to_numeric(gs["Foaling Year"], errors="coerce")
     gs["yr"] = pd.to_numeric(gs["Race Year"], errors="coerce")
@@ -107,8 +125,8 @@ def build_maps(df: pd.DataFrame, data: Path):
     return dam_sire, events, own, gsw_keys
 
 
-def load_fees(data: Path) -> dict:
-    sf = pd.read_csv(data / "stud_fees.csv")
+def load_fees(data) -> dict:
+    sf = read_table(data, "stud_fees", ["Year", "Stallion", "Stud Fee"])
     sf["k"] = sf.Stallion.map(sm.name_key)
     sf["fee"] = pd.to_numeric(sf["Stud Fee"].astype(str).str.replace(r"[^\d.]", "", regex=True), errors="coerce")
     sf = sf[(sf.fee > 0) & (sf.fee < 1_000_000)]
@@ -644,11 +662,11 @@ def write_report(path: Path, art: dict) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data-dir", default=str(ROOT / "data"))
+    ap.add_argument("--data-dir", default=None, help="read CSV copies from this folder instead of Postgres")
     ap.add_argument("--out", default=str(sm.ARTIFACT_PATH))
     ap.add_argument("--report", default=str(ROOT / "docs" / "sales-model-results.md"))
     args = ap.parse_args()
-    data = Path(args.data_dir)
+    data = args.data_dir
 
     log("loading sales")
     df = load_sales(data)
@@ -710,6 +728,11 @@ def main() -> None:
     with gzip.open(out, "wt", encoding="utf-8") as fh:
         json.dump(blob, fh, separators=(",", ":"))
     log(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB)")
+    if args.data_dir is None:
+        from crossr_core import railway_db
+
+        railway_db.save_model(sm.MODEL_NAME, blob)
+        log('stored the artifact in Postgres (crossr_models "sales_model")')
     write_report(Path(args.report), art)
     log(f"wrote {args.report}")
 

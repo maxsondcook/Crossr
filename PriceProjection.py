@@ -5,9 +5,9 @@ Data-science module: relate yearling / weanling sale prices to the sire's
 stud fee at covering (the nomination year that produced the foal), then
 project expected sale price from a stallion's current stud fee.
 
-Only YEARLING and WEANLING lots are included.
-Missing stud fees are scraped from Racing Post and written into
-stud_fee_database.json via fee_and_standing_location.
+Only YEARLING and WEANLING lots are included. The API only reads the fitted
+fee-band model from Postgres (load_fee_band_model); build_fee_band_dataset is an
+offline rebuild from the raw sales_data/ files.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ import fee_and_standing_location as fee_db
 
 SEARCH_DIRS = [Path("sales_data"), Path(".")]
 ROOT = Path(__file__).resolve().parent
+# Source file scripts/load_railway.py copies into crossr_models("fee_bands").
 FEE_BAND_CACHE_PATH = ROOT / "Analyzed Sales" / "expected_market_fee_bands.json"
 
 # Stud-fee bands for empirical Expected Market Value (USD, half-open [lo, hi)).
@@ -677,24 +678,22 @@ def build_fee_band_dataset(
     return enriched, stats, model
 
 
-def save_fee_band_model(model: Dict[str, Any], path: Optional[Path] = None) -> Path:
-    import json
+FEE_BAND_MODEL_NAME = "fee_bands"
 
-    path = path or FEE_BAND_CACHE_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(model, f, indent=2)
-    return path
+
+def save_fee_band_model(model: Dict[str, Any], path: Optional[Path] = None) -> str:
+    """Store the fitted fee-band model in Postgres (crossr_models). ``path`` is ignored."""
+    from crossr_core import railway_db
+
+    railway_db.save_model(FEE_BAND_MODEL_NAME, model)
+    return FEE_BAND_MODEL_NAME
 
 
 def load_fee_band_model(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
-    import json
+    """The fee-band model from Postgres, or None if it was never stored. ``path`` is ignored."""
+    from crossr_core import railway_db
 
-    path = path or FEE_BAND_CACHE_PATH
-    if not path.exists():
-        return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return railway_db.read_model(FEE_BAND_MODEL_NAME)
 
 
 def summarize_sire_history(
@@ -756,202 +755,3 @@ def build_dataset(
     )
     model = fit_price_fee_model(enriched)
     return enriched, stats, model
-
-
-def print_model_summary(model: Dict[str, Any]) -> None:
-    print("\n=======================================================")
-    print("         PRICE ↔ STUD FEE MODEL (YRLG / WNLG)         ")
-    print("=======================================================")
-    print(f"Matched sales used: {model.get('n_matched', 0):,}")
-    print(f"{'Segment':<12} {'N':>8} {'Med Multiple':>14} {'Mean Multiple':>14} {'Log Slope':>10}")
-    print("-" * 62)
-    for kind, block in model.get("by_kind", {}).items():
-        slope = block["log_slope"]
-        slope_s = f"{slope:.3f}" if slope is not None else "n/a"
-        print(
-            f"{kind:<12} {block['n']:>8,} {_fmt_multiple(block['median_multiple']):>14} "
-            f"{_fmt_multiple(block['mean_multiple']):>14} {slope_s:>10}"
-        )
-    print("=======================================================")
-    print("Covering year = sale_year-2 (yearlings) / sale_year-1 (weanlings).")
-    print("Projection uses these multiples against a stallion's CURRENT fee.")
-
-
-def run_projection_prompt(model: Dict[str, Any], rows: List[Dict[str, Any]]) -> None:
-    name = input("\nStallion name for projection: ").strip()
-    if not name:
-        return
-
-    db = fee_db.load_fee_database()
-    current = fee_db.get_current_fee(name, db)
-    if current is None:
-        print("Current stud fee not in database — trying Racing Post…")
-        scraped = fee_db.scrape_racing_post_fee_history(name)
-        if scraped["ok"]:
-            fee_db.upsert_fee_history(
-                name,
-                scraped["fees_by_year"],
-                farm=scraped.get("farm"),
-                racing_post_id=scraped.get("horse_id"),
-                racing_post_slug=scraped.get("slug"),
-                usd_years=scraped.get("usd_years"),
-            )
-            current = fee_db.get_current_fee(name)
-        else:
-            print(f"  Could not scrape fee: {scraped.get('error')}")
-
-    if current is None:
-        manual = input("Enter current stud fee manually (digits only, or blank to cancel): ").strip()
-        current = fee_db.parse_fee_value(manual)
-        if current is None:
-            return
-        fee_db.upsert_fee_history(name, {2026: current})
-
-    kind = input("Project as [1] Yearling (default) or [2] Weanling: ").strip()
-    sold_as = "Weanling" if kind == "2" else "Yearling"
-    proj = project_price(current, model, sold_as=sold_as)
-    hist = summarize_sire_history(rows, name)
-
-    print("\n---------------- Projection ----------------")
-    print(f"Stallion          : {name}")
-    print(f"Current stud fee  : {_money(current)}")
-    print(f"Segment           : {sold_as}")
-    print(f"Model sample size : {proj.get('n', 0):,}")
-    print(f"Median multiple   : {_fmt_multiple(proj.get('median_multiple'))}")
-    print(f"Proj @ median x   : {_money(proj.get('proj_median_multiple'))}")
-    print(f"Proj @ mean x     : {_money(proj.get('proj_mean_multiple'))}")
-    print(f"Proj log-log OLS  : {_money(proj.get('proj_loglog'))}")
-    if hist.get("n"):
-        print(
-            f"This sire history : n={hist['n']:,} | "
-            f"med price {_money(hist['median_price'])} | "
-            f"med multiple {_fmt_multiple(hist['median_multiple'])}"
-        )
-    print("--------------------------------------------")
-
-
-def scrape_missing_for_dataset(rows: List[Dict[str, Any]], max_scrapes: int = 100) -> None:
-    missing_sires = sorted(
-        {
-            r["sire"]
-            for r in rows
-            if not r.get("stud_fee")
-        },
-        key=lambda s: fee_db._norm_name(s),
-    )
-    print(f"\nUnique sires still missing a covering fee on ≥1 lot: {len(missing_sires)}")
-    if not missing_sires:
-        return
-    limit = input(f"Scrape up to how many sires? [{max_scrapes}]: ").strip()
-    try:
-        max_scrapes = int(limit) if limit else max_scrapes
-    except ValueError:
-        pass
-
-    db = fee_db.load_fee_database()
-    ok = fail = 0
-    for i, sire in enumerate(missing_sires[:max_scrapes], 1):
-        print(f"[{i}/{min(max_scrapes, len(missing_sires))}] {sire}…", end=" ", flush=True)
-        scraped = fee_db.scrape_racing_post_fee_history(sire)
-        if scraped["ok"]:
-            fee_db.upsert_fee_history(
-                sire,
-                scraped["fees_by_year"],
-                farm=scraped.get("farm"),
-                racing_post_id=scraped.get("horse_id"),
-                racing_post_slug=scraped.get("slug"),
-                usd_years=scraped.get("usd_years"),
-                db=db,
-                persist=True,
-            )
-            ok += 1
-            print(f"ok ({len(scraped['fees_by_year'])} years)")
-        else:
-            fail += 1
-            print(f"fail ({scraped.get('error')})")
-    print(f"Done. Scraped ok={ok} fail={fail}. Re-run build to refresh matches.")
-
-
-def export_matched_csv(rows: List[Dict[str, Any]], path: Path) -> None:
-    matched = [r for r in rows if r.get("stud_fee")]
-    fields = [
-        "sale_year",
-        "sale_title",
-        "hip",
-        "name",
-        "sold_as",
-        "sire",
-        "dam",
-        "covering_year",
-        "stud_fee",
-        "price",
-        "price_to_fee",
-        "source_file",
-    ]
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-        writer.writeheader()
-        for r in matched:
-            writer.writerow(r)
-    print(f"Wrote {len(matched):,} matched rows → {path}")
-
-
-def run_price_projection_menu() -> None:
-    enriched: List[Dict[str, Any]] = []
-    model: Dict[str, Any] = {"n_matched": 0, "by_kind": {}}
-
-    while True:
-        print("\n==================================")
-        print("       Price Projection           ")
-        print("==================================")
-        print("[1] Build yearling/weanling dataset (use cached fees)")
-        print("[2] Build dataset + scrape missing fees from Racing Post")
-        print("[3] Show price ↔ stud-fee model summary")
-        print("[4] Project sale price from a stallion's current fee")
-        print("[5] Scrape missing stallion fees into stud fee database")
-        print("[6] Export matched sales CSV")
-        print("----------------------------------")
-        print("[X] Return")
-
-        choice = input("\nSelect Option: ").strip().lower()
-        if choice in ("x", ""):
-            break
-        elif choice == "1":
-            enriched, _, model = build_dataset(scrape_missing=False)
-            print_model_summary(model)
-        elif choice == "2":
-            cap = input("Max Racing Post scrapes this run [40]: ").strip()
-            try:
-                max_scrapes = int(cap) if cap else 40
-            except ValueError:
-                max_scrapes = 40
-            enriched, _, model = build_dataset(scrape_missing=True, max_scrapes=max_scrapes)
-            print_model_summary(model)
-        elif choice == "3":
-            if not model.get("n_matched"):
-                print("Build the dataset first (option 1 or 2).")
-                continue
-            print_model_summary(model)
-        elif choice == "4":
-            if not model.get("n_matched"):
-                print("Build the dataset first (option 1 or 2).")
-                continue
-            run_projection_prompt(model, enriched)
-        elif choice == "5":
-            if not enriched:
-                print("Build the dataset first so we know which fees are missing.")
-                continue
-            scrape_missing_for_dataset(enriched)
-        elif choice == "6":
-            if not enriched:
-                print("Build the dataset first (option 1 or 2).")
-                continue
-            out = Path("Analyzed Sales") / "price_projection_matched.csv"
-            out.parent.mkdir(parents=True, exist_ok=True)
-            export_matched_csv(enriched, out)
-        else:
-            print("Invalid selection.")
-
-
-if __name__ == "__main__":
-    run_price_projection_menu()

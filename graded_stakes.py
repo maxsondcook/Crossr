@@ -148,24 +148,12 @@ _STARTS_SQL = """
 
 def _iter_starts():
     """(display_name, foal_year, sex, foaled_in, race_date, place, grade, race_name, country, track)."""
-    pg = sample_db._pg()
-    if pg:
-        with pg.connect() as conn:
-            with conn.cursor(name="stakes_starts") as cur:
-                cur.itersize = 10000
-                cur.execute(_STARTS_SQL)
-                for rec in cur:
-                    yield tuple("" if v is None else str(v) for v in rec)
-        return
-    horses = {
-        row.get("id"): (row.get("display_name"), row.get("foal_year"), row.get("sex"), row.get("foaled_in"))
-        for row in sample_db.load_table("race_horses")
-    }
-    for row in sample_db.load_table("race_starts"):
-        horse = horses.get(row.get("horse_id"))
-        if horse:
-            yield (*horse, row.get("race_date") or "", row.get("place") or "", row.get("grade") or "",
-                   row.get("race_name") or "", row.get("country") or "", row.get("track") or "")
+    with sample_db._pg().connect() as conn:
+        with conn.cursor(name="stakes_starts") as cur:
+            cur.itersize = 10000
+            cur.execute(_STARTS_SQL)
+            for rec in cur:
+                yield tuple("" if v is None else str(v) for v in rec)
 
 
 def _start_record(name, foal_year, sex, race_date, grade_class, race_name, country, track) -> dict:
