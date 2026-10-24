@@ -2,7 +2,7 @@
 
     com.crossr.pipeline.scrape        always running; restarted 5 min after it exits
     com.crossr.pipeline.sales-import  daily at 07:00 (run at wake if the Mac slept)
-    com.crossr.pipeline.racing-post   Mondays at 03:00 (sires due a Racing Post lookup)
+    com.crossr.pipeline.racing-post   always running; works through sires due a lookup
 
 All three run through scripts/pipeline/railway_env.sh, so DATABASE_URL is built
 from the Railway CLI at start and no password is written to disk. The scrapers
@@ -53,8 +53,10 @@ def plists(db: str, python: str) -> dict[str, dict]:
         },
         RACING_POST: {
             "Label": RACING_POST,
-            "ProgramArguments": [env, db, "/usr/bin/caffeinate", "-i", python, "-m", "crossr_pipeline", "racing-post"],
-            "StartCalendarInterval": {"Weekday": 1, "Hour": 3, "Minute": 0},
+            "ProgramArguments": [env, db, "/usr/bin/caffeinate", "-i", python, "-m", "crossr_pipeline", "racing-post", "--loop"],
+            "RunAtLoad": True,
+            "KeepAlive": True,
+            "ThrottleInterval": 300,
             "StandardOutPath": str(LOG_DIR / "racing-post.log"),
             "StandardErrorPath": str(LOG_DIR / "racing-post.log"),
             **common,

@@ -376,6 +376,9 @@ def run_racing_post(conn, delay: float = 3.0, limit: int | None = None) -> int:
     todo = [s for s in load_sires(conn) if due(s, states, now)]
     if limit:
         todo = todo[:limit]
+    if not todo:
+        lock.close()
+        return 0
     run = state.Run(conn, JOB)
     print(f"racing-post: {len(todo)} sire(s) to look up", flush=True)
     status = "ok"
@@ -423,4 +426,4 @@ def run_racing_post(conn, delay: float = 3.0, limit: int | None = None) -> int:
             pgdb.flush_versions(conn, ("stud_fees",))
         lock.close()
     run.finish(status, f"{len(todo)} sires")
-    return 0
+    return len(todo)

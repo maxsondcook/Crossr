@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -69,11 +70,17 @@ def cmd_racing_post(args) -> int:
     from crossr_pipeline.racing_post import run_racing_post
 
     print(f"Database: {_db_name()}", flush=True)
-    conn = _conn()
-    try:
-        return run_racing_post(conn, delay=args.delay, limit=args.limit)
-    finally:
-        conn.close()
+    while True:
+        conn = _conn()
+        try:
+            done = run_racing_post(conn, delay=args.delay, limit=args.limit)
+        finally:
+            conn.close()
+        if not args.loop:
+            return 0
+        if done == 0:
+            print("racing-post: nothing due. Sleeping 6 h.", flush=True)
+            time.sleep(6 * 3600)
 
 
 def _age(ts) -> str:
@@ -162,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("racing-post", help="Racing Post fee history for every sire (adds missing stud_fees years)")
     p.add_argument("--delay", type=float, default=3.0, help="Seconds between page loads (plus jitter)")
     p.add_argument("--limit", type=int, help="Stop after this many sires (testing)")
+    p.add_argument("--loop", action="store_true", help="Keep going: rerun when done, sleep 6 h when nothing is due")
     p.set_defaults(func=cmd_racing_post)
 
     p = sub.add_parser("status", help="Recent runs, queue state, table counts")

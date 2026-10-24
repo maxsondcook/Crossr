@@ -8,7 +8,7 @@ Postgres; no CSV or SQLite staging.
 | `pedigrees-sales` | Sire and dam of every lot in `sales_lots`, filled to a full 5-generation tree from Equibase. Every horse opened on the way is stored as a race record too. | continuously (the `scrape` loop) |
 | `races-refresh` | Re-opens each ok horse with a start in the last 60 days, so new starts and earnings land in `race_seasons` / `race_starts`. | weekly, inside the `scrape` loop |
 | `sales-import` | Loads new or changed `sales_data/*.csv` into `sales_lots`, replacing only that file's rows. | daily at 07:00 |
-| `racing-post-fees` | Racing Post fee history for every sire in `breeding_seasons` or `sales_lots`. Every row (fee, currency, private, country, standing) goes to `racing_post_fees`; `stud_fees` only gains years it had no fee for (existing fees win). | Mondays 03:00; found sires are re-checked after 180 days |
+| `racing-post-fees` | Racing Post fee history for every sire in `breeding_seasons` or `sales_lots`. Every row (fee, currency, private, country, standing) goes to `racing_post_fees`; `stud_fees` only gains years it had no fee for (existing fees win). | continuously (`racing-post --loop`); found sires are re-checked after 180 days |
 
 ## Running it
 
