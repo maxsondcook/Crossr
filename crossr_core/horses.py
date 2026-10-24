@@ -877,6 +877,7 @@ def sale_workspace(
     sale_year=None,
     birth_year=None,
     catalog_default_kind=None,
+    hip_pct=None,
 ):
     """Pedigree, female family, similar crosses for one sale horse. Physical stays blank."""
     from crossr_core import projections as proj_svc
@@ -894,6 +895,7 @@ def sale_workspace(
     ) if sire else []
     sire_profile = _profile_for(sire, profiles)
     market = proj_svc.project_lot_market(
+        {"hip_pct": hip_pct} if hip_pct is not None else None,
         sire=sire or "",
         sex=sex or "",
         sold_as=sold_as or "",

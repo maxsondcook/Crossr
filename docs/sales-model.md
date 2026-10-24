@@ -119,8 +119,12 @@ python scripts/train_sales_model.py
 ```
 
 Needs the local CSV copies in `data/` (sales_lots, stud_fees, race_horses,
-graded_stakes). Takes about a minute. Retrain after new sales are loaded; lots
-from a sale already in the training data are flagged `in_sample`.
+graded_stakes). Takes about a minute. Retrain after new sales are loaded; a lot is
+flagged `in_sample` (a backtest, not a forecast) when its own sale and year are in
+the training data.
+
+Renamed sales are merged through `SALE_ALIASES` in `crossr_core/sales_model.py`
+(Fasig-Tipton Eastern Fall Yearlings = Midlantic Fall Yearlings since 2013).
 
 ## Next
 

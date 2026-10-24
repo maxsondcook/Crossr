@@ -77,6 +77,8 @@ def name_key(name: Any) -> str:
 
 
 _SALE_NOISE = re.compile(r"\b(analyzed|19\d{2}|20\d{2})\b")
+# Renamed sales: old name -> current name (Fasig-Tipton's Timonium yearling sale).
+SALE_ALIASES = {"eastern fall yearlings": "midlantic fall yearlings"}
 
 
 def sale_key(title: Any) -> str:
@@ -85,7 +87,10 @@ def sale_key(title: Any) -> str:
     s = re.sub(r"\.csv$", "", s)
     s = _SALE_NOISE.sub(" ", s)
     s = re.sub(r"[^a-z0-9 ]+", " ", s)
-    return " ".join(s.split())
+    s = " ".join(s.split())
+    for old, new in SALE_ALIASES.items():
+        s = s.replace(old, new)
+    return s
 
 
 def _sex_flag(sex: Any) -> Optional[int]:
@@ -205,6 +210,7 @@ class History:
             "hip_pct": lot.get("hip_pct"),
             "hip_signal": self.hip_curve(skey, lot.get("hip_pct")),
             "damsire_k": ds_k,
+            "sale_matched_key": skey,
         }
 
     def features(self, raw: Dict[str, Any]) -> Dict[str, float]:
@@ -455,8 +461,9 @@ def predict_lot(
         "sale_matched": not bool(feats["sale_new"]),
         "damsire_used": raw["damsire_k"],
         "trained_through": hist.through_year,
-        # Lots from a sale already in training saw their own sale in the tables.
-        "in_sample": hist.through_year is not None and int(sale_year) <= hist.through_year,
+        # Only lots whose own sale (this sale, this year) is in the training data are backtests.
+        "in_sample": bool(raw["sale_matched_key"])
+        and int(sale_year) in hist.sale_level.get(raw["sale_matched_key"], {}),
         "holdout": {
             "price": price.get("holdout"),
             "boom": model["boom"][variant].get("holdout"),

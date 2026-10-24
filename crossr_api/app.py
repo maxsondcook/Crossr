@@ -531,6 +531,7 @@ def _workspace(lot, book, catalog_title="", catalog=None, catalog_default_kind=N
         sale_year=sale_year,
         birth_year=lot.get("birth_year") or lot.get("birth_date"),
         catalog_default_kind=modal,
+        hip_pct=lot.get("hip_pct"),
     )
     # Auction history stays same-sire proven crosses only (Maxson: that panel is locked).
     # SUCCESSFUL SIMILAR CROSSES may also include same-dam stakes winners (e.g. Tiztastic).
