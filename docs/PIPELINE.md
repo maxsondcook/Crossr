@@ -96,6 +96,18 @@ it again 5 minutes later.
 
 ## Scheduling (launchd)
 
+launchd jobs can't read `~/Desktop` (macOS privacy rules), so the jobs run
+from a separate clone at `~/Crossr-pipeline` with its own `.venv`, linked to
+Railway once with `railway link` inside it. After merging new pipeline code
+into `unified` on the Desktop checkout, update the clone:
+
+```bash
+git -C ~/Crossr-pipeline pull
+launchctl kickstart -k gui/$(id -u)/com.crossr.pipeline.scrape
+```
+
+Install the agents from the clone:
+
 ```bash
 .venv/bin/python -m crossr_pipeline install-launchd --db railway   # writes the plists, loads nothing
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.scrape.plist
