@@ -56,3 +56,4 @@ equibase_new_horses.csv
 Going_to_delete/
 crossr_core/__pycache__/
 .mplconfig/
+.venv/
