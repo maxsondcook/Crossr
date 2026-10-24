@@ -223,52 +223,56 @@ def ingest_graded_stakes() -> dict:
     return sample_db.upsert_rows("graded_stakes", incoming)
 
 
-def ingest_sales_lots() -> dict:
+def sales_rows(path: Path) -> list[dict]:
+    """sales_lots rows for one catalog CSV in sales_data/."""
     import sales_history
 
-    fieldnames = sample_db.TABLES["sales_lots"]
+    year_match = re.search(r"\d{4}", path.name)
+    catalog_year = year_match.group(0) if year_match else ""
+    title = sales_history.clean_title(path.name)
+    rows = []
+    for lot in sales_history.load_and_process_csv(path):
+        rows.append({
+            "catalog_year": catalog_year,
+            "catalog_title": title,
+            "source_file": path.name,
+            "hip": lot.get("hip"),
+            "name": lot.get("name"),
+            "name_key": sales_history.clean_search_string(lot.get("name")),
+            "sex": lot.get("sex"),
+            "sex_letter": lot.get("sex_letter"),
+            "sire": lot.get("sire"),
+            "sire_key": sales_history.clean_search_string(lot.get("sire")),
+            "dam": lot.get("dam"),
+            "dam_key": sales_history.clean_search_string(lot.get("dam")),
+            "damsire": lot.get("damsire"),
+            "damsire_key": sales_history.clean_search_string(lot.get("damsire")),
+            "color": lot.get("color"),
+            "consignor": lot.get("consignor"),
+            "purchaser": lot.get("purchaser"),
+            "barn": lot.get("barn"),
+            "foaled_location": lot.get("foaled_location"),
+            "birth_year": lot.get("birth_year"),
+            "price_raw": lot.get("price_raw"),
+            "price_num": lot.get("price_num"),
+            "is_rna": lot.get("is_rna"),
+            "is_out": lot.get("is_out"),
+            "is_fasig": lot.get("is_fasig"),
+        })
+    return rows
+
+
+def ingest_sales_lots() -> dict:
     sales_dir = ROOT / "sales_data"
     if not sales_dir.is_dir():
         return {"skipped": "sales_data missing"}
-    files = sorted(sales_dir.glob("*.csv"))
     incoming = []
-    for path in files:
-        year_match = re.search(r"\d{4}", path.name)
-        catalog_year = year_match.group(0) if year_match else ""
-        title = sales_history.clean_title(path.name)
+    for path in sorted(sales_dir.glob("*.csv")):
         try:
-            lots = sales_history.load_and_process_csv(path)
+            incoming.extend(sales_rows(path))
         except Exception as exc:
             print(f"  sales skip {path.name}: {exc}")
             continue
-        for lot in lots:
-            incoming.append({
-                "catalog_year": catalog_year,
-                "catalog_title": title,
-                "source_file": path.name,
-                "hip": lot.get("hip"),
-                "name": lot.get("name"),
-                "name_key": sales_history.clean_search_string(lot.get("name")),
-                "sex": lot.get("sex"),
-                "sex_letter": lot.get("sex_letter"),
-                "sire": lot.get("sire"),
-                "sire_key": sales_history.clean_search_string(lot.get("sire")),
-                "dam": lot.get("dam"),
-                "dam_key": sales_history.clean_search_string(lot.get("dam")),
-                "damsire": lot.get("damsire"),
-                "damsire_key": sales_history.clean_search_string(lot.get("damsire")),
-                "color": lot.get("color"),
-                "consignor": lot.get("consignor"),
-                "purchaser": lot.get("purchaser"),
-                "barn": lot.get("barn"),
-                "foaled_location": lot.get("foaled_location"),
-                "birth_year": lot.get("birth_year"),
-                "price_raw": lot.get("price_raw"),
-                "price_num": lot.get("price_num"),
-                "is_rna": lot.get("is_rna"),
-                "is_out": lot.get("is_out"),
-                "is_fasig": lot.get("is_fasig"),
-            })
     # Partition-replace by source_file would be ideal per catalog; full upsert is safe/idempotent
     return sample_db.upsert_rows("sales_lots", incoming)
 

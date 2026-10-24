@@ -25,7 +25,7 @@ from pathlib import Path
 
 from pq_scraper.dbio import load_pedigree_map, save_pedigree_map
 
-from equibase_scraper import db, queue
+from equibase_scraper import db as sqlite_db, pgdb, queue
 from equibase_scraper.parse import (
     is_blocked,
     is_empty_search,
@@ -40,6 +40,9 @@ from equibase_scraper.pedigree_fill import (
     fill_profile_pedigree,
     stored_pedigree_complete,
 )
+
+# DATABASE_URL set: race records and pedigrees go straight to Postgres.
+db = pgdb if pgdb.enabled() else sqlite_db
 
 REPO = Path(__file__).resolve().parents[1]
 CACHE = REPO / "equibase_scraper" / "cache"
@@ -400,16 +403,28 @@ def fetch_ancestor_profile(page, conn, delay: float, query) -> dict | None:
 
 
 class _PedigreeBook:
-    def __init__(self):
+    """Pedigree map and ancestor index. With Postgres, trees go straight to the
+    pedigrees table (no pedigrees_database.py rewrite); ``saved`` counts them."""
+
+    def __init__(self, conn=None):
         print("Loading pedigree map for 5-generation fill...", flush=True)
-        self.pedigree_map = load_pedigree_map()
+        self.conn = conn if db is pgdb else None
+        if self.conn is not None:
+            self.pedigree_map = pgdb.load_pedigree_map(self.conn)
+        else:
+            self.pedigree_map = load_pedigree_map()
         self.index = build_ancestor_index(self.pedigree_map)
         self.failed_refnos: set[str] = set()
         self.failed_names: set[tuple[str, str]] = set()
+        self.saved = 0
         print(f"Pedigree map: {len(self.pedigree_map)} horses", flush=True)
 
     def save(self, keys: set[str]) -> None:
         if not keys:
+            return
+        if self.conn is not None:
+            items = {key: self.pedigree_map[key] for key in keys if key in self.pedigree_map}
+            self.saved += pgdb.upsert_pedigrees(self.conn, items)
             return
         save_pedigree_map(self.pedigree_map, overwrite_keys=set(keys))
 
@@ -472,16 +487,19 @@ def fetch_horse(page, conn, horse, delay: float) -> str:
 
     expected_sire = horse["sire"] if "sire" in horse.keys() else None
     expected_dam = horse["dam"] if "dam" in horse.keys() else None
-    cached = _read_cache(profile_path)
+    yob_range = horse.get("yob_range")
+    role = horse.get("role")
+    refresh = bool(horse.get("refresh"))
+    cached = None if refresh else _read_cache(profile_path)
     if cached and is_profile(cached):
-        resolved = resolve_html(cached, year, expected_sire, expected_dam)
+        resolved = resolve_html(cached, year, expected_sire, expected_dam, yob_range, role)
         if resolved["kind"] in {"profile", "year_mismatch"}:
             summary = _store_resolved(conn, horse_id, resolved)
             print(f"{label}: {summary} cache", flush=True)
             return resolved["kind"]
 
     polite_wait(page, delay)
-    search_html = _read_cache(search_path)
+    search_html = None if refresh else _read_cache(search_path)
     search_note = "cache"
     if search_html is None:
         search_html, err = post_search(page, horse["display_name"] or horse["pedigree_key"])
@@ -499,7 +517,7 @@ def fetch_horse(page, conn, horse, delay: float) -> str:
         print(f"{label}: blocked", flush=True)
         raise Blocked()
 
-    resolved = resolve_html(search_html or "", year, expected_sire, expected_dam)
+    resolved = resolve_html(search_html or "", year, expected_sire, expected_dam, yob_range, role)
     if resolved["kind"] == "blocked":
         db.mark_status(conn, horse_id, "blocked", resolved.get("detail") or "", _now())
         conn.commit()
@@ -534,7 +552,7 @@ def fetch_horse(page, conn, horse, delay: float) -> str:
         print(f"{label}: error {err or 'empty profile'}", flush=True)
         return "error"
     _write_cache(profile_path, profile_html)
-    resolved = resolve_html(profile_html, year, expected_sire, expected_dam)
+    resolved = resolve_html(profile_html, year, expected_sire, expected_dam, yob_range, role)
     if resolved["kind"] == "blocked":
         db.mark_status(conn, horse_id, "blocked", "profile blocked", _now())
         conn.commit()
@@ -575,7 +593,7 @@ def run_fetch(conn, horses, delay: float, pedigree_fill: bool = True) -> int:
     if not horses:
         print("Nothing to fetch.", flush=True)
         return 0
-    book = _PedigreeBook() if pedigree_fill else None
+    book = _PedigreeBook(conn) if pedigree_fill else None
     if not pedigree_fill:
         print("Pedigree fill disabled for this run.", flush=True)
     print(f"Fetching {len(horses)} horse(s), delay={delay}s", flush=True)
@@ -625,7 +643,7 @@ def run_fill_pedigrees(conn, delay: float) -> int:
     """Walk status=ok horses whose 5-generation pedigree is not in the book yet."""
     from playwright.sync_api import sync_playwright
 
-    book = _PedigreeBook()
+    book = _PedigreeBook(conn)
     horses = [dict(row) for row in db.ok_horses(conn) if not _subject_is_complete(book, row)]
     print(f"Pedigree fill: {len(horses)} ok horse(s) still incomplete.", flush=True)
     if not horses:
@@ -662,11 +680,17 @@ def run_fill_pedigrees(conn, delay: float) -> int:
 def enqueue(conn) -> int:
     print(f"Reading {queue.PEDIGREE_PATH.name} ...", flush=True)
     seen = 0
-    with conn:
+    if db is pgdb:
         for subject in queue.iter_subjects():
             db.upsert_pending(conn, subject)
             seen += 1
-    total = conn.execute("SELECT COUNT(*) FROM horses").fetchone()[0]
+        total = db.count_rows(conn)
+    else:
+        with conn:
+            for subject in queue.iter_subjects():
+                db.upsert_pending(conn, subject)
+                seen += 1
+        total = conn.execute("SELECT COUNT(*) FROM horses").fetchone()[0]
     print(f"Queued {seen} pedigree horses. {total} rows in {db.DB_PATH.name}.", flush=True)
     return 0
 

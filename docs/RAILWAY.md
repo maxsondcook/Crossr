@@ -84,10 +84,11 @@ With `DATABASE_URL` exported, the pipeline (`scripts/pipeline/run.py`) and the
 pedigree scrapers write straight to Railway. The running API notices changes
 within ~15 s (`crossr_table_versions`) and reloads only the table that changed.
 
+The scheduled pipeline (Equibase race records, sale-parent pedigrees, sales
+CSV import) is in [PIPELINE.md](PIPELINE.md).
+
 ## Known limits
 
 - The API still loads each table fully into memory the first time it is used
   (~3.5 GB with everything loaded). Moving the heavy lookups to SQL queries is
   the next step to cut RAM, and therefore cost.
-- Starred hips and notes on **Upcoming Sales** are still written to CSVs inside
-  the container, so they reset on each deploy. They should move to Postgres next.
