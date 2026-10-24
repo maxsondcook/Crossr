@@ -709,7 +709,7 @@ function SalesPage() {
 
       {catalog ? (
         <div className="sales-columns">
-          <div className="sales-col">
+          <div className="sales-col sales-col-pedigree">
             <div className="panel">
               <h4>PEDIGREE</h4>
               {ready ? <PedigreeChart tree={detail.pedigree} showSubject={false} hrefFor={hrefFor} /> : <p className="empty">Loading pedigree…</p>}
@@ -736,7 +736,7 @@ function SalesPage() {
             </div>
           </div>
 
-          <div className="sales-col">
+          <div className="sales-col sales-col-info">
             {listError ? <p className="error">{listError}</p> : null}
             {loadingList ? <p className="empty">Loading catalog…</p> : null}
             {!loadingList && !current ? <p className="empty">No hips match this list.</p> : null}

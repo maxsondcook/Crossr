@@ -626,19 +626,32 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   overflow: hidden;
   text-overflow: clip;
   white-space: nowrap;
-  font-weight: 650;
+  font-weight: 700;
   line-height: 1.15;
   text-transform: uppercase;
+  color: #f5f8fc;
 }
 .cat-cell .cat-name:hover { color: var(--teal); }
 .cat-cell .yr {
   display: block;
-  color: var(--muted);
+  color: #a7b6cc;
   font-size: 0.92em;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   line-height: 1.15;
   flex-shrink: 0;
+}
+/* Sales pedigree: left column owns extra width → larger 20ch-scaled type. */
+.sales-col-pedigree .catalog-ped {
+  font-weight: 600;
+}
+.sales-col-pedigree .cat-name {
+  color: #ffffff;
+  -webkit-font-smoothing: antialiased;
+}
+.sales-col-pedigree .yr {
+  color: #b6c3d6;
 }
 /* Uniform scale — do not enlarge early gens (that re-breaks the 20ch budget). */
 .cat-g1,
@@ -812,7 +825,8 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(520px, 1.45fr) minmax(320px, 1fr) auto;
+  /* Left pedigree grows with the window; right info stack stays fixed width. */
+  grid-template-columns: minmax(0, 1fr) var(--sales-info-width, 360px) auto;
   gap: 10px;
   align-items: stretch;
 }
@@ -823,6 +837,12 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   flex-direction: column;
   gap: 10px;
   align-items: stretch;
+}
+.sales-col-info {
+  width: var(--sales-info-width, 360px);
+  max-width: var(--sales-info-width, 360px);
+  min-width: var(--sales-info-width, 360px);
+  justify-self: stretch;
 }
 /* Stack in document flow — never shrink panels over each other. */
 .sales-col > .panel {
