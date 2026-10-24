@@ -1125,6 +1125,11 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .barn-grid .wide { grid-column: 1 / -1; }
 
 @media (max-width: 980px) {
+  .sales-col-info {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
   .stallion-card, .dash, .sales-layout, .lot-dash, .lot-head, .filters, .barn-grid, .sales-columns, .sale-meta {
     grid-template-columns: 1fr;
   }
