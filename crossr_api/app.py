@@ -292,6 +292,29 @@ def horse_profile(name: str):
     return payload
 
 
+def _add_cross_similarity(result):
+    """Similarity of each winning cross to the stallion × mare foal being suggested."""
+    mare = result.get("mare_key") or result.get("mare")
+    if not mare:
+        return
+    for suggestion in result.get("suggestions") or []:
+        try:
+            foal_tree = horse_svc.resolve_pedigree_tree(sire=suggestion["name"], dam=mare)
+        except Exception:
+            continue
+        rows = list(suggestion.get("crosses") or []) + list(suggestion.get("cross_meta") or [])
+        for row in rows:
+            name = row.get("name") or row.get("foal_name")
+            if not name:
+                continue
+            try:
+                sim = horse_svc.pedigree_similarity(a_tree=foal_tree, b=name)
+            except Exception:
+                sim = None
+            row["similarity"] = (sim or {}).get("percent")
+            row["similarity_label"] = (sim or {}).get("label")
+
+
 @app.post("/api/hypomating/suggest")
 def hypomating_suggest(body: SuggestBody):
     result = hypomating_engine.suggest_matings(
@@ -316,6 +339,7 @@ def hypomating_suggest(body: SuggestBody):
             status_code=404,
             detail="That broodmare is not in the Crossr pedigree database yet.",
         )
+    _add_cross_similarity(result)
     brood = result.get("broodmare") or {}
     if brood.get("mare"):
         profile = horse_svc.get_horse_profile(brood["mare"], profiles=profiles())
