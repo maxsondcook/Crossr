@@ -55,7 +55,12 @@ export default function HypofoalDetail({ report, onBack = null, loading = false,
   const title = matingCaps(report.sire, report.dam, report.foal_name);
   const crosses = report.similar_crosses || [];
   const auctions = report.auction_history || [];
-  const stallions = report.similar_stallions || [];
+  // Below 50% (or exactly 50% via a shared sire) only means the same father, so leave those out.
+  const stallions = (report.similar_stallions || []).filter((row) => {
+    const pct = Number(row.similarity);
+    if (pct > 50) return true;
+    return pct === 50 && row.similarity_label !== "Same sire";
+  });
 
   return (
     <div className="hypofoal-detail">
@@ -171,7 +176,7 @@ export default function HypofoalDetail({ report, onBack = null, loading = false,
           <div className="panel scroll-panel" style={{ marginTop: 12 }}>
             <h4>CURRENT-DAY STALLIONS SIMILARITY</h4>
             {!stallions.length ? (
-              <p className="empty">No similar active stallions on file yet.</p>
+              <p className="empty">No current stallions share more than a sire with this foal.</p>
             ) : (
               <table>
                 <thead>
