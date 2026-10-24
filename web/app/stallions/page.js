@@ -6,25 +6,14 @@ import { apiGet, horseHref } from "../../lib/api";
 import { isStarred, toggleStar } from "../../lib/barn";
 import { recordAppView } from "../../lib/appNav";
 
-function avatarHue(name) {
-  let hash = 0;
-  const text = String(name || "");
-  for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) % 360;
-  return hash;
-}
-
-function StallionAvatar({ name, letter }) {
-  const hue = avatarHue(name);
-  const initial = (letter || name || "?").toString().trim().slice(0, 1).toUpperCase() || "?";
+function StallionMark({ variant = "green" }) {
+  const src =
+    variant === "orange"
+      ? "/crossr-stallion-mark-orange.png"
+      : "/crossr-stallion-mark.png";
   return (
-    <div
-      className="stallion-avatar"
-      style={{
-        background: `linear-gradient(145deg, hsl(${hue} 28% 28%), hsl(${(hue + 28) % 360} 22% 18%))`,
-      }}
-      aria-hidden="true"
-    >
-      {initial}
+    <div className={`stallion-avatar stallion-avatar--${variant}`} aria-hidden="true">
+      <img className="stallion-mark" src={src} alt="" width={56} height={36} />
     </div>
   );
 }
@@ -34,7 +23,7 @@ export default function StallionsPage() {
   const [farms, setFarms] = useState([]);
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
-  const [sort, setSort] = useState("mares");
+  const [sort, setSort] = useState("rank");
   const [showFilters, setShowFilters] = useState(false);
   const [farm, setFarm] = useState("");
   const [minFee, setMinFee] = useState("");
@@ -57,7 +46,7 @@ export default function StallionsPage() {
     let cancel = false;
     setLoading(true);
     Promise.all([
-      apiGet("/api/stallions?sort=mares"),
+      apiGet("/api/stallions?sort=rank"),
       apiGet("/api/stallions/farms").catch(() => ({ farms: [] })),
     ])
       .then(([list, farmPayload]) => {
@@ -133,8 +122,8 @@ export default function StallionsPage() {
         </div>
         <button className="ghost" onClick={() => setShowFilters((v) => !v)}>Filter</button>
         <select className="ghost" value={sort} onChange={(e) => setSort(e.target.value)}>
-          <option value="mares">Sort: Mares bred 2026</option>
           <option value="rank">Sort: Rank</option>
+          <option value="mares">Sort: Mares bred 2026</option>
           <option value="name">Sort: A–Z</option>
           <option value="fee_desc">Sort: Stud fee (high)</option>
           <option value="fee_asc">Sort: Stud fee (low)</option>
@@ -194,7 +183,7 @@ export default function StallionsPage() {
       {error ? <p className="error">{error}</p> : null}
 
       <div className="stallion-list">
-        {visible.map((s) => (
+        {visible.map((s, idx) => (
           <Link
             key={s.key}
             href={horseHref(s.name)}
@@ -205,7 +194,7 @@ export default function StallionsPage() {
               }
             }}
           >
-            <StallionAvatar name={s.name} letter={s.avatar} />
+            <StallionMark variant={idx % 2 === 0 ? "green" : "orange"} />
             <div>
               <h3>{s.name}</h3>
               <div className="parents">

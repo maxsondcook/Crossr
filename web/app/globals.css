@@ -322,11 +322,24 @@ button, input, select { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 800;
-  font-size: 22px;
-  letter-spacing: 0.02em;
-  color: #f2f5fa;
+  background: rgba(8, 14, 24, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.stallion-avatar--green {
+  box-shadow: inset 0 0 0 1px rgba(57, 255, 120, 0.12);
+}
+.stallion-avatar--orange {
+  box-shadow: inset 0 0 0 1px rgba(255, 140, 40, 0.14);
+}
+.stallion-mark {
+  width: 50px;
+  height: auto;
+  max-height: 42px;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 }
 .stallion-card h3 { margin: 0; font-size: 22px; font-weight: 700; }
 .stallion-card .parents { color: var(--muted); font-style: italic; margin-top: 2px; font-size: 13px; }
