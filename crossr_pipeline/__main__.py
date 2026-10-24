@@ -3,6 +3,7 @@
     python -m crossr_pipeline scrape [--limit N] [--once] [--delay 3]
     python -m crossr_pipeline scrape --refresh-only [--refresh-cap N]
     python -m crossr_pipeline sales-import [--dry-run] [--force FILE ...]
+    python -m crossr_pipeline racing-post [--limit N] [--delay 3]
     python -m crossr_pipeline status
     python -m crossr_pipeline install-launchd [--db railway|crossr_dev]
 
@@ -62,6 +63,17 @@ def cmd_sales_import(args) -> int:
         conn.close()
     print(result)
     return 1 if result["failed"] else 0
+
+
+def cmd_racing_post(args) -> int:
+    from crossr_pipeline.racing_post import run_racing_post
+
+    print(f"Database: {_db_name()}", flush=True)
+    conn = _conn()
+    try:
+        return run_racing_post(conn, delay=args.delay, limit=args.limit)
+    finally:
+        conn.close()
 
 
 def _age(ts) -> str:
@@ -146,6 +158,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--force", nargs="*", metavar="FILE", help="Reload these file names even if unchanged")
     p.set_defaults(func=cmd_sales_import)
+
+    p = sub.add_parser("racing-post", help="Racing Post fee history for every sire (adds missing stud_fees years)")
+    p.add_argument("--delay", type=float, default=3.0, help="Seconds between page loads (plus jitter)")
+    p.add_argument("--limit", type=int, help="Stop after this many sires (testing)")
+    p.set_defaults(func=cmd_racing_post)
 
     p = sub.add_parser("status", help="Recent runs, queue state, table counts")
     p.add_argument("--limit", type=int, default=15)

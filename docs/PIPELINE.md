@@ -8,6 +8,7 @@ Postgres; no CSV or SQLite staging.
 | `pedigrees-sales` | Sire and dam of every lot in `sales_lots`, filled to a full 5-generation tree from Equibase. Every horse opened on the way is stored as a race record too. | continuously (the `scrape` loop) |
 | `races-refresh` | Re-opens each ok horse with a start in the last 60 days, so new starts and earnings land in `race_seasons` / `race_starts`. | weekly, inside the `scrape` loop |
 | `sales-import` | Loads new or changed `sales_data/*.csv` into `sales_lots`, replacing only that file's rows. | daily at 07:00 |
+| `racing-post-fees` | Racing Post fee history for every sire in `breeding_seasons` or `sales_lots`. Every row (fee, currency, private, country, standing) goes to `racing_post_fees`; `stud_fees` only gains years it had no fee for (existing fees win). | Mondays 03:00; found sires are re-checked after 180 days |
 
 ## Running it
 
@@ -64,6 +65,27 @@ on the next pass.
   are leaves.
 - **Table versions** (what makes the API reload) are bumped every 30 minutes
   and at the end of a pass, not after every horse.
+
+### Racing Post fees
+
+`python -m crossr_pipeline racing-post [--limit N]` uses its own Chrome window
+(`crossr_pipeline/chrome_profile_racingpost`), plain Playwright with no
+stealth settings. For each sire it does two page loads:
+
+1. `racingpost.com/search-results/?keyword=<name>`. Results read
+   "Name (CTY) - YYYY". It keeps exact-name hits, then prefers the sire's
+   country suffix (USA when there is none), then a foal-year window from its
+   crops.
+2. The horse's `fee-history` page (Sales Record → Fee History).
+
+Added `stud_fees` rows have `Source List` = "Racing Post fee history":
+- `Farm` is where the horse stood that year;
+- `Notes` holds the Racing Post id, country and currency;
+- non-USD fees keep their currency ("EUR 5,000");
+- private fees are stored as "Private", not 0.
+
+Item states are `found`, `no_fees`, `no_match` (retried after a year),
+`ambiguous` (never retried) and `error` (retried after 3 days).
 
 ### Blocks
 
