@@ -12,6 +12,8 @@ Tables
 * crossr_table_versions - bumped on every write so the API reloads a table only
   when it changed (replaces the CSV mtime check).
 * users / sessions / preferences - accounts and saved barns (crossr_core.auth).
+* upcoming_lot_marks - starred hips and notes on Upcoming Sales catalogs, so they
+  survive redeploys (the catalog CSVs ship inside the container).
 """
 
 from __future__ import annotations
@@ -106,6 +108,15 @@ def schema_sql() -> str:
         "    payload TEXT NOT NULL,\n"
         "    updated_at BIGINT NOT NULL\n);"
     )
+    parts.append(
+        "CREATE TABLE IF NOT EXISTS upcoming_lot_marks (\n"
+        "    catalog_id TEXT NOT NULL,\n"
+        "    hip TEXT NOT NULL,\n"
+        "    starred BOOLEAN,\n"
+        "    notes TEXT,\n"
+        "    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),\n"
+        "    PRIMARY KEY (catalog_id, hip)\n);"
+    )
     return "\n\n".join(parts) + "\n"
 
 
@@ -132,6 +143,19 @@ def read_table(table: str, columns: Iterable[str]) -> list[dict]:
     with connect() as conn:
         cur = conn.execute(f"SELECT {col_sql} FROM {_q(table)}")
         return [{c: ("" if v is None else str(v)) for c, v in zip(columns, rec)} for rec in cur]
+
+
+def iter_table(table: str, columns: Iterable[str], batch: int = 5000):
+    """Stream rows as tuples of strings (server-side cursor, no full-table list)."""
+    ensure_schema()
+    columns = list(columns)
+    col_sql = ", ".join(_q(c) for c in columns)
+    with connect() as conn:
+        with conn.cursor(name=f"iter_{table}") as cur:
+            cur.itersize = batch
+            cur.execute(f"SELECT {col_sql} FROM {_q(table)}")
+            for rec in cur:
+                yield tuple("" if v is None else str(v) for v in rec)
 
 
 def table_version(table: str, max_age: float | None = None) -> float:
@@ -201,10 +225,22 @@ def row_counts() -> dict[str, int]:
 # Pedigrees
 # ---------------------------------------------------------------------------
 
-def read_pedigree_map() -> dict:
+def read_pedigree_map(compact: bool = False) -> dict:
+    """All trees. ``compact`` returns a CompactPedigreeMap of JSON bytes, which
+    streams rows as text so the full set is never parsed into dicts at once."""
     ensure_schema()
     with connect() as conn:
-        return {key: tree for key, tree in conn.execute("SELECT key, tree FROM pedigrees")}
+        if not compact:
+            return {key: tree for key, tree in conn.execute("SELECT key, tree FROM pedigrees")}
+        from crossr_core.pedigree_store import CompactPedigreeMap
+
+        out = CompactPedigreeMap()
+        with conn.cursor(name="pedigrees_stream") as cur:
+            cur.itersize = 2000
+            cur.execute("SELECT key, tree::text FROM pedigrees")
+            for key, text in cur:
+                out.set_raw(key, text.encode())
+        return out
 
 
 def upsert_pedigrees(items: dict, batch: int = 2000) -> int:
@@ -240,3 +276,35 @@ def replace_pedigrees(items: dict) -> int:
                     copy.write_row([str(key), json.dumps(tree)])
         _bump(conn, "pedigrees", len(items))
     return len(items)
+
+
+# ---------------------------------------------------------------------------
+# Upcoming Sales marks (starred hips + notes)
+# ---------------------------------------------------------------------------
+
+def read_lot_marks(catalog_id: str) -> dict[str, dict]:
+    """hip -> {"starred": bool|None, "notes": str|None} for one catalog."""
+    ensure_schema()
+    with connect() as conn:
+        return {
+            hip: {"starred": starred, "notes": notes}
+            for hip, starred, notes in conn.execute(
+                "SELECT hip, starred, notes FROM upcoming_lot_marks WHERE catalog_id = %s",
+                (catalog_id,),
+            )
+        }
+
+
+def set_lot_mark(catalog_id: str, hip: str, starred: bool | None = None, notes: str | None = None) -> dict:
+    """Upsert a mark; a None field keeps its stored value. Returns the stored mark."""
+    ensure_schema()
+    with connect() as conn:
+        starred_out, notes_out = conn.execute(
+            "INSERT INTO upcoming_lot_marks (catalog_id, hip, starred, notes, updated_at) "
+            "VALUES (%s, %s, %s, %s, now()) ON CONFLICT (catalog_id, hip) DO UPDATE SET "
+            "starred = COALESCE(EXCLUDED.starred, upcoming_lot_marks.starred), "
+            "notes = COALESCE(EXCLUDED.notes, upcoming_lot_marks.notes), updated_at = now() "
+            "RETURNING starred, notes",
+            (catalog_id, hip, starred, notes),
+        ).fetchone()
+    return {"starred": starred_out, "notes": notes_out}

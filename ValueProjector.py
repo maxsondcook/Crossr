@@ -215,11 +215,28 @@ def _pedigree_for(name: str) -> Optional[dict]:
     ped = pedigree_store.get_pedigree_map().get(key)
     if ped:
         return ped
-    # Soft match
-    for k, v in pedigree_store.get_pedigree_map().items():
-        if clean_horse_name(k) == key:
-            return v
-    return None
+    # Soft match: first key (in map order) whose cleaned name matches.
+    pedigrees = pedigree_store.get_pedigree_map()
+    match = _soft_pedigree_index(pedigrees).get(key)
+    return pedigrees[match] if match is not None else None
+
+
+_SOFT_INDEX: tuple = (None, -1, {})
+
+
+def _soft_pedigree_index(pedigrees) -> Dict[str, str]:
+    """clean name -> first matching key; rebuilt when the map changes.
+
+    A hip page calls _pedigree_for hundreds of times, and each miss used to
+    clean all ~39k keys (about 2.5 minutes for one Upcoming Sales hip).
+    """
+    global _SOFT_INDEX
+    if _SOFT_INDEX[0] is not pedigrees or _SOFT_INDEX[1] != len(pedigrees):
+        index: Dict[str, str] = {}
+        for k in list(pedigrees):
+            index.setdefault(clean_horse_name(k), k)
+        _SOFT_INDEX = (pedigrees, len(pedigrees), index)
+    return _SOFT_INDEX[2]
 
 
 def _node_horse(node: Any) -> str:

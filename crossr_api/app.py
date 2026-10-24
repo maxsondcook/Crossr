@@ -10,6 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+# Keep pedigree trees as compact JSON in memory (see crossr_core.pedigree_store).
+os.environ.setdefault("CROSSR_COMPACT_PEDIGREES", "1")
+
 import main
 import hypomating_engine
 from crossr_core import horses as horse_svc

@@ -15,6 +15,7 @@ import re
 import sqlite3
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -141,20 +142,83 @@ def backend() -> str:
     return "postgres" if _pg() else "csv"
 
 
-def _read_csv(table: str) -> list[dict]:
+class Row(Mapping):
+    """Read-only row: a tuple of cell strings plus the table's shared column index.
+
+    A plain dict per row costs ~1 KB before its strings; with ~1.9M rows across
+    the 8 tables that dominated the API's memory. Rows support everything callers
+    use (``row.get``, ``row[col]``, ``dict(row)``, ``{**row}``, ``.items()``);
+    copy with ``dict(row)`` before changing anything.
+    """
+
+    __slots__ = ("_v",)
+    _cols: tuple = ()
+    _idx: dict = {}
+
+    def __init__(self, values):
+        self._v = values
+
+    def __getitem__(self, key):
+        return self._v[self._idx[key]]
+
+    def get(self, key, default=None):
+        i = self._idx.get(key)
+        return default if i is None else self._v[i]
+
+    def __contains__(self, key):
+        return key in self._idx
+
+    def __iter__(self):
+        return iter(self._cols)
+
+    def __len__(self):
+        return len(self._cols)
+
+    def copy(self) -> dict:
+        return dict(zip(self._cols, self._v))
+
+    def __repr__(self):
+        return f"Row({self.copy()!r})"
+
+
+_ROW_TYPES: dict[str, type] = {}
+
+
+def _row_type(table: str) -> type:
+    cls = _ROW_TYPES.get(table)
+    if cls is None:
+        cols = tuple(TABLES[table])
+        cls = type(f"{table}_row", (Row,), {"__slots__": (), "_cols": cols, "_idx": {c: i for i, c in enumerate(cols)}})
+        _ROW_TYPES[table] = cls
+    return cls
+
+
+def _compact_rows(table: str, tuples) -> list:
+    """Build Rows from value tuples, sharing repeated strings (sires, tracks, years)."""
+    cls = _row_type(table)
+    pool: dict[str, str] = {}
+    share = pool.setdefault
+    return [cls(tuple(share(v, v) for v in values)) for values in tuples]
+
+
+def _read_tuples(table: str):
+    """Yield one tuple of strings per row, in TABLES[table] column order."""
+    columns = TABLES[table]
     pg = _pg()
     if pg:
-        return pg.read_table(table, TABLES[table])
+        yield from pg.iter_table(table, columns)
+        return
     path = csv_path(table)
-    columns = TABLES[table]
     if not path.exists():
-        return []
+        return
     with path.open(encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        rows = []
+        reader = csv.reader(handle)
+        header = next(reader, None) or []
+        pos = {name: i for i, name in enumerate(header)}
+        picks = [pos.get(col) for col in columns]
         for raw in reader:
-            rows.append({col: (raw.get(col) if raw.get(col) is not None else "") for col in columns})
-        return rows
+            n = len(raw)
+            yield tuple(raw[i] if i is not None and i < n else "" for i in picks)
 
 
 def _mtime(table: str) -> float:
@@ -173,7 +237,8 @@ def load_table(table: str, refresh: bool = False) -> list[dict]:
     with _LOCK:
         mtime = _mtime(table)
         if refresh or table not in _ROWS or _MTIME.get(table) != mtime:
-            _ROWS[table] = _read_csv(table)
+            _ROWS.pop(table, None)  # let the old copy go before building the new one
+            _ROWS[table] = _compact_rows(table, _read_tuples(table))
             _MTIME[table] = mtime
         return list(_ROWS[table])
 
@@ -216,7 +281,7 @@ def atomic_write_table(table: str, rows: list[dict]) -> int:
     pg = _pg()
     if pg:
         normalized = [
-            {col: _cell(row.get(col) if isinstance(row, dict) else "") for col in columns}
+            {col: _cell(row.get(col) if isinstance(row, Mapping) else "") for col in columns}
             for row in rows
         ]
         count = pg.replace_table(table, columns, normalized)
@@ -226,7 +291,7 @@ def atomic_write_table(table: str, rows: list[dict]) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + f".{os.getpid()}.{time.time_ns()}.tmp")
     normalized = [
-        {col: _cell(row.get(col) if isinstance(row, dict) else "") for col in columns}
+        {col: _cell(row.get(col) if isinstance(row, Mapping) else "") for col in columns}
         for row in rows
     ]
     with tmp.open("w", encoding="utf-8", newline="") as handle:
@@ -358,7 +423,7 @@ def sales_connection() -> sqlite3.Connection | None:
             return _SALES_MEM
         if _SALES_MEM is not None:
             _SALES_MEM.close()
-        rows = _read_csv("sales_lots")
+        rows = load_table("sales_lots")
         conn = sqlite3.connect(":memory:", check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.executescript(_SALES_SCHEMA)
@@ -421,8 +486,6 @@ def sales_connection() -> sqlite3.Connection | None:
         conn.commit()
         _SALES_MEM = conn
         _SALES_MTIME = mtime
-        _ROWS["sales_lots"] = rows
-        _MTIME["sales_lots"] = mtime
         return _SALES_MEM
 
 
@@ -437,7 +500,7 @@ def rankings_connection() -> sqlite3.Connection | None:
             return _RANK_MEM
         if _RANK_MEM is not None:
             _RANK_MEM.close()
-        rows = _read_csv("stallion_rankings")
+        rows = load_table("stallion_rankings")
         cols = TABLES["stallion_rankings"]
         conn = sqlite3.connect(":memory:", check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -453,8 +516,6 @@ def rankings_connection() -> sqlite3.Connection | None:
         conn.commit()
         _RANK_MEM = conn
         _RANK_MTIME = mtime
-        _ROWS["stallion_rankings"] = rows
-        _MTIME["stallion_rankings"] = mtime
         return _RANK_MEM
 
 

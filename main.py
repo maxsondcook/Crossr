@@ -38,6 +38,27 @@ def years_for_name(name, pedigree_db=None):
     return lookup_pedigree(name, pedigree_db)["years"]
 
 
+_CLEAN_KEY_INDEX = {}
+
+
+def _keys_for_clean_name(pedigree_db, clean):
+    """Index of clean_horse_name(key) -> [keys], rebuilt when the map's size changes.
+
+    lookup_pedigree used to run clean_horse_name over all ~78k keys per call;
+    a hypomating report makes thousands of lookups.
+    """
+    cached = _CLEAN_KEY_INDEX.get(id(pedigree_db))
+    if cached is None or cached[0] is not pedigree_db or cached[1] != len(pedigree_db):
+        index = {}
+        for key in list(pedigree_db):
+            index.setdefault(clean_horse_name(key), []).append(key)
+        cached = (pedigree_db, len(pedigree_db), index)
+        if len(_CLEAN_KEY_INDEX) >= 4:  # don't pin replaced or temporary maps in memory
+            _CLEAN_KEY_INDEX.clear()
+        _CLEAN_KEY_INDEX[id(pedigree_db)] = cached
+    return cached[2].get(clean, ())
+
+
 def lookup_pedigree(name, pedigree_db=None):
     """Resolve a horse name to a pedigree tree without prompting.
 
@@ -63,9 +84,10 @@ def lookup_pedigree(name, pedigree_db=None):
 
     by_year = {}
     yearless = []
-    for key, tree in pedigree_db.items():
-        if clean_horse_name(key) != clean:
-            continue
+    # Keys sharing this cleaned name, in dict order. Trees may be stored compactly
+    # and decoded on access, so only matching keys are read.
+    for key in _keys_for_clean_name(pedigree_db, clean):
+        tree = pedigree_db.get(key)
         tree = tree if isinstance(tree, dict) else {}
         year = foaling_year(key) or foaling_year(tree.get("Horse", ""))
         if year:
@@ -205,6 +227,21 @@ def load_and_sync_all_data():
         from crossr_core import pedigree_store
 
         db_map = pedigree_store.get_pedigree_map(refresh=True)
+        if isinstance(db_map, pedigree_store.CompactPedigreeMap):
+            # API: share the stored JSON bytes instead of deep-copying every tree.
+            combined_database = pedigree_store.CompactPedigreeMap()
+            for k in db_map:
+                v = db_map[k]
+                if not (isinstance(v, dict) and "Horse" in v):
+                    continue
+                raw = db_map.raw(k)
+                clean = clean_horse_name(k)
+                year = foaling_year(k) or foaling_year(v.get("Horse", ""))
+                if year:
+                    combined_database.set_raw(f"{clean} ({year})", raw)
+                if clean not in combined_database:
+                    combined_database.set_raw(clean, raw)
+            return combined_database
         if isinstance(db_map, dict):
             for k, v in db_map.items():
                 if not (isinstance(v, dict) and "Horse" in v):

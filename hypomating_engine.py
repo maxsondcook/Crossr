@@ -1137,24 +1137,28 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
     active_pool = [c for c in candidates.values() if c["score"] > 0 and c["direct_hit"]]
     sorted_pool = sorted(active_pool, key=lambda x: -x["score"])
 
+    # Sires of graded winners whose damsire is in the mare's sire line. Computed
+    # once instead of re-reading every winner's pedigree for each stallion.
+    cross_hit_sires = set()
+    for h_name in horse_summaries:
+        clean_h = main.clean_horse_name(h_name)
+        if clean_h not in pedigree_db:
+            continue
+        hp = pedigree_db[clean_h]
+        s_node = hp.get("Sire", {})
+        h_sire = s_node.get("Horse", "") if isinstance(s_node, dict) else str(s_node)
+        d_node = hp.get("Dam", {})
+        h_damsire = get_mare_sire_from_pedigree(d_node) if isinstance(d_node, dict) else ""
+        if h_damsire and main.clean_horse_name(h_damsire) in mare_sire_ancestry:
+            cross_hit_sires.add(main.clean_horse_name(h_sire))
+
     unfiltered_structural_hits = []
     for st_name, p_data in all_profiles.items():
         clean_st = main.clean_horse_name(st_name)
         st_pedigree = pedigree_db.get(clean_st, {"Horse": st_name})
         if check_inbreeding_failsafe(st_pedigree, mare_pedigree, max_generation=3):
             continue
-        has_cross_hit = False
-        for h_name, h in horse_summaries.items():
-            if main.clean_horse_name(h_name) in pedigree_db:
-                hp = pedigree_db[main.clean_horse_name(h_name)]
-                s_node = hp.get("Sire", {})
-                h_sire = s_node.get("Horse", "") if isinstance(s_node, dict) else str(s_node)
-                d_node = hp.get("Dam", {})
-                h_damsire = get_mare_sire_from_pedigree(d_node) if isinstance(d_node, dict) else ""
-                if h_damsire and main.clean_horse_name(h_damsire) in mare_sire_ancestry:
-                    if main.clean_horse_name(h_sire) == clean_st:
-                        has_cross_hit = True
-                        break
+        has_cross_hit = clean_st in cross_hit_sires
         if has_cross_hit and clean_st not in [main.clean_horse_name(c["name"]) for c in active_pool]:
             unfiltered_structural_hits.append(st_name)
 

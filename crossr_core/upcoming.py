@@ -281,16 +281,36 @@ def list_catalogs():
     return sorted(by_key.values(), key=lambda row: row["title"].lower())
 
 
+def _pg():
+    from crossr_core import railway_db
+
+    return railway_db if railway_db.enabled() else None
+
+
+def _apply_mark(lot, mark):
+    if not mark:
+        return lot
+    if mark.get("starred") is not None:
+        lot["starred"] = bool(mark["starred"])
+    if mark.get("notes") is not None:
+        lot["notes"] = mark["notes"]
+    return lot
+
+
 def list_lots(catalog_id):
     path = _path_for(catalog_id)
     if not path:
         return None
     sale_year = _year(catalog_id)
     _, rows = _read_rows(path)
+    # With Postgres, stars/notes live in upcoming_lot_marks and override the CSV.
+    pg = _pg()
+    marks = pg.read_lot_marks(catalog_id) if pg else {}
     lots = []
     for row in rows:
         lot = _lot_from_csv(row, sale_year=sale_year)
         lot["sale_year"] = sale_year
+        _apply_mark(lot, marks.get(lot["hip"]))
         if lot["hip"] or lot["name"]:
             lots.append(lot)
     # Catalog modal age fills any remaining blank sold_as (mixed/untitled sales).
@@ -339,6 +359,11 @@ def update_lot(catalog_id, hip, starred=None, notes=None):
             break
     if found is None:
         return None
+    pg = _pg()
+    if pg:
+        # The CSV ships inside the container and resets on deploy; store in Postgres.
+        mark = pg.set_lot_mark(catalog_id, want, starred=starred, notes=notes)
+        return _apply_mark(_lot_from_csv(found), mark)
     if starred is not None:
         found[upper["STARRED"]] = "*" if starred else ""
     if notes is not None:
