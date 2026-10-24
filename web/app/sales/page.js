@@ -837,7 +837,7 @@ function SalesPage() {
                     ) : null}
                     {(!ready || projectionPanels(detail, current).showValue) ? (
                       <>
-                      <span className="pv-label pv-section">Projected Value</span>
+                      {ready ? <span className="pv-label pv-section">Projected Value</span> : null}
                       <ProjectedValue
                         valueProjector={ready ? detail?.expected_market?.value_projector : null}
                         lot={ready ? (detail?.lot || current) : current}
