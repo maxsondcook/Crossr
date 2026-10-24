@@ -5,17 +5,11 @@ import re
 import main
 import hypofoals_manager
 import placeholder_store
+from graded_stakes import load_stakes_data
 
-# ==============================================================================
-# BROODMARE SIRE — placeholderdatabase/broodmare_sire_stats.csv only
-# ==============================================================================
+# Broodmare sire ranks from data/stallion_rankings.csv (Broodmare list).
 BROODMARE_DATABASE = placeholder_store.load_broodmare_database()
 clean_horse_name = placeholder_store.broodmare_clean_horse_name
-
-
-def load_stakes_data(*_args, **_kwargs):
-    """Sample DB only: placeholderdatabase/graded_stakes_winners.csv (winners)."""
-    return placeholder_store.load_graded_stakes_records()
 
 RAW_RANKING_ORDER = [
     "Not This Time",       # 1
@@ -536,16 +530,10 @@ def run_hypomating_menu(pedigree_db, all_profiles):
 def get_profile_meta(name, all_profiles):
     clean_name = main.clean_horse_name(name)
     rank_val = "N/A"
-    # Prefer sire_rank from placeholderdatabase/stallion_stats.csv
-    csv_row = placeholder_store.stallion_index().get(clean_name) or {}
-    csv_rank = str(csv_row.get("sire_rank") or "").strip()
-    if csv_rank and csv_rank.upper() != "N/A":
-        rank_val = csv_rank
-    else:
-        for idx, r_name in enumerate(RAW_RANKING_ORDER, 1):
-            if main.clean_horse_name(r_name) == clean_name:
-                rank_val = str(idx)
-                break
+    for idx, r_name in enumerate(RAW_RANKING_ORDER, 1):
+        if main.clean_horse_name(r_name) == clean_name:
+            rank_val = str(idx)
+            break
 
     profile = {}
     for k, v in all_profiles.items():
@@ -553,7 +541,7 @@ def get_profile_meta(name, all_profiles):
             profile = v
             break
 
-    raw_fee = profile.get("Stud Fee", csv_row.get("stud_fee", 0))
+    raw_fee = profile.get("Stud Fee", 0)
     try:
         fee_num = int(str(raw_fee).replace(",", "").replace("$", ""))
         fee_str = f"${fee_num:,.0f}"
@@ -563,9 +551,9 @@ def get_profile_meta(name, all_profiles):
         
     has_progeny = profile.get("HasProgeny", profile.get("Has Progeny", True))
     
-    status_text = str(profile.get("Status") or csv_row.get("status") or "").strip().lower()
-    is_pensioned = status_text == "pensioned" or "pension" in status_text
-    is_active = (len(profile) > 0 or bool(csv_row)) and not is_pensioned and fee_num > 0
+    # SIMPLIFICATION RULE: Check if horse is in profiles AND status is not pensioned
+    is_pensioned = str(profile.get("Status", "")).strip().lower() == "pensioned"
+    is_active = (len(profile) > 0) and not is_pensioned
 
     return {"rank": rank_val, "fee_str": fee_str, "fee_num": fee_num, "has_progeny": has_progeny, "is_active": is_active}
 
@@ -1225,16 +1213,13 @@ def lineage_options_payload(stallion_name, all_profiles, budget_filter=None):
     options = []
     for relative in sorted_relatives:
         meta = get_profile_meta(relative, all_profiles)
-        if not meta["is_active"]:
-            continue
-        if not meta["rank"] or str(meta["rank"]).upper() == "N/A":
-            continue
-        options.append({
-            "name": relative,
-            "rank": meta["rank"],
-            "stud_fee": meta["fee_str"],
-            "fee_num": meta["fee_num"],
-        })
+        if meta["is_active"]:
+            options.append({
+                "name": relative,
+                "rank": meta["rank"],
+                "stud_fee": meta["fee_str"],
+                "fee_num": meta["fee_num"],
+            })
     return {"stallion": stallion_name, "options": options}
 
 

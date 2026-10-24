@@ -39,7 +39,7 @@ EXTRA = [
     Path("/Users/maxsoncook/Desktop/PedigreePDFS/web.pdf"),
     Path("/Users/maxsoncook/Desktop/PedigreePDFS/webHORA.pdf"),
 ]
-STAKES = PROJECT / "graded_stakes_winners.csv"
+STAKES = PROJECT / "data" / "graded_stakes.csv"
 
 
 def catalog_pdfs() -> list[Path]:
