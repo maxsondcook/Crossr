@@ -193,8 +193,9 @@ def ingest_graded_stakes() -> dict:
     incoming: list[dict] = []
 
     ifha_csv = ROOT / "ifha_scraper" / "ifha_graded_stakes_2003_2026.csv"
-    root_csv = ROOT / "graded_stakes_winners.csv"
-    source = ifha_csv if ifha_csv.exists() else root_csv
+    root_csv = ROOT / "Going_to_delete" / "graded_stakes_winners.csv"
+    legacy_csv = ROOT / "graded_stakes_winners.csv"
+    source = ifha_csv if ifha_csv.exists() else (root_csv if root_csv.exists() else legacy_csv)
     if not source.exists():
         return {"skipped": "no graded stakes staging CSV"}
 

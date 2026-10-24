@@ -921,28 +921,17 @@ def _csv_year(path):
     return int(year_m.group(0)) if year_m else None
 
 
-def _load_csv_rank_map(filename_glob):
-    """Parse BloodHorse ranking CSVs into {clean_name: {year: rank}} plus sorted years."""
-    ranks = {}
-    years = set()
-    pattern = os.path.join(ROOT, "stallion_rankings_data", "*", filename_glob)
-    for path in glob.glob(pattern):
-        year = _csv_year(path)
-        if not year:
-            continue
-        years.add(year)
-        with open(path, encoding="utf-8-sig", errors="ignore", newline="") as f:
-            for row in csv.DictReader(f):
-                raw_name = (row.get("Stallion") or "").strip()
-                if not raw_name:
-                    continue
-                first = raw_name.splitlines()[0].strip()
-                name = main.clean_horse_name(first)
-                rank = _intish(row.get("#") or row.get("Rank"))
-                if not name or not rank:
-                    continue
-                ranks.setdefault(name, {})[year] = rank
-    return ranks, sorted(years, reverse=True)
+def _rank_label_from_sample_row(row):
+    from crossr_core.stallion_rankings_rich import _DB_LIST_META
+
+    list_name = (row.get("list") or "").strip()
+    table_name = (row.get("table_name") or "").strip()
+    meta = _DB_LIST_META.get((list_name, table_name))
+    if meta:
+        return meta[1]
+    if table_name:
+        return f"{list_name} — {table_name}" if list_name else table_name
+    return list_name or ""
 
 
 def _assign_ranks(name_to_value):
@@ -992,11 +981,22 @@ def _rank_metric_maps(year_values):
 
 
 def load_broodmare_ranks():
-    """Year -> rank for each cleaned stallion name from Leading Broodmare Sires CSVs."""
+    """Year -> rank for each cleaned stallion name from data/stallion_rankings.csv."""
     global _BMS_RANKS
     if _BMS_RANKS is not None:
         return _BMS_RANKS
-    ranks, _years = _load_csv_rank_map("*Leading Broodmare Sires.csv")
+    from crossr_core import sample_db
+
+    ranks = {}
+    for row in sample_db.load_table("stallion_rankings"):
+        if (row.get("list") or "").strip() != "Broodmare":
+            continue
+        year = _intish(row.get("year"))
+        name = main.clean_horse_name(row.get("stallion") or "")
+        rank = _intish(row.get("rank"))
+        if not year or not name or not rank:
+            continue
+        ranks.setdefault(name, {})[year] = rank
     _BMS_RANKS = ranks
     return ranks
 
@@ -1101,55 +1101,42 @@ def _years_for_view(years, entered_stud=None, max_year=None):
 
 
 def load_stallion_ranking_tables():
-    """All BloodHorse ranking CSVs plus mares-bred / stud-fee yearly ranks."""
+    """BloodHorse ranks from data/stallion_rankings.csv plus mares-bred / stud-fee ranks."""
     global _STALLION_RANK_TABLES
     if _STALLION_RANK_TABLES is not None:
         return _STALLION_RANK_TABLES
 
+    from crossr_core import sample_db
+
     grouped = {}
-    data_root = os.path.join(ROOT, "stallion_rankings_data")
-    for year_name in os.listdir(data_root):
-        year_dir = os.path.join(data_root, year_name)
-        if not os.path.isdir(year_dir) or not re.fullmatch(r"(?:19|20)\d{2}", year_name):
+    for row in sample_db.load_table("stallion_rankings"):
+        year = _intish(row.get("year"))
+        if not year:
             continue
-        year = int(year_name)
-        for fname in os.listdir(year_dir):
-            if not fname.lower().endswith(".csv"):
-                continue
-            path = os.path.join(year_dir, fname)
-            raw_label = _ranking_file_label(fname)
-            norm = _norm_rank_key(raw_label)
-            if not norm:
-                continue
-            bucket = grouped.setdefault(
-                norm,
-                {
-                    "label": _RANK_LABEL_BY_KEY.get(norm) or _pretty_rank_label(raw_label),
-                    "ranks": {},
-                    "extras": {},
-                    "years": set(),
-                },
-            )
-            bucket["years"].add(year)
-            capture_earnings = norm == _norm_rank_key("Leading Sire Rankings")
-            try:
-                with open(path, encoding="utf-8-sig", errors="ignore", newline="") as f:
-                    for row in csv.DictReader(f):
-                        raw_name = (row.get("Stallion") or "").strip()
-                        if not raw_name:
-                            continue
-                        first = raw_name.splitlines()[0].strip()
-                        name = main.clean_horse_name(first)
-                        rank = _intish(row.get("#") or row.get("Rank"))
-                        if not name or not rank:
-                            continue
-                        bucket["ranks"].setdefault(name, {})[year] = rank
-                        if capture_earnings:
-                            earnings = _csv_earnings(row)
-                            if earnings is not None:
-                                bucket["extras"].setdefault(name, {})[year] = {"earnings": earnings}
-            except Exception:
-                continue
+        raw_label = _rank_label_from_sample_row(row)
+        norm = _norm_rank_key(raw_label)
+        if not norm:
+            continue
+        bucket = grouped.setdefault(
+            norm,
+            {
+                "label": _RANK_LABEL_BY_KEY.get(norm) or _pretty_rank_label(raw_label),
+                "ranks": {},
+                "extras": {},
+                "years": set(),
+            },
+        )
+        bucket["years"].add(year)
+        capture_earnings = norm == _norm_rank_key("Leading Sire Rankings")
+        name = main.clean_horse_name(row.get("stallion") or "")
+        rank = _intish(row.get("rank"))
+        if not name or not rank:
+            continue
+        bucket["ranks"].setdefault(name, {})[year] = rank
+        if capture_earnings:
+            earnings = _intish(row.get("year_earnings") or row.get("chief_earner_earnings"))
+            if earnings is not None:
+                bucket["extras"].setdefault(name, {})[year] = {"earnings": earnings}
 
     lists = []
     tables = {}
