@@ -9,8 +9,9 @@ Three services in one Railway project:
 | **web** | Next.js site | `web/Dockerfile` |
 
 Live project: `vigilant-strength` (production).
-Site: https://web-production-cbb1f5.up.railway.app · API: https://api-production-f372.up.railway.app/api/health Build settings live on the
-services themselves; Railway no longer accepts `railway.json` config files.
+Site: https://web-production-cbb1f5.up.railway.app · API: https://api-production-f372.up.railway.app/api/health
+
+Build settings live on the services themselves; Railway no longer accepts `railway.json` config files.
 
 When `DATABASE_URL` is set the app reads and writes Postgres. Without it, it
 falls back to the local `data/*.csv` files and `pedigrees_database.py`, so local
