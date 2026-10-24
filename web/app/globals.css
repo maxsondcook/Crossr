@@ -1283,6 +1283,8 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 }
 @media (max-width: 900px) {
   .topbar { flex-wrap: wrap; }
-  .nav { justify-content: flex-start; flex-wrap: wrap; gap: 14px; }
-  .nav-search { flex-basis: 100%; min-width: 0; }
+  /* Row 1: logo + account; row 2: links; row 3: search. */
+  .topbar > .ghost, .nav-account { order: 1; margin-left: auto; }
+  .nav { order: 2; flex-basis: 100%; justify-content: flex-start; flex-wrap: wrap; gap: 14px; }
+  .nav-search { order: 3; flex-basis: 100%; min-width: 0; }
 }
