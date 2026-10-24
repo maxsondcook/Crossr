@@ -134,38 +134,36 @@ function formatRankingCell(row, col) {
 // Shown elsewhere on the page, so left out of the rankings table.
 const RANKING_HIDDEN_KEYS = new Set(["chief_earner", "chief_earner_earnings", "stud_fee", "farm"]);
 // Runner/winner column pairs collapsed into one Win% column.
-const WIN_PCT_PAIRS = [
-  { runners: "runners", winners: "winners", key: "win_pct", label: "Win%" },
-  { runners: "all_surfaces_runners", winners: "all_surfaces_winners", key: "all_win_pct", label: "All Win%" },
-  { runners: "turf_runners", winners: "turf_winners", key: "turf_win_pct", label: "Turf Win%" },
-];
+// Raw runner/winner counts are left out; SW% (stakes winners ÷ runners) stands in for BT SWs.
+const RUNNER_KEYS = new Set([
+  "runners", "winners",
+  "all_surfaces_runners", "all_surfaces_winners",
+  "turf_runners", "turf_winners",
+]);
+const SW_PCT = { key: "sw_pct", label: "SW%", type: "percent" };
 
 function shapeRankingTable(rawColumns, rawRows, rankList) {
   const keys = new Set(rawColumns.map((c) => c.key));
-  const pairs = WIN_PCT_PAIRS.filter((p) => keys.has(p.runners) && keys.has(p.winners));
+  const canSwPct = keys.has("runners") && keys.has("stakes_winners");
+  const replacesStakesWins = canSwPct && keys.has("stakes_wins");
   const columns = [];
   for (const col of rawColumns) {
     // The Stud Fee list ranks by fee, so it keeps that column.
     if (RANKING_HIDDEN_KEYS.has(col.key) && !(rankList === "stud_fee" && col.key === "stud_fee")) continue;
-    const pairAsRunners = pairs.find((p) => p.runners === col.key);
-    if (pairAsRunners) {
-      columns.push({ key: pairAsRunners.key, label: pairAsRunners.label, type: "percent" });
+    if (RUNNER_KEYS.has(col.key)) continue;
+    if (col.key === "stakes_wins" && replacesStakesWins) {
+      columns.push(SW_PCT);
       continue;
     }
-    if (pairs.some((p) => p.winners === col.key)) continue;
     columns.push(col);
+    if (col.key === "stakes_winners" && canSwPct && !replacesStakesWins) columns.push(SW_PCT);
   }
-  const rows = pairs.length
+  const rows = canSwPct
     ? rawRows.map((row) => {
-        const next = { ...row };
-        for (const p of pairs) {
-          const r = row[`${p.runners}_num`] ?? parseMetricNumber(row[p.runners]);
-          const w = row[`${p.winners}_num`] ?? parseMetricNumber(row[p.winners]);
-          const pct = r && w != null ? (w / r) * 100 : null;
-          next[`${p.key}_num`] = pct;
-          next[p.key] = pct != null ? `${pct.toFixed(1)}%` : null;
-        }
-        return next;
+        const r = row.runners_num ?? parseMetricNumber(row.runners);
+        const sw = row.stakes_winners_num ?? parseMetricNumber(row.stakes_winners);
+        const pct = r && sw != null ? (sw / r) * 100 : null;
+        return { ...row, sw_pct_num: pct, sw_pct: pct != null ? `${pct.toFixed(1)}%` : null };
       })
     : rawRows;
   return { columns, rows };
@@ -354,9 +352,13 @@ function StallionRankingsPanel({ rankingMeta: rawRankingMeta, rankList: rawRankL
     copy.sort((a, b) => {
       const aNum = a[`${sortKey}_num`] ?? parseMetricNumber(a[sortKey]);
       const bNum = b[`${sortKey}_num`] ?? parseMetricNumber(b[sortKey]);
+      // Missing values (—) always sort last, whichever direction.
+      const aBlank = a[sortKey] == null || a[sortKey] === "";
+      const bBlank = b[sortKey] == null || b[sortKey] === "";
+      if (aBlank !== bBlank) return aBlank ? 1 : -1;
       if (aNum != null && bNum != null && aNum !== bNum) return (aNum - bNum) * dir;
-      if (aNum != null && bNum == null) return -1 * dir;
-      if (aNum == null && bNum != null) return 1 * dir;
+      if (aNum != null && bNum == null) return -1;
+      if (aNum == null && bNum != null) return 1;
       const as = String(a[sortKey] ?? "");
       const bs = String(b[sortKey] ?? "");
       return as.localeCompare(bs, undefined, { numeric: true }) * dir;
