@@ -94,6 +94,12 @@ Boom%, crops 2008–2021: AUC 0.69 (with hip) / 0.65; the top predicted decile
 produced graded winners at 3.5% vs 0.54% in the bottom decile (base 1.2%), and
 predicted rates match observed rates decile by decile.
 
+Per-sale hip curve vs the pooled hip curve it replaced, same held-out horses:
+price R² improved in 15 of 16 sale years (mean +0.040; paired t p = 2×10⁻⁸, sign
+test p = 0.0005). Boom% AUC 0.675 → 0.687 (DeLong p = 0.001; held-out log-loss gain
+95% CI excludes 0 under a sire-cluster bootstrap; better in 11 of 14 crops, sign
+test p = 0.06). Hip curve vs no hip feature at all: AUC 0.640 → 0.687 (p < 10⁻¹⁵).
+
 ## Key effects (price, with hip; all p < 0.0001)
 
 - Filly: −16% vs colt
