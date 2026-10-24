@@ -1058,6 +1058,9 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .pv-item[data-pv="sold"] b { color: var(--gold); }
 .pv-price { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .pv-section { margin-bottom: 6px; }
+.pv-badge { margin-left: 8px; padding: 1px 6px; border-radius: 6px; background: rgba(212, 175, 55, 0.15); color: var(--gold); font-size: 10px; letter-spacing: 0.06em; }
+.pv-boom b { color: var(--green); }
+.pv-boom-rel { color: var(--muted); font-size: 13px; font-weight: 600; }
 .pv-price b { display: block; margin-top: 4px; font-size: 18px; font-variant-numeric: tabular-nums; }
 .pv-note { color: var(--muted); font-size: 13px; margin: 10px 0 0; line-height: 1.45; }
 @media (max-width: 720px) {

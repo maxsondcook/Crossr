@@ -831,8 +831,23 @@ function SalesPage() {
                     <h4>MARKET PROJECTION</h4>
                     {(!ready || projectionPanels(detail, current).showPrice) ? (
                       <div className="pv-price" data-meta="projected-price">
-                        <span className="pv-label">Projected Price</span>
+                        <span className="pv-label">
+                          Projected Price
+                          {ready && detail?.expected_market?.sales_model?.in_sample ? (
+                            <span className="pv-badge" title="This sale is in the model's training data, so the figure is a backtest, not a forecast.">Backtest</span>
+                          ) : null}
+                        </span>
                         <b className="money">{ready ? projectedPriceLabel(detail) : "…"}</b>
+                      </div>
+                    ) : null}
+                    {ready && Number.isFinite(Number(detail?.market_prediction?.boom_pct)) && detail?.market_prediction?.boom_pct != null ? (
+                      // Boom %: chance of a graded / Group stakes win; ~1.2% is average.
+                      <div className="pv-price pv-boom">
+                        <span className="pv-label">Boom</span>
+                        <b>
+                          {Number(detail.market_prediction.boom_pct).toFixed(1)}%
+                          <span className="pv-boom-rel"> · {(Number(detail.market_prediction.boom_pct) / 1.2).toFixed(1)}× average</span>
+                        </b>
                       </div>
                     ) : null}
                     {(!ready || projectionPanels(detail, current).showValue) ? (
