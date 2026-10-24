@@ -416,7 +416,7 @@ function HorsePage() {
       </div>
       <div>
         <div className="panel">
-          <h4>SALES CATALOG PEDIGREE</h4>
+          <h4>PEDIGREE</h4>
           <PedigreeChart tree={data.pedigree} showSubject={false} hrefFor={hrefFor} />
         </div>
         <div className="panel family-panel" style={{ marginTop: 12 }}>
