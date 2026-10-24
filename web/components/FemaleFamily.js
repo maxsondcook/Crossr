@@ -2,39 +2,49 @@
 
 import Link from "next/link";
 import { horseHref } from "../lib/api";
+import { horseCaps } from "../lib/display";
 
-/** Stakes-win (or better) codes from the graded/group winners index. */
-const BLACK_TYPE_STATUS = new Set(["MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW"]);
+/**
+ * Black-type winner gate (stakes WIN or better only).
+ * Allowlist matches graded/group/listed win codes from the Place==1 stakes index:
+ *   MG1W, G1W, MGSW, G2W, G3W, MSW (multi listed/ungraded SW), SW (listed/ungraded SW).
+ * Stakes-placed-only horses never receive a win status from the index and must NEVER
+ * get the "Black-type winner, above." trailer — that phrase is reserved for the
+ * profile subject when isBlackTypeWinner(status) is true.
+ */
+export const BLACK_TYPE_WIN_STATUS = new Set([
+  "MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW",
+]);
 
-function isBlackTypeWinner(p) {
-  return Boolean(p?.status && BLACK_TYPE_STATUS.has(String(p.status).toUpperCase()));
+export function isBlackTypeWinner(statusOrRow) {
+  const status = typeof statusOrRow === "string" || statusOrRow == null
+    ? statusOrRow
+    : statusOrRow.status;
+  return Boolean(status && BLACK_TYPE_WIN_STATUS.has(String(status).toUpperCase()));
 }
 
 function FoalLine({ p, hrefFor }) {
-  const sexBit = p.sex ? `${p.sex}. ` : "";
+  const sexBit = p.sex ? `${horseCaps(p.sex)}. ` : "";
   const blackType = isBlackTypeWinner(p);
-  // Uppercase stakes winners (and the subject when they qualify as black-type).
-  const displayName = blackType || p.status ? (p.name || "").toUpperCase() : p.name;
   const link = (label) => (hrefFor ? hrefFor(label) : horseHref(label));
-  // "Black-type winner, above." only for the profile subject when they have a stakes-win status.
   const trailer = p.is_subject && blackType
     ? ". Black-type winner, above."
     : p.status
-      ? `. ${p.status}.`
+      ? `. ${horseCaps(p.status)}.`
       : ".";
   return (
     <div className={`ff-foal${p.is_subject ? " subject" : ""}${blackType ? " stakes" : ""}`}>
-      <Link href={link(p.name)}>{displayName}</Link>
+      <Link href={link(p.name)}>{horseCaps(p.name)}</Link>
       {p.year ? <span className="yr"> ({p.year})</span> : null}
-      {p.sire ? <> ({sexBit}by <Link href={link(p.sire)}>{p.sire}</Link>)</> : null}
+      {p.sire ? <> ({sexBit}BY <Link href={link(p.sire)}>{horseCaps(p.sire)}</Link>)</> : null}
       {trailer}
-      {(p.races || []).length ? ` ${(p.races).join(", ")}.` : null}
+      {(p.races || []).length ? ` ${horseCaps((p.races).join(", "))}.` : null}
       {(p.produce || []).map((g) => (
         <div className="ff-grand" key={`${g.name}-${g.sire}`}>
-          Dam of <Link href={link(g.name)}>{g.status ? g.name.toUpperCase() : g.name}</Link>
-          {g.sire ? <> ({g.sex ? `${g.sex}. ` : ""}by <Link href={link(g.sire)}>{g.sire}</Link>)</> : null}
-          {g.status ? `. ${g.status}.` : "."}
-          {(g.races || []).length ? ` ${g.races.join(", ")}.` : null}
+          DAM OF <Link href={link(g.name)}>{horseCaps(g.name)}</Link>
+          {g.sire ? <> ({g.sex ? `${horseCaps(g.sex)}. ` : ""}BY <Link href={link(g.sire)}>{horseCaps(g.sire)}</Link>)</> : null}
+          {g.status ? `. ${horseCaps(g.status)}.` : "."}
+          {(g.races || []).length ? ` ${horseCaps(g.races.join(", "))}.` : null}
         </div>
       ))}
     </div>
@@ -48,17 +58,17 @@ export default function FemaleFamily({ family, hrefFor = null }) {
   const link = (label) => (hrefFor ? hrefFor(label) : horseHref(label));
   return family.map((d) => (
     <div className="ff-block" key={d.ordinal}>
-      <div className="ff-ord">{d.ordinal}</div>
+      <div className="ff-ord">{horseCaps(d.ordinal)}</div>
       <div className="ff-head">
-        <Link href={link(d.name)}>{(d.name || "").toUpperCase()}</Link>
+        <Link href={link(d.name)}>{horseCaps(d.name)}</Link>
         {d.year ? ` (${d.year})` : ""}
-        {d.sire ? <>, by <Link href={link(d.sire)}>{d.sire}</Link>.</> : "."}
-        {d.status ? ` ${d.status}.` : ""}
+        {d.sire ? <>, BY <Link href={link(d.sire)}>{horseCaps(d.sire)}</Link>.</> : "."}
+        {d.status ? ` ${horseCaps(d.status)}.` : ""}
       </div>
       <div className="ff-racing">
-        {(d.racing || []).length ? d.racing.join("; ") : "Racing record not on file."}
+        {(d.racing || []).length ? horseCaps(d.racing.join("; ")) : "RACING RECORD NOT ON FILE."}
       </div>
-      <div className="ff-prod-label">Produce</div>
+      <div className="ff-prod-label">PRODUCE</div>
       {(d.produce || []).length === 0 ? (
         <p className="empty">No produce on file yet.</p>
       ) : (

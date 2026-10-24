@@ -9,9 +9,9 @@ const LEAF_ROWS = 2 ** ANCESTOR_GENS;
 /** Prefer wrapping by ~10ch so multi-word names stack (e.g. GREAT / ABOVE). Cap 18. */
 const NAME_WRAP = 10;
 const NAME_HARD_MAX = 18;
-/** Max column width in ch including 1ch gutters on each side. */
+/** Max column width in ch including side gutters (extra ch so bold glyphs don’t clip). */
 const COL_MAX = 20;
-const COL_MIN = 8;
+const COL_MIN = 9;
 
 function flatten(node, idx, depth, map) {
   if (!node || depth > ANCESTOR_GENS) return;
@@ -66,8 +66,8 @@ function longestLine(name) {
 function columnChars(names) {
   if (!names.length) return COL_MIN;
   const longest = names.reduce((m, n) => Math.max(m, longestLine(n)), 0);
-  // Name block + 1ch padding each side; never exceed COL_MAX / go below COL_MIN.
-  return Math.min(COL_MAX, Math.max(COL_MIN, longest + 2));
+  // Name + side gutters; +3ch so final letters aren’t clipped by bold monospace metrics.
+  return Math.min(COL_MAX, Math.max(COL_MIN, longest + 3));
 }
 
 function Cell({ n, className, style, hrefFor }) {

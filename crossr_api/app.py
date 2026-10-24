@@ -348,8 +348,7 @@ def hypomating_report(body: ReportBody):
         )
     if result.get("error") == "not_found":
         raise HTTPException(status_code=404, detail="Broodmare not found")
-    result["pedigree"] = horse_svc.trim_pedigree(result["pedigree"])
-    return result
+    return horse_svc.enrich_hypofoal_report(result, body.sire, body.dam, profiles=profiles())
 
 
 @app.get("/api/sales/years")
@@ -499,7 +498,13 @@ def _workspace(lot, book, catalog_title="", catalog=None, catalog_default_kind=N
         birth_year=lot.get("birth_year") or lot.get("birth_date"),
         catalog_default_kind=modal,
     )
-    ctx["auction_history"] = sales_svc.auctions_for_horses(ctx.get("similar_crosses") or [])
+    # Auction history stays same-sire proven crosses only (Maxson: that panel is locked).
+    # SUCCESSFUL SIMILAR CROSSES may also include same-dam stakes winners (e.g. Tiztastic).
+    sire_crosses = [
+        row for row in (ctx.get("similar_crosses") or [])
+        if (row.get("source") or "sire_cross") == "sire_cross"
+    ]
+    ctx["auction_history"] = sales_svc.auctions_for_horses(sire_crosses)
     ctx["catalog_default_kind"] = modal
     return ctx
 

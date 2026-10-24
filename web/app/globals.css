@@ -43,32 +43,36 @@ button, input, select { font: inherit; color: inherit; }
   box-shadow: var(--shadow);
 }
 .brand-wrap {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex-shrink: 0;
+  line-height: 1;
 }
 .home-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   line-height: 0;
+  flex-shrink: 0;
 }
 .home-btn:hover { background: rgba(212, 175, 55, 0.08); }
 .home-btn img {
-  /* Tight-cropped mark: ~150px wide, height follows horse aspect (no empty pad). */
-  width: 150px;
-  height: auto;
-  max-height: 96px;
+  /* Tight crop + wordmark-aligned height — clean, not a jumbled oversized box. */
+  height: 40px;
+  width: auto;
+  max-width: 64px;
   object-fit: contain;
   object-position: center;
   display: block;
 }
 .brand-name {
-  font-size: 28px;
+  font-size: 26px;
   letter-spacing: 0.12em;
   font-weight: 800;
+  line-height: 1;
   background: linear-gradient(180deg, #f3d67a, #c49a2a);
   -webkit-background-clip: text;
   background-clip: text;
@@ -531,22 +535,26 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   /*
     Content-sized: each gen column is ≤20ch (shrinks when names are shorter).
     Long names wrap inside the cell; year stays on the line below the name block.
+    Row heights follow leaf content (no tall empty minmax band).
   */
   display: grid;
   grid-template-columns: var(--ped-grid-cols);
-  grid-template-rows: repeat(32, minmax(1.7em, auto));
+  grid-template-rows: repeat(32, auto);
   width: max-content;
   max-width: 100%;
   min-height: 0;
+  height: max-content;
   border: 1px solid var(--line);
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible;
   box-sizing: border-box;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  /* True monospace — ui-monospace can be proportional and clip final glyphs. */
+  font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 11px;
   font-variant-ligatures: none;
+  font-kerning: none;
   letter-spacing: 0;
-  line-height: 1.2;
+  line-height: 1.25;
 }
 .catalog-ped *,
 .catalog-ped *::before,
@@ -563,11 +571,11 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   gap: 0.1em;
   min-width: 0;
   width: 100%;
-  overflow: hidden;
-  padding: 0.35em 1ch;
+  overflow: visible;
+  padding: 0.35em 1.25ch;
   border-right: 1px solid var(--line);
   background: #121a2b;
-  font-weight: 800;
+  font-weight: 700;
   text-transform: uppercase;
 }
 .cat-subject .cat-name {
@@ -575,7 +583,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   flex-direction: column;
   align-items: flex-start;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   color: #ffffff;
 }
 .cat-subject a:hover { color: var(--gold); }
@@ -596,8 +604,8 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   min-width: 0;
   width: 100%;
   min-height: 0;
-  overflow: hidden;
-  padding: 0.12em 1ch;
+  overflow: visible;
+  padding: 0.2em 1.25ch;
   border-bottom: 1px solid #243049;
   border-left: 1px solid #243049;
 }
@@ -609,7 +617,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   gap: 0;
   width: 100%;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 .cat-cell-inner.empty {
   min-height: 1em;
@@ -619,17 +627,18 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   flex-direction: column;
   align-items: flex-start;
   max-width: 100%;
-  overflow: hidden;
-  font-weight: 700;
-  line-height: 1.15;
+  overflow: visible;
+  font-weight: 650;
+  line-height: 1.2;
   text-transform: uppercase;
   color: #ffffff;
 }
 .cat-name-line {
   display: block;
   white-space: nowrap;
-  max-width: 100%;
-  overflow: hidden;
+  max-width: none;
+  overflow: visible;
+  padding-right: 0.15ch;
 }
 .cat-cell .cat-name:hover { color: var(--teal); }
 .cat-cell .yr {
@@ -649,6 +658,29 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .cat-g5 { font-size: 1em; }
 .cat-cell.sire { border-left: 2px solid var(--teal); }
 .cat-cell.dam { border-left: 2px solid var(--pink); }
+/* Hypomating results: pedigree content-sized; suggested stallions get the wider column. */
+.hypo-results {
+  display: grid;
+  grid-template-columns: minmax(380px, 0.9fr) minmax(560px, 1.55fr);
+  gap: 12px;
+  align-items: start;
+  margin-top: 12px;
+}
+.hypo-results > .panel {
+  width: max-content;
+  max-width: 100%;
+  height: max-content;
+  overflow: visible;
+}
+.hypo-results .pedigree-fit,
+.hypo-results .catalog-ped {
+  height: max-content;
+  margin: 0;
+}
+.hypo-results .family-panel {
+  margin-top: 10px;
+  max-width: min(100%, 42rem);
+}
 .horse-inline-link {
   color: var(--teal);
   text-decoration: underline;
@@ -750,6 +782,31 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   gap: 6px;
 }
 .suggest-alts .ghost { width: 100%; text-align: left; }
+.lineage-inline {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #243049;
+  border-radius: 10px;
+  background: #0f1624;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lineage-inline h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+.hypofoal-title {
+  margin: 10px 0 4px;
+  font-size: 22px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.hypofoal-barn-btn {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
 .logic { color: var(--muted); font-size: 13px; margin-top: 8px; }
 
 .shell-sales {

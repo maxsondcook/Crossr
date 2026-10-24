@@ -66,10 +66,26 @@ function colorWord(lot) {
   })[key] || blank(lot.color);
 }
 
-function expectedMarketLabel(detail, lot) {
+function projectedPriceLabel(detail) {
   const band = detail?.expected_market;
   if (band?.label) return band.label;
   return "Projection unavailable";
+}
+
+/** Y/W → Price + Value; broodmare catalogs → Value only; 2yo/HORA → hide both. */
+function projectionPanels(detail, lot) {
+  const em = detail?.expected_market;
+  if (em && typeof em.show_projected_price === "boolean") {
+    return {
+      showPrice: Boolean(em.show_projected_price),
+      showValue: Boolean(em.show_projected_value),
+    };
+  }
+  const kind = em?.sold_as || lot?.sold_as_kind || "";
+  const role = em?.value_projector?.role || "";
+  const isYW = kind === "Yearling" || kind === "Weanling";
+  const isBroodmare = role === "broodmare";
+  return { showPrice: isYW, showValue: isYW || isBroodmare };
 }
 
 /** Show sale title once; skip appending year when already in the title. */
@@ -132,7 +148,13 @@ function SalesPage() {
   const [years, setYears] = useState([]);
   const [year, setYear] = useState("");
   const [catalogs, setCatalogs] = useState([]);
+  const [pastCatalogs, setPastCatalogs] = useState([]);
+  const [upcomingCatalogs, setUpcomingCatalogs] = useState([]);
+  const [loadingPast, setLoadingPast] = useState(false);
+  const [loadingUpcoming, setLoadingUpcoming] = useState(false);
   const [loadingCatalogs, setLoadingCatalogs] = useState(false);
+  const [pastOpen, setPastOpen] = useState(true);
+  const [upcomingOpen, setUpcomingOpen] = useState(true);
   const [catalog, setCatalog] = useState(null);
   const [lots, setLots] = useState([]);
   const [listError, setListError] = useState("");
@@ -191,7 +213,39 @@ function SalesPage() {
     setLoadingCatalogs(true);
   }, [searchParams]);
 
+  // Entry screen: keep Past + Upcoming lists loaded independently (both start open).
   useEffect(() => {
+    if (catalog) return;
+    apiGet("/api/sales/years")
+      .then((d) => {
+        const list = d.years || [];
+        setYears(list);
+        setYear((prev) => prev || (list[0] != null ? String(list[0]) : ""));
+      })
+      .catch((e) => setListError(e.message));
+  }, [catalog]);
+
+  useEffect(() => {
+    if (catalog || !year) return;
+    setLoadingPast(true);
+    apiGet(`/api/sales/catalogs?year=${year}`)
+      .then((d) => setPastCatalogs(d.catalogs || []))
+      .catch((e) => setListError(e.message))
+      .finally(() => setLoadingPast(false));
+  }, [catalog, year]);
+
+  useEffect(() => {
+    if (catalog) return;
+    setLoadingUpcoming(true);
+    apiGet("/api/sales/upcoming")
+      .then((d) => setUpcomingCatalogs(d.catalogs || []))
+      .catch((e) => setListError(e.message))
+      .finally(() => setLoadingUpcoming(false));
+  }, [catalog]);
+
+  // Catalog workspace: load the list for the active mode (URL restore / open catalog).
+  useEffect(() => {
+    if (!catalog && mode !== "past") return;
     if (mode !== "past") return;
     apiGet("/api/sales/years")
       .then((d) => {
@@ -200,35 +254,37 @@ function SalesPage() {
         setYear((prev) => prev || (list[0] != null ? String(list[0]) : ""));
       })
       .catch((e) => setListError(e.message));
-  }, [mode]);
+  }, [mode, catalog]);
 
   useEffect(() => {
-    if (mode !== "past" || !year) return;
+    if (mode !== "past" || !year || !catalog) return;
     setListError("");
     setLoadingCatalogs(true);
     apiGet(`/api/sales/catalogs?year=${year}`)
       .then((d) => setCatalogs(d.catalogs || []))
       .catch((e) => setListError(e.message))
       .finally(() => setLoadingCatalogs(false));
-  }, [mode, year]);
+  }, [mode, year, catalog]);
 
   useEffect(() => {
-    if (mode !== "upcoming") return;
+    if (mode !== "upcoming" || !catalog) return;
     setListError("");
     setLoadingCatalogs(true);
     apiGet("/api/sales/upcoming")
       .then((d) => setCatalogs(d.catalogs || []))
       .catch((e) => setListError(e.message))
       .finally(() => setLoadingCatalogs(false));
-  }, [mode]);
+  }, [mode, catalog]);
 
   useEffect(() => {
     const pending = restoreRef.current;
-    if (!pending || pending.mode !== mode || !catalogs.length || catalog) return;
-    const match = catalogs.find((item) => String(item.id) === String(pending.catalogId));
+    if (!pending || pending.mode !== mode || catalog) return;
+    const pool = pending.mode === "upcoming" ? upcomingCatalogs : (catalogs.length ? catalogs : pastCatalogs);
+    if (!pool.length) return;
+    const match = pool.find((item) => String(item.id) === String(pending.catalogId));
     if (!match) return;
     setCatalog(match);
-  }, [catalogs, mode, catalog]);
+  }, [catalogs, pastCatalogs, upcomingCatalogs, mode, catalog]);
 
   useEffect(() => {
     setSelectedSires([]);
@@ -324,10 +380,10 @@ function SalesPage() {
     if (!lots.length) return "";
     const sources = new Set(lots.map((lot) => lot.filter_price_source).filter(Boolean));
     if (sources.has("sale_price") && (sources.has("expected_market_mid") || sources.has("unknown"))) {
-      return "Price uses sale price when sold; otherwise Expected Market mid.";
+      return "Price uses sale price when sold; otherwise Projected Price mid.";
     }
     if (sources.has("sale_price")) return "Price uses catalog sale price.";
-    return "Price uses Expected Market mid — no sale prices yet.";
+    return "Price uses Projected Price mid — no sale prices yet.";
   }, [lots]);
 
   function lotIsStarred(lot) {
@@ -450,20 +506,19 @@ function SalesPage() {
     router.replace(next, { scroll: false });
   }, [salesReturn, pathname, router]);
 
-  function chooseMode(next) {
-    restoreRef.current = null;
-    setMode(next);
-    setCatalog(null);
-    setCatalogs([]);
-    setLoadingCatalogs(true);
-    setListError("");
-    setActiveClient("");
-    setOnlyDismissed(false);
-    router.replace("/sales", { scroll: false });
+  function togglePastSection() {
+    setPastOpen((open) => !open);
   }
 
-  function openCatalog(item) {
+  function toggleUpcomingSection() {
+    setUpcomingOpen((open) => !open);
+  }
+
+  function openCatalog(item, nextMode) {
+    restoreRef.current = null;
+    setMode(nextMode);
     setCatalog(item);
+    setCatalogs(nextMode === "upcoming" ? upcomingCatalogs : pastCatalogs);
     setRailOpen(false);
     setOnlyDismissed(false);
     setActiveClient("");
@@ -669,35 +724,36 @@ function SalesPage() {
       ) : (
         <div className="sales-entry">
           <div className="mode-row">
-            <button className={mode === "past" ? "primary" : "ghost"} type="button" onClick={() => chooseMode("past")}>
+            <button className={pastOpen ? "primary" : "ghost"} type="button" onClick={togglePastSection}>
               Past results
             </button>
-            <button className={mode === "upcoming" ? "primary" : "ghost"} type="button" onClick={() => chooseMode("upcoming")}>
+            <button className={upcomingOpen ? "primary" : "ghost"} type="button" onClick={toggleUpcomingSection}>
               Upcoming sales
             </button>
           </div>
           {listError ? <p className="error">{listError}</p> : null}
-          {mode === "past" ? (
+          {pastOpen ? (
             <div className="panel">
-              <h4>YEAR</h4>
+              <h4>PAST RESULTS</h4>
+              <h4 style={{ marginTop: 8 }}>YEAR</h4>
               <select value={year} onChange={(e) => setYear(e.target.value)}>
                 {years.map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
               <h4 style={{ marginTop: 12 }}>SALES</h4>
-              {loadingCatalogs ? <p className="empty">Loading sales…</p> : catalogs.map((item) => (
-                <button key={item.id} className="ghost catalog-btn" type="button" onClick={() => openCatalog(item)}>
+              {loadingPast ? <p className="empty">Loading sales…</p> : pastCatalogs.map((item) => (
+                <button key={item.id} className="ghost catalog-btn" type="button" onClick={() => openCatalog(item, "past")}>
                   {item.title}
                 </button>
               ))}
             </div>
           ) : null}
-          {mode === "upcoming" ? (
-            <div className="panel">
+          {upcomingOpen ? (
+            <div className="panel" style={{ marginTop: pastOpen ? 12 : 0 }}>
               <h4>UPCOMING SALES</h4>
-              {loadingCatalogs ? <p className="empty">Loading sales…</p> : catalogs.length === 0 ? (
+              {loadingUpcoming ? <p className="empty">Loading sales…</p> : upcomingCatalogs.length === 0 ? (
                 <p className="empty">No upcoming catalogs yet. Import a sale into Upcoming Sales and run the analyzer.</p>
-              ) : catalogs.map((item) => (
-                <button key={item.id} className="ghost catalog-btn" type="button" onClick={() => openCatalog(item)}>
+              ) : upcomingCatalogs.map((item) => (
+                <button key={item.id} className="ghost catalog-btn" type="button" onClick={() => openCatalog(item, "upcoming")}>
                   {item.title}
                   <span>{item.hips} hips</span>
                 </button>
@@ -752,10 +808,12 @@ function SalesPage() {
                     <div><span className="meta-label">Foaled</span><b>{blank(current.birth_date) || current.birth_year || "—"}</b></div>
                     <div><span className="meta-label">Consigned by</span><b>{blank(current.consignor) || "—"}</b></div>
                     <div><span className="meta-label">Hip</span><b>{current.hip || "—"}</b></div>
-                    <div data-meta="expected-market">
-                      <span className="meta-label">Expected Market Value</span>
-                      <b className="money">{ready ? expectedMarketLabel(detail, current) : "…"}</b>
-                    </div>
+                    {(!ready || projectionPanels(detail, current).showPrice) ? (
+                      <div data-meta="projected-price">
+                        <span className="meta-label">Projected Price</span>
+                        <b className="money">{ready ? projectedPriceLabel(detail) : "…"}</b>
+                      </div>
+                    ) : null}
                     {mode === "past" ? (
                       <div><span className="meta-label">Auction price</span><b className="money">{priceLabel(current)}</b></div>
                     ) : null}
@@ -763,14 +821,16 @@ function SalesPage() {
                   {jumpError ? <p className="error">{jumpError}</p> : null}
                 </div>
 
-                <div className="panel" data-panel="projected-value">
-                  <h4>PROJECTED VALUE</h4>
-                  <ProjectedValue
-                    valueProjector={ready ? detail?.expected_market?.value_projector : null}
-                    lot={ready ? (detail?.lot || current) : current}
-                    showSold={mode === "past"}
-                  />
-                </div>
+                {(!ready || projectionPanels(detail, current).showValue) ? (
+                  <div className="panel" data-panel="projected-value">
+                    <h4>PROJECTED VALUE</h4>
+                    <ProjectedValue
+                      valueProjector={ready ? detail?.expected_market?.value_projector : null}
+                      lot={ready ? (detail?.lot || current) : current}
+                      showSold={mode === "past"}
+                    />
+                  </div>
+                ) : null}
 
                 <div className="panel">
                   <h4>SUCCESSFUL SIMILAR CROSSES</h4>

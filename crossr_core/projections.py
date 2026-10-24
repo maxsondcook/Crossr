@@ -231,15 +231,21 @@ def resolve_stud_fee(
     *,
     sale_year: Optional[int] = None,
 ) -> Optional[int]:
-    """Resolve sire stud fee — at sale year when provided, else current fee."""
+    """Resolve sire stud fee from data/stud_fees.csv (sale year when provided)."""
     fee = None
     try:
-        import fee_and_standing_location as fee_db
+        from crossr_core import sample_db
 
-        if sale_year:
-            fee = fee_db.resolve_fee_at_sale(sire_name or "", int(sale_year))
-        else:
-            fee = fee_db.get_current_fee(sire_name or "")
+        hist = sample_db.stud_fee_history().get(sample_db.name_key(sire_name or "")) or {}
+        if sale_year and hist:
+            year = int(sale_year)
+            if year in hist and hist[year] > 0:
+                fee = hist[year]
+            else:
+                priors = [y for y in hist if y <= year and hist[y] > 0]
+                fee = hist[max(priors)] if priors else None
+        elif hist:
+            fee = hist[max(hist)]
     except Exception:
         fee = None
     if fee and fee > 0:
@@ -273,14 +279,9 @@ def _value_projector_payload(lot: dict) -> Dict[str, Any]:
     role = raw.get("role") or ""
     sex_u = (lot.get("sex_letter") or lot.get("sex") or "").strip().upper()
 
-    # Colts / horses / ridglings / geldings as youngstock: never surface a
-    # breeding-value number in the sales UI (stallion-prospect or BMS-style).
-    male_youngstock = role == "youngstock" and (
-        kind in ("colt", "gelding")
-        or sex_u[:1] in ("C", "H", "R", "G")
-        or sex_u.startswith(("COLT", "HORSE", "RIDGLING", "GELDING"))
-    )
-    if male_youngstock:
+    # Geldings: race only — suppress any breeding figure.
+    is_gelding = kind == "gelding" or sex_u[:1] == "G" or sex_u.startswith("GELDING")
+    if is_gelding:
         point = None
         low = None
         high = None
@@ -302,6 +303,8 @@ def _value_projector_payload(lot: dict) -> Dict[str, Any]:
         "detail": raw.get("detail") or "",
         "projected_race_earnings": race,
         "race_detail": raw.get("race_detail") or "",
+        "added_value_by_fee_bracket": raw.get("added_value_by_fee_bracket") or [],
+        "mean_added_value_multiplier": raw.get("mean_added_value_multiplier"),
     }
 
 
@@ -622,6 +625,11 @@ def project_lot_market(
         }
 
     expected["value_projector"] = value
+    # Alias for locked UI label; keep expected_market key for API compatibility.
+    expected["panel"] = "projected_price"
+    expected["show_projected_price"] = bool(kind)
+    # Value panel: Y/W always; broodmare catalogs get breeding-only (role=broodmare).
+    expected["show_projected_value"] = bool(kind) or (value.get("role") == "broodmare")
     expected["price_projection"] = {
         k: price.get(k)
         for k in (

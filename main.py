@@ -5,8 +5,13 @@ import os
 import re
 import pprint
 import copy
-import stallion_stats 
 import hypomating_engine
+
+# Optional CLI stats menu — never required for the API / web UI.
+try:
+    import stallion_stats  # noqa: F401
+except ImportError:
+    stallion_stats = None
 
 # NAME CLEANING
 def clean_horse_name(name: str) -> str:
@@ -1083,7 +1088,10 @@ if __name__ == "__main__":
                 print(f"⚠️ An error occurred while running the pedigree builder: {e}")
                         
         elif choice == "4":
-            stallion_stats.run_stats_menu()
+            if stallion_stats is None:
+                print("❌ Stallion stats module is not available (use placeholderdatabase/stallion_stats.csv).")
+            else:
+                stallion_stats.run_stats_menu()
             
         elif choice == "5":
             hypomating_engine.run_hypomating_menu(PEDIGREE_DATABASE, all_profiles)

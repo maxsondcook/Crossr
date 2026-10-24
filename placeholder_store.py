@@ -290,6 +290,37 @@ def load_broodmare_sire_rows() -> list[dict]:
     return rows
 
 
+def load_graded_stakes_records() -> list[dict]:
+    """Winner records from placeholderdatabase/graded_stakes_winners.csv.
+
+    Sample CSV is winners-only (no Place column). Shape matches what
+    hypomating_engine.build_horse_summaries / female-family stakes index expect.
+    """
+    records = []
+    for row in load_table("graded_stakes_winners"):
+        name = (row.get("horse_name") or "").strip()
+        if not name or name.upper() in {"N/A", "NAN", "NONE"}:
+            continue
+        grade = (row.get("grade") or "").strip()
+        records.append({
+            "Horse Name": name,
+            "Foaling Year": (row.get("foaling_year") or "").strip(),
+            "Sex": (row.get("sex") or "").strip(),
+            "Race Name": (row.get("race_name") or "").strip(),
+            "Race Year": (row.get("race_year") or "").strip(),
+            "Grade": grade,
+            "Group": grade,
+            "Purse": (row.get("purse") or "").strip(),
+            "Distance": (row.get("distance") or "").strip(),
+            "Track": (row.get("track") or "").strip(),
+            "Date": (row.get("race_date") or "").strip(),
+            "Place": 1,
+            "Country": (row.get("country") or "").strip(),
+            "Age": (row.get("age") or "").strip(),
+        })
+    return records
+
+
 def load_broodmare_database() -> dict:
     """Dict shape hypomating_engine expects from BROODMARE_DATABASE."""
     database = {}

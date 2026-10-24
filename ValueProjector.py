@@ -34,17 +34,111 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pedigrees_database
-import stallion_profiles as sp_mod
+from crossr_core import sample_db
+
+
+_PROFILES_CACHE: Optional[Dict[str, dict]] = None
+_PROFILES_BY_KEY: Optional[Dict[str, Tuple[str, dict]]] = None
+_FEE_HISTORY: Optional[Dict[str, Dict[int, int]]] = None
+_BMS_FOALS: Optional[Dict[str, int]] = None
+
+
+def _intish(raw: Any) -> int:
+    try:
+        digits = re.sub(r"[^\d-]", "", str(raw or ""))
+        return int(digits) if digits else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _latest_general_rankings() -> Dict[str, dict]:
+    """name_key → latest General list ranking row."""
+    best: Dict[str, Tuple[int, dict]] = {}
+    for row in sample_db.load_table("stallion_rankings"):
+        if (row.get("list") or "").strip() != "General":
+            continue
+        key = sample_db.name_key(row.get("stallion") or "")
+        if not key:
+            continue
+        year = _intish(row.get("year"))
+        prior = best.get(key)
+        if prior is None or year >= prior[0]:
+            best[key] = (year, row)
+    return {k: v[1] for k, v in best.items()}
+
+
+def _apply_ranking_stats(profile: dict, rank_row: Optional[dict]) -> dict:
+    if not rank_row:
+        return profile
+    runners = _intish(rank_row.get("runners"))
+    earnings = parse_money(rank_row.get("year_earnings"))
+    foals = _intish(rank_row.get("foals")) or _intish(rank_row.get("cumulative_foals"))
+    if runners > 0 and earnings > 0:
+        profile["Progeny Racing Statistics"] = {
+            "Starters": runners,
+            "Runners": runners,
+            "Foals of Racing Age": foals or runners,
+            "Foals": foals or runners,
+        }
+        profile["Progeny Earnings Statistics"] = {
+            "Earnings": earnings,
+            "Avg Earnings/starter": earnings / runners if runners else 0,
+        }
+    elif foals > 0:
+        prog = profile.get("Progeny Racing Statistics") or {}
+        prog.setdefault("Foals of Racing Age", foals)
+        prog.setdefault("Foals", foals)
+        profile["Progeny Racing Statistics"] = prog
+    if not profile.get("Farm"):
+        profile["Farm"] = rank_row.get("farm") or ""
+    return profile
+
+
+def _load_stallion_profiles(force: bool = False) -> Dict[str, dict]:
+    """Stud cards from stud_fees.csv (+ rankings progeny stats)."""
+    global _PROFILES_CACHE, _PROFILES_BY_KEY
+    if _PROFILES_CACHE is not None and not force:
+        return _PROFILES_CACHE
+    ranks = _latest_general_rankings()
+    base = sample_db.stallion_roster_from_fees()
+    enriched: Dict[str, dict] = {}
+    by_key: Dict[str, Tuple[str, dict]] = {}
+    for name, profile in base.items():
+        card = _apply_ranking_stats(dict(profile), ranks.get(clean_horse_name(name)))
+        enriched[name] = card
+        by_key[clean_horse_name(name)] = (name, card)
+    _PROFILES_CACHE = enriched
+    _PROFILES_BY_KEY = by_key
+    return enriched
+
+
+class _StallionProfilesProxy:
+    """Lazy view over the 8 sample CSVs via sample_db."""
+
+    @property
+    def stallion_profiles(self):
+        return _load_stallion_profiles()
+
+
+sp_mod = _StallionProfilesProxy()
 
 # ---------------------------------------------------------------------------
 # Constants (from notebook)
 # ---------------------------------------------------------------------------
 STUD_DEAL_MULTIPLIER = 400
-LIVE_FOAL_RATE = 0.75
-FOALS_PER_BROODMARE_LOW = 6
-FOALS_PER_BROODMARE_HIGH = 10
-FOALS_PER_BROODMARE_MEAN = 8
-EXPECTED_LIVE_FOALS = FOALS_PER_BROODMARE_MEAN * LIVE_FOAL_RATE  # 6.0
+# Maxson locked crop: 8–12 foals × 0.7 live-foal rate → 5.6–8.4 live foals.
+LIVE_FOAL_RATE = 0.70
+FOALS_PER_BROODMARE_LOW = 8
+FOALS_PER_BROODMARE_HIGH = 12
+FOALS_PER_BROODMARE_MEAN = 10
+EXPECTED_LIVE_FOALS_LOW = FOALS_PER_BROODMARE_LOW * LIVE_FOAL_RATE  # 5.6
+EXPECTED_LIVE_FOALS_HIGH = FOALS_PER_BROODMARE_HIGH * LIVE_FOAL_RATE  # 8.4
+EXPECTED_LIVE_FOALS = FOALS_PER_BROODMARE_MEAN * LIVE_FOAL_RATE  # 7.0
+
+# Colt similar-sire peer gates (pedigree % and stud-fee proximity).
+COLT_PEER_MIN_SIM = 50.0  # exclusive: require similarity > 50%
+COLT_PEER_FEE_ABS = 10_000
+COLT_PEER_FEE_PCT = 0.10
 
 # Opening / initial stud fees when known (current profile fee is used otherwise).
 # Notebook example: Flightline ISF = $200,000.
@@ -105,12 +199,11 @@ def fmt_money(amount: float) -> str:
 
 def _profile_lookup(name: str) -> Tuple[Optional[str], Optional[dict]]:
     """Return (canonical profile key, profile dict) or (None, None)."""
-    profiles = sp_mod.stallion_profiles
+    _load_stallion_profiles()
     target = clean_horse_name(name)
-    for key, data in profiles.items():
-        if clean_horse_name(key) == target:
-            return key, data
-    # Soft contains match
+    if _PROFILES_BY_KEY and target in _PROFILES_BY_KEY:
+        return _PROFILES_BY_KEY[target]
+    profiles = sp_mod.stallion_profiles
     hits = [k for k in profiles if target and target in clean_horse_name(k)]
     if len(hits) == 1:
         return hits[0], profiles[hits[0]]
@@ -171,11 +264,36 @@ def career_race_earnings(profile: dict) -> float:
     return total
 
 
+def _fee_history_map() -> Dict[str, Dict[int, int]]:
+    global _FEE_HISTORY
+    if _FEE_HISTORY is None:
+        _FEE_HISTORY = sample_db.stud_fee_history()
+    return _FEE_HISTORY
+
+
+def _bms_cum_foals_map() -> Dict[str, int]:
+    global _BMS_FOALS
+    if _BMS_FOALS is None:
+        out: Dict[str, int] = {}
+        for entry in sample_db.broodmare_sire_rows():
+            key = clean_horse_name(entry.get("stallion") or "")
+            n = int(entry.get("cum_foals") or 0)
+            if key and n > 0:
+                out[key] = n
+        _BMS_FOALS = out
+    return _BMS_FOALS
+
+
 def initial_stud_fee(name: str, profile: Optional[dict] = None) -> float:
-    """ISF: override table first, else current Stud Fee from the profile."""
+    """ISF: override → earliest stud_fees.csv year → current profile fee."""
     key = clean_horse_name(name)
     if key in INITIAL_STUD_FEE_OVERRIDES:
         return float(INITIAL_STUD_FEE_OVERRIDES[key])
+    hist = _fee_history_map().get(key) or {}
+    if hist:
+        first_year = min(hist)
+        if hist[first_year] > 0:
+            return float(hist[first_year])
     if profile is None:
         _, profile = _profile_lookup(name)
     if not profile:
@@ -197,19 +315,8 @@ def foals_of_racing_age(name: str, profile: Optional[dict] = None) -> int:
                         return n
                 except (TypeError, ValueError):
                     pass
-    # Broodmare-sire cum_foals as last resort for prolific older sires
-    try:
-        from broodmare_sire_data import broodmare_sire_raw, clean_horse_name as bms_clean
-
-        target = bms_clean(name)
-        for entry in broodmare_sire_raw:
-            if bms_clean(entry["stallion"]) == target:
-                n = int(entry.get("cum_foals") or 0)
-                if n > 0:
-                    return n
-    except Exception:
-        pass
-    return 0
+    n = _bms_cum_foals_map().get(clean_horse_name(name), 0)
+    return int(n) if n else 0
 
 
 def stands_at_stud(profile: dict) -> bool:
@@ -283,47 +390,222 @@ def colt_contribution(isf: float, foals_racing_age_ss: int) -> float:
     return (isf * STUD_DEAL_MULTIPLIER) / male_foals
 
 
+def _current_stud_fee(name: str, profile: Optional[dict] = None) -> float:
+    """Current advertised stud fee (profile / fee DB), not initial."""
+    if profile is None:
+        _, profile = _profile_lookup(name)
+    if profile:
+        fee = parse_money(profile.get("Stud Fee", 0))
+        if fee > 0:
+            return fee
+    hist = _fee_history_map().get(clean_horse_name(name)) or {}
+    if hist:
+        return float(hist[max(hist)])
+    return 0.0
+
+
+def _fee_proximity_ok(
+    ref_isf: float,
+    ref_current: float,
+    peer_isf: float,
+    peer_current: float,
+) -> bool:
+    """True when peer fees are within $10k absolute OR 10% of initial OR 10% of current."""
+    pairs = [
+        (ref_isf, peer_isf),
+        (ref_isf, peer_current),
+        (ref_current, peer_isf),
+        (ref_current, peer_current),
+    ]
+    for a, b in pairs:
+        if a <= 0 or b <= 0:
+            continue
+        if abs(a - b) <= COLT_PEER_FEE_ABS:
+            return True
+        base = max(a, 1.0)
+        if abs(a - b) / base <= COLT_PEER_FEE_PCT:
+            return True
+    # Also compare like-for-like initial and current when both sides known.
+    if ref_isf > 0 and peer_isf > 0:
+        if abs(ref_isf - peer_isf) <= COLT_PEER_FEE_ABS:
+            return True
+        if abs(ref_isf - peer_isf) / max(ref_isf, 1.0) <= COLT_PEER_FEE_PCT:
+            return True
+    if ref_current > 0 and peer_current > 0:
+        if abs(ref_current - peer_current) <= COLT_PEER_FEE_ABS:
+            return True
+        if abs(ref_current - peer_current) / max(ref_current, 1.0) <= COLT_PEER_FEE_PCT:
+            return True
+    return False
+
+
+def _peer_sons_at_stud_ev(peer_name: str, peer_profile: Optional[dict] = None) -> Optional[dict]:
+    """Σ sons-at-stud initial fees / peer foal count."""
+    sons = [
+        (n, p)
+        for n, p in find_similar_stallions(peer_name, include_grandsons=False)
+        if get_sire_name(n) == clean_horse_name(peer_name)
+    ]
+    if not sons:
+        return None
+    sum_isf = 0.0
+    son_rows = []
+    for n, p in sons:
+        isf = initial_stud_fee(n, p)
+        if isf <= 0:
+            continue
+        sum_isf += isf
+        son_rows.append({"stallion": n, "isf": isf})
+    if sum_isf <= 0:
+        return None
+    foals = foals_of_racing_age(peer_name, peer_profile)
+    if foals <= 0:
+        foals = _bms_cum_foals_map().get(clean_horse_name(peer_name), 0)
+    if foals <= 0:
+        return None
+    return {
+        "sum_sons_isf": sum_isf,
+        "n_sons": len(son_rows),
+        "foals": foals,
+        "ev": sum_isf / float(foals),
+        "sons": son_rows,
+    }
+
+
+def similar_sire_peers_for_colt(colt_sire: str) -> List[dict]:
+    """
+    Standing sires with pedigree similarity >50% to `colt_sire` AND fee proximity
+    (within $10k or 10% of initial / current). No max peer cap.
+    """
+    canon, ref_profile = _profile_lookup(colt_sire)
+    display = canon or (colt_sire or "").strip()
+    ref_key = clean_horse_name(display)
+    ref_isf = initial_stud_fee(display, ref_profile)
+    ref_current = _current_stud_fee(display, ref_profile) or ref_isf
+    if ref_isf <= 0 and ref_current <= 0:
+        return []
+
+    try:
+        from crossr_core import horses as horse_svc
+    except Exception:
+        horse_svc = None
+
+    peers: List[dict] = []
+    for name, profile in sp_mod.stallion_profiles.items():
+        if clean_horse_name(name) == ref_key:
+            continue
+        if not stands_at_stud(profile):
+            continue
+        peer_isf = initial_stud_fee(name, profile)
+        peer_current = _current_stud_fee(name, profile) or peer_isf
+        if not _fee_proximity_ok(ref_isf, ref_current, peer_isf, peer_current):
+            continue
+        sim_pct = None
+        if horse_svc is not None:
+            try:
+                sim = horse_svc.pedigree_similarity(a=display, b=name)
+                sim_pct = (sim or {}).get("percent")
+            except Exception:
+                sim_pct = None
+        if sim_pct is None:
+            # Soft familial fallback when trees missing: same sire / grandsire.
+            if get_sire_name(name) and get_sire_name(name) == get_sire_name(display):
+                sim_pct = 50.0
+            elif get_grandsire_name(name) and get_grandsire_name(name) == clean_horse_name(display):
+                sim_pct = 50.0
+            else:
+                continue
+        if float(sim_pct) <= COLT_PEER_MIN_SIM:
+            continue
+        ev_pack = _peer_sons_at_stud_ev(name, profile)
+        if not ev_pack:
+            continue
+        peers.append(
+            {
+                "stallion": name,
+                "similarity": float(sim_pct),
+                "isf": peer_isf,
+                "current_fee": peer_current,
+                **ev_pack,
+            }
+        )
+    peers.sort(key=lambda p: (-p["similarity"], -p["ev"]))
+    return peers
+
+
 def project_colt_bv(colt_sire: str, verbose: bool = True) -> dict:
     """
     Expected breeding value of a yearling/colt by `colt_sire`.
 
-    E[BV] = Σ (ISF_i · 400) / (F_SS / 2) over similar stallions of SS.
+    Locked path: average across similar sires (sim >50% + fee proximity) of
+    (Σ sons-at-stud initial stud fees) / peer foal count. No peer cap.
+    Falls back to legacy sire-of-stallions sum when no peers qualify.
     """
     canon_sire, sire_profile = _profile_lookup(colt_sire)
     display_sire = canon_sire or colt_sire.strip()
 
+    peers = similar_sire_peers_for_colt(display_sire)
+    contributions = []
+    peer_evs: List[float] = []
+    for peer in peers:
+        peer_evs.append(float(peer["ev"]))
+        contributions.append(
+            {
+                "stallion": peer["stallion"],
+                "isf": peer["isf"],
+                "stud_deal": peer["sum_sons_isf"],
+                "contribution": peer["ev"],
+                "relation": "similar_sire",
+                "similarity": peer["similarity"],
+                "n_sons": peer["n_sons"],
+                "foals": peer["foals"],
+            }
+        )
+
+    if peer_evs:
+        total = statistics.mean(peer_evs)
+        result = {
+            "kind": "colt",
+            "colt_sire": display_sire,
+            "sire_of_stallions": display_sire,
+            "resolution": "similar_sire_peers",
+            "foals_of_racing_age_ss": None,
+            "male_foals_est": None,
+            "n_similar": len(contributions),
+            "contributions": contributions,
+            "peer_evs": peer_evs,
+            "expected_bv": total,
+            "note": (
+                "Mean of similar-sire peer EVs: "
+                "(Σ sons-at-stud ISF) / peer foals. "
+                "Mode of realized BV is 0."
+            ),
+        }
+        if verbose:
+            _print_colt_report(result)
+        return result
+
+    # Legacy fallback when no pedigree+fee peers have sons-at-stud outcomes.
     ss_name, resolution = resolve_sire_of_stallions(display_sire)
     ss_canon, ss_profile = _profile_lookup(ss_name)
     ss_display = ss_canon or ss_name
 
     f_ss = foals_of_racing_age(ss_display, ss_profile)
-    # Notebook ballpark for Tapit was ~3000; if profile is thin, allow BMS cum_foals
     if f_ss <= 0:
-        try:
-            from broodmare_sire_data import broodmare_sire_raw, clean_horse_name as bms_clean
-
-            for entry in broodmare_sire_raw:
-                if bms_clean(entry["stallion"]) == bms_clean(ss_display):
-                    f_ss = int(entry.get("cum_foals") or 0)
-                    break
-        except Exception:
-            pass
+        f_ss = _bms_cum_foals_map().get(clean_horse_name(ss_display), 0)
 
     similar = find_similar_stallions(ss_display)
-    contributions = []
     total = 0.0
-
     for name, profile in similar:
         isf = initial_stud_fee(name, profile)
         if isf <= 0:
-            continue  # BV = 0 if they don't stand
+            continue
         term = colt_contribution(isf, f_ss)
-        stud_deal = isf * STUD_DEAL_MULTIPLIER
         contributions.append(
             {
                 "stallion": name,
                 "isf": isf,
-                "stud_deal": stud_deal,
+                "stud_deal": isf * STUD_DEAL_MULTIPLIER,
                 "contribution": term,
                 "relation": (
                     "son"
@@ -338,15 +620,15 @@ def project_colt_bv(colt_sire: str, verbose: bool = True) -> dict:
         "kind": "colt",
         "colt_sire": display_sire,
         "sire_of_stallions": ss_display,
-        "resolution": resolution,
+        "resolution": resolution + "_legacy",
         "foals_of_racing_age_ss": f_ss,
         "male_foals_est": f_ss / 2.0 if f_ss else 0.0,
         "n_similar": len(contributions),
         "contributions": contributions,
         "expected_bv": total,
         "note": (
-            "Mode of realized BV is 0 (most colts never stand). "
-            "This figure is the mean / expected value across similar stallions."
+            "Legacy SS path (no similar-sire peers with sons-at-stud). "
+            "Mode of realized BV is 0."
         ),
     }
 
@@ -403,54 +685,35 @@ def _dam_to_sire_cache() -> Dict[str, str]:
 
 
 def _build_sales_indexes() -> None:
+    """Index priced lots from data/sales_lots.csv only."""
     global _SALES_BY_DAM_SIRE, _SALES_BY_DAM
     by_ds: Dict[str, List[dict]] = defaultdict(list)
     by_dam: Dict[str, List[dict]] = defaultdict(list)
     dam_sire_of = _dam_to_sire_cache()
 
-    for base in SALES_DIRS:
-        if not base.exists():
+    for row in sample_db.load_table("sales_lots"):
+        price = parse_money(row.get("price_num"))
+        if price <= 0:
             continue
-        for fp in base.glob("*.csv"):
-            try:
-                with open(fp, mode="r", encoding="utf-8-sig", errors="ignore") as f:
-                    reader = csv.DictReader(f)
-                    hm = _header_map(reader.fieldnames)
-                    sod_h = hm.get("sire of dam") or hm.get("bms") or hm.get("damsire")
-                    sire_h = hm.get("sire")
-                    dam_h = hm.get("dam")
-                    price_h = hm.get("price")
-                    sex_h = hm.get("sex")
-                    name_h = hm.get("name") or hm.get("horse name") or hm.get("horse")
-                    if not price_h:
-                        continue
-                    for row in reader:
-                        price = parse_money(row.get(price_h))
-                        if price <= 0:
-                            continue
-                        sire = clean_horse_name(row.get(sire_h, "")) if sire_h else ""
-                        dam = clean_horse_name(row.get(dam_h, "")) if dam_h else ""
-                        sod = clean_horse_name(row.get(sod_h, "")) if sod_h else ""
-
-                        # Infer broodmare sire = the dam's own sire when SOD is absent
-                        if not sod and dam:
-                            sod = dam_sire_of.get(dam, "")
-
-                        rec = {
-                            "price": price,
-                            "sire": sire,
-                            "dam": dam,
-                            "dam_sire": sod,
-                            "sex": (row.get(sex_h, "") if sex_h else ""),
-                            "horse": clean_horse_name(row.get(name_h, "")) if name_h else "",
-                            "file": fp.name,
-                        }
-                        if sod:
-                            by_ds[sod].append(rec)
-                        if dam:
-                            by_dam[dam].append(rec)
-            except Exception:
-                continue
+        sire = clean_horse_name(row.get("sire_key") or row.get("sire") or "")
+        dam = clean_horse_name(row.get("dam_key") or row.get("dam") or "")
+        sod = clean_horse_name(row.get("damsire_key") or row.get("damsire") or "")
+        if not sod and dam:
+            sod = dam_sire_of.get(dam, "")
+        rec = {
+            "price": price,
+            "sire": sire,
+            "dam": dam,
+            "dam_sire": sod,
+            "sex": row.get("sex_letter") or row.get("sex") or "",
+            "horse": clean_horse_name(row.get("name_key") or row.get("name") or ""),
+            "file": row.get("source_file") or "sales_lots.csv",
+            "catalog_year": row.get("catalog_year") or "",
+        }
+        if sod:
+            by_ds[sod].append(rec)
+        if dam:
+            by_dam[dam].append(rec)
 
     _SALES_BY_DAM_SIRE = dict(by_ds)
     _SALES_BY_DAM = dict(by_dam)
@@ -472,10 +735,27 @@ def sales_by_dam(dam: str) -> List[dict]:
     return list(_SALES_BY_DAM.get(clean_horse_name(dam), []))
 
 
-def covering_sire_fee(sire_name: str) -> float:
+def covering_sire_fee(sire_name: str, sale_year: Any = None) -> float:
+    """Covering sire stud fee at sale year when known; else initial/current."""
+    key = clean_horse_name(sire_name)
+    hist = _fee_history_map().get(key) or {}
+    year = None
+    try:
+        year = int(str(sale_year).strip()[:4]) if sale_year not in (None, "") else None
+    except (TypeError, ValueError):
+        year = None
+    if year and year in hist and hist[year] > 0:
+        return float(hist[year])
+    if year and hist:
+        # Nearest prior year
+        priors = [y for y in hist if y <= year and hist[y] > 0]
+        if priors:
+            return float(hist[max(priors)])
     _, profile = _profile_lookup(sire_name)
     if profile:
         return initial_stud_fee(sire_name, profile)
+    if hist:
+        return float(hist[max(hist)])
     return 0.0
 
 
@@ -483,6 +763,78 @@ def added_value_multiplier(sale_price: float, stud_fee: float) -> Optional[float
     if stud_fee <= 0 or sale_price <= 0:
         return None
     return sale_price / stud_fee
+
+
+# Covering-sire fee brackets for dam added-value stats (locked Maxson bands).
+_ADDED_VALUE_FEE_BRACKETS = [
+    (200_000, None, "≥$200k"),
+    (150_000, 200_000, "$150–200k"),
+    (100_000, 150_000, "$100–150k"),
+    (75_000, 100_000, "$75–100k"),
+    (60_000, 75_000, "$60–75k"),
+    (50_000, 60_000, "$50–60k"),
+    (40_000, 50_000, "$40–50k"),
+]
+
+
+def covering_sire_fee_bracket(fee: float) -> str:
+    """Label for covering-sire stud fee; below $40k uses $5k steps."""
+    if fee is None or fee <= 0:
+        return "unknown"
+    fee = float(fee)
+    for lo, hi, label in _ADDED_VALUE_FEE_BRACKETS:
+        if hi is None and fee >= lo:
+            return label
+        if hi is not None and lo <= fee < hi:
+            return label
+    # $5k steps below $40k
+    step_lo = int(fee // 5000) * 5000
+    step_hi = step_lo + 5000
+    return f"${step_lo // 1000}k–{step_hi // 1000}k"
+
+
+def _added_value_by_fee_bracket(multipliers: List[dict]) -> List[dict]:
+    """Aggregate sale_price/fee multiples and (multiple−1)×fee uplift by fee band."""
+    buckets: Dict[str, List[dict]] = defaultdict(list)
+    for m in multipliers or []:
+        fee = float(m.get("stud_fee") or 0)
+        mult = m.get("multiplier")
+        if mult is None:
+            continue
+        label = covering_sire_fee_bracket(fee)
+        uplift = (float(mult) - 1.0) * fee if fee > 0 else None
+        buckets[label].append(
+            {
+                "multiplier": float(mult),
+                "uplift": uplift,
+                "stud_fee": fee,
+                "price": m.get("price"),
+            }
+        )
+    out = []
+    order = [label for _, _, label in _ADDED_VALUE_FEE_BRACKETS] + ["unknown"]
+    seen = set()
+    for label in list(buckets.keys()):
+        if label not in order:
+            order.append(label)
+    for label in order:
+        rows = buckets.get(label) or []
+        if not rows:
+            continue
+        seen.add(label)
+        mults = [r["multiplier"] for r in rows]
+        uplifts = [r["uplift"] for r in rows if r.get("uplift") is not None]
+        out.append(
+            {
+                "bracket": label,
+                "n": len(rows),
+                "mean_multiple": statistics.mean(mults),
+                "median_multiple": statistics.median(mults),
+                "mean_uplift": statistics.mean(uplifts) if uplifts else None,
+                "median_uplift": statistics.median(uplifts) if uplifts else None,
+            }
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -556,7 +908,7 @@ def _project_specific_mare(dam_name: str, verbose: bool = True) -> dict:
     by_sire: Dict[str, List[float]] = defaultdict(list)
 
     for rec in sales:
-        fee = covering_sire_fee(rec["sire"])
+        fee = covering_sire_fee(rec["sire"], rec.get("catalog_year"))
         mult = added_value_multiplier(rec["price"], fee)
         by_sire[rec["sire"] or "?"].append(rec["price"])
         if mult is not None:
@@ -575,8 +927,13 @@ def _project_specific_mare(dam_name: str, verbose: bool = True) -> dict:
 
     # Career projection if we only have a few foals so far
     projected_career = None
-    if median_price is not None:
-        projected_career = EXPECTED_LIVE_FOALS * median_price
+    bring = median_price if median_price is not None else (
+        statistics.mean(r["price"] for r in sales) if sales else None
+    )
+    if bring is not None:
+        remaining_mid = max(EXPECTED_LIVE_FOALS - len(sales), 0.0)
+        realized = sum(r["price"] for r in sales)
+        projected_career = realized + remaining_mid * bring if sales else EXPECTED_LIVE_FOALS * bring
     elif not sales:
         # Fall back via dam sire / similar ISF
         ds = get_sire_name(dam_name)  # mare's sire = broodmare sire of her foals' dams... wait
@@ -640,7 +997,7 @@ def _project_broodmare_sire_filly(bms_name: str, verbose: bool = True) -> dict:
     prices = []
     for rec in sales:
         prices.append(rec["price"])
-        fee = covering_sire_fee(rec["sire"])
+        fee = covering_sire_fee(rec["sire"], rec.get("catalog_year"))
         mult = added_value_multiplier(rec["price"], fee)
         if mult is not None:
             multipliers.append(
@@ -666,17 +1023,24 @@ def _project_broodmare_sire_filly(bms_name: str, verbose: bool = True) -> dict:
             by_dam[rec["dam"]] += rec["price"]
     mean_per_dam = statistics.mean(by_dam.values()) if by_dam else None
 
+    bring = mean_price if mean_price is not None else median_price
     projected = None
+    projected_low = projected_high = None
     if used_fallback and mean_per_dam is not None:
         # Peer fallback: use observed mean Σ/dam (no full-career scale-up)
         projected = mean_per_dam
-    elif median_price is not None:
-        projected = EXPECTED_LIVE_FOALS * median_price
+        projected_low = projected_high = mean_per_dam
+    elif bring is not None:
+        projected_low = EXPECTED_LIVE_FOALS_LOW * bring
+        projected_high = EXPECTED_LIVE_FOALS_HIGH * bring
+        projected = EXPECTED_LIVE_FOALS * bring
     elif mean_per_dam is not None:
         projected = mean_per_dam
+        projected_low = projected_high = mean_per_dam
 
     # Highlight notebook-style examples (highest / notable multipliers)
     examples = sorted(multipliers, key=lambda m: m["multiplier"], reverse=True)[:8]
+    by_fee_bracket = _added_value_by_fee_bracket(multipliers)
 
     result = {
         "kind": "filly_bms",
@@ -686,15 +1050,20 @@ def _project_broodmare_sire_filly(bms_name: str, verbose: bool = True) -> dict:
         "unique_dams": len(by_dam),
         "mean_progeny_price": mean_price,
         "median_progeny_price": median_price,
+        "broodmare_bring": bring,
         "mean_added_value_multiplier": mean_mult,
         "median_added_value_multiplier": median_mult,
         "mean_total_per_dam": mean_per_dam,
         "expected_live_foals": EXPECTED_LIVE_FOALS,
+        "expected_live_foals_range": (EXPECTED_LIVE_FOALS_LOW, EXPECTED_LIVE_FOALS_HIGH),
         "foals_per_broodmare_range": (FOALS_PER_BROODMARE_LOW, FOALS_PER_BROODMARE_HIGH),
         "live_foal_rate": LIVE_FOAL_RATE,
         "projected_career_bv": projected,
+        "projected_career_bv_low": projected_low,
+        "projected_career_bv_high": projected_high,
         "empirical_bv": mean_per_dam,
         "multiplier_examples": examples,
+        "added_value_by_fee_bracket": by_fee_bracket,
         "used_similar_isf_fallback": used_fallback and fallback_from is not None,
         "fallback_peer": fallback_from,
     }
@@ -951,30 +1320,23 @@ def _colt_vp_summary(colt_sire: str) -> dict:
         return _empty_vp("colt")
 
     low = high = None
-    detail = f"n_similar={n}; SS={raw.get('sire_of_stallions')}"
+    detail = f"n_similar={n}; resolution={raw.get('resolution')}"
 
-    if n >= COLT_RANGE_MIN_SIMILAR:
-        sons = [c["contribution"] for c in contribs if c.get("relation") == "son"]
-        all_sum = point
-        sons_sum = sum(sons) if sons else None
-        # Jackknife band: leave-one-out totals (always ≤ full sum)
-        jack = []
-        for i in range(n):
-            jack.append(all_sum - contribs[i]["contribution"])
-        jack_sorted = sorted(jack)
-        # Spread from conservative (leave out top contributor ≈ jack min)
-        # up through full mean; also widen with sons-only when available.
-        candidates_low = [jack_sorted[0], jack_sorted[len(jack_sorted) // 4]]
-        candidates_high = [all_sum]
-        if sons_sum is not None and len(sons) >= 2:
-            candidates_low.append(sons_sum)
-            candidates_high.append(all_sum)
-        low = min(candidates_low)
-        high = max(candidates_high)
-        # Ensure point sits inside the band
+    peer_evs = sorted(float(x) for x in (raw.get("peer_evs") or []) if x and x > 0)
+    if len(peer_evs) >= 2:
+        low = _percentile(peer_evs, 0.25)
+        high = _percentile(peer_evs, 0.75)
         low = min(low, point)
         high = max(high, point)
-        detail += "; range=jackknife/sons sensitivity"
+        detail += "; range=peer EV p25–p75"
+    elif n >= COLT_RANGE_MIN_SIMILAR:
+        vals = sorted(c["contribution"] for c in contribs if c.get("contribution"))
+        if len(vals) >= 2:
+            low = _percentile(vals, 0.25)
+            high = _percentile(vals, 0.75)
+            low = min(low, point)
+            high = max(high, point)
+            detail += "; range=contrib p25–p75"
 
     return _pack_vp_result(
         kind="colt",
@@ -996,7 +1358,6 @@ def _filly_bms_vp_summary(bms_name: str) -> dict:
     point = float(point)
 
     # Rebuild price list from the same sales source the projector used
-    sales = sales_by_dam_sire(raw.get("fallback_peer") or bms_name)
     if raw.get("used_similar_isf_fallback") and raw.get("fallback_peer"):
         sales = sales_by_dam_sire(raw["fallback_peer"])
     else:
@@ -1007,31 +1368,31 @@ def _filly_bms_vp_summary(bms_name: str) -> dict:
     prices = sorted(r["price"] for r in sales if r.get("price"))
     n = len(prices)
     used_fallback = bool(raw.get("used_similar_isf_fallback"))
-    detail = f"n_sales={n}"
+    detail = f"n_sales={n}; crop={EXPECTED_LIVE_FOALS_LOW:.1f}–{EXPECTED_LIVE_FOALS_HIGH:.1f}"
     if used_fallback:
         detail += f"; peer={raw.get('fallback_peer')}"
 
-    low = high = None
-    # Ranges only from direct BMS evidence — peer fallbacks stay a point estimate
-    # so another sire's auction IQR is not pasted onto a thinly documented line.
+    low = raw.get("projected_career_bv_low")
+    high = raw.get("projected_career_bv_high")
+    # Prefer locked crop × bring range; widen with sale IQR when sample is rich.
     if not used_fallback and n >= FILLY_RANGE_MIN_N:
+        bring = raw.get("broodmare_bring") or statistics.median(prices)
         p25 = _percentile(prices, 0.25)
         p75 = _percentile(prices, 0.75)
-        low = EXPECTED_LIVE_FOALS * p25
-        high = EXPECTED_LIVE_FOALS * p75
-        low = min(low, point)
-        high = max(high, point)
-        detail += "; range=P25–P75 career"
-    elif not used_fallback and n >= 10:
-        p20 = _percentile(prices, 0.20)
-        p80 = _percentile(prices, 0.80)
-        low = EXPECTED_LIVE_FOALS * p20
-        high = EXPECTED_LIVE_FOALS * p80
-        low = min(low, point)
-        high = max(high, point)
-        detail += "; range=P20–P80 career"
+        low = min(EXPECTED_LIVE_FOALS_LOW * bring, EXPECTED_LIVE_FOALS_LOW * p25)
+        high = max(EXPECTED_LIVE_FOALS_HIGH * bring, EXPECTED_LIVE_FOALS_HIGH * p75)
+        detail += "; range=crop×bring + sale IQR"
+    elif low is None or high is None:
+        bring = raw.get("broodmare_bring")
+        if bring:
+            low = EXPECTED_LIVE_FOALS_LOW * bring
+            high = EXPECTED_LIVE_FOALS_HIGH * bring
+            detail += "; range=crop×bring"
+    if low is not None and high is not None:
+        low = min(float(low), point)
+        high = max(float(high), point)
 
-    return _pack_vp_result(
+    packed = _pack_vp_result(
         kind="filly_bms",
         point=point,
         low=low,
@@ -1039,6 +1400,9 @@ def _filly_bms_vp_summary(bms_name: str) -> dict:
         n=n,
         detail=detail,
     )
+    packed["added_value_by_fee_bracket"] = raw.get("added_value_by_fee_bracket") or []
+    packed["mean_added_value_multiplier"] = raw.get("mean_added_value_multiplier")
+    return packed
 
 
 def _mare_vp_summary(mare_name: str, mare_sire: str = "") -> dict:
@@ -1057,26 +1421,30 @@ def _mare_vp_summary(mare_name: str, mare_sire: str = "") -> dict:
 
     low = high = None
     detail = f"n_progeny_sales={n}"
-    if n >= MARE_RANGE_MIN_N:
-        prices = sorted(r["price"] for r in sales)
-        # Empirical total so far as low; scale unfinished careers with percentiles
+    prices = sorted(r["price"] for r in sales) if sales else []
+    bring = statistics.mean(prices) if prices else None
+    # Proven broodmares: remaining crop = (5.6–8.4) − foals already produced (floor 0).
+    rem_low = max(EXPECTED_LIVE_FOALS_LOW - n, 0.0)
+    rem_high = max(EXPECTED_LIVE_FOALS_HIGH - n, 0.0)
+    if n >= MARE_RANGE_MIN_N and bring is not None:
         total = sum(prices)
         p25 = _percentile(prices, 0.25)
         p75 = _percentile(prices, 0.75)
-        # Remaining expected foals beyond those already sold
-        remaining = max(EXPECTED_LIVE_FOALS - n, 0.0)
-        low = total + remaining * p25
-        high = total + remaining * p75
-        if remaining <= 0:
-            low = total
-            high = total
+        low = total + rem_low * p25
+        high = total + rem_high * p75
+        if rem_high <= 0:
+            low = high = total
         low = min(low, point) if point else low
         high = max(high, point) if point else high
-        detail += "; range=realized+remaining P25–P75"
+        detail += f"; range=realized+remaining crop {rem_low:.1f}–{rem_high:.1f}"
+    elif bring is not None:
+        low = rem_low * bring
+        high = rem_high * bring
+        detail += f"; range=remaining crop×bring {rem_low:.1f}–{rem_high:.1f}"
     elif mare_sire:
         return _filly_bms_vp_summary(mare_sire)
 
-    return _pack_vp_result(
+    packed = _pack_vp_result(
         kind="mare",
         point=point,
         low=low,
@@ -1084,6 +1452,9 @@ def _mare_vp_summary(mare_name: str, mare_sire: str = "") -> dict:
         n=n,
         detail=detail,
     )
+    packed["foals_produced"] = n
+    packed["remaining_live_foals_range"] = (rem_low, rem_high)
+    return packed
 
 
 def classify_catalog_role(

@@ -286,61 +286,88 @@ def catalog_nav(catalog_id):
         conn.close()
 
 
+def _sale_price_num(raw):
+    try:
+        return int(float(str(raw or "0").replace(",", "").replace("$", "") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def auctions_for_horses(crosses, limit=40):
-    """Sale rows for similar-cross horses: name, similarity, sale, price."""
+    """Sale rows from placeholderdatabase/sale_results.csv for similar-cross horses.
+
+    Catalog hips are stored as SIRE x DAM labels. Match each cross horse by:
+    (1) cleaned horse_name, or (2) sire+dam pair from the pedigree DB / cross row.
+    """
     if not crosses:
         return []
-    sim_by_key = {}
-    name_by_key = {}
-    ordered_keys = []
+    import placeholder_store
+    import main
+
+    targets = []  # (display_name, similarity, name_key, sire_key, dam_key)
+    seen = set()
     for row in crosses:
         name = row.get("name") or ""
-        key = sales_history.clean_search_string(name)
-        if not key:
+        key = placeholder_store.name_key(name) or sales_history.clean_search_string(name)
+        if not key or key in seen:
             continue
-        similarity = row.get("similarity")
-        previous = sim_by_key.get(key)
-        if key not in sim_by_key:
-            ordered_keys.append(key)
-        if previous is None or (similarity is not None and similarity > previous):
-            sim_by_key[key] = similarity
-            name_by_key[key] = name
-    if not ordered_keys:
+        seen.add(key)
+        sire = row.get("sire") or ""
+        dam = row.get("dam") or ""
+        if not sire or not dam:
+            ped = main.PEDIGREE_DATABASE.get(main.clean_horse_name(name)) or {}
+            sire_node = ped.get("Sire") or {}
+            dam_node = ped.get("Dam") or {}
+            if not sire:
+                sire = sire_node.get("Horse", "") if isinstance(sire_node, dict) else str(sire_node or "")
+            if not dam:
+                dam = dam_node.get("Horse", "") if isinstance(dam_node, dict) else str(dam_node or "")
+        targets.append({
+            "name": name,
+            "similarity": row.get("similarity"),
+            "name_key": key,
+            "sire_key": placeholder_store.name_key(sire),
+            "dam_key": placeholder_store.name_key(dam),
+        })
+    if not targets:
         return []
-    conn = connect()
-    if not conn:
-        return []
-    try:
-        placeholders = ",".join("?" * len(ordered_keys))
-        rows = conn.execute(
-            f"""
-            SELECT l.name, l.name_key, l.hip, l.price_raw, l.price_num, l.is_rna, l.purchaser,
-                   c.title AS sale, c.year
-            FROM lots l
-            JOIN catalogs c ON c.id = l.catalog_id
-            WHERE l.name_key IN ({placeholders}) AND l.is_out = 0
-            """,
-            ordered_keys,
-        ).fetchall()
-    finally:
-        conn.close()
+
+    by_name = {t["name_key"]: t for t in targets}
+    by_pair = {}
+    for t in targets:
+        if t["sire_key"] and t["dam_key"]:
+            by_pair.setdefault((t["sire_key"], t["dam_key"]), t)
+
     out = []
-    for row in rows:
-        key = row["name_key"]
+    for sale in placeholder_store.load_table("sale_results"):
+        if str(sale.get("is_out") or "0") in {"1", "true", "True"}:
+            continue
+        horse = sale.get("horse_name") or ""
+        hk = placeholder_store.name_key(horse)
+        sk = placeholder_store.name_key(sale.get("sire") or "")
+        dk = placeholder_store.name_key(sale.get("dam") or "")
+        match = by_name.get(hk) or by_pair.get((sk, dk))
+        if not match:
+            continue
+        price_num = _sale_price_num(sale.get("price_num"))
+        price_raw = sale.get("price_raw") or ""
+        is_rna = str(sale.get("is_rna") or "0") in {"1", "true", "True"} or (
+            price_raw and "RNA" in str(price_raw).upper()
+        )
         out.append({
-            "name": name_by_key.get(key) or row["name"],
-            "similarity": sim_by_key.get(key),
-            "sale": row["sale"],
-            "year": row["year"],
-            "hip": row["hip"],
-            "price_raw": row["price_raw"],
-            "price_num": row["price_num"],
-            "is_rna": bool(row["is_rna"]),
-            "purchaser": row["purchaser"],
+            "name": match["name"],
+            "similarity": match["similarity"],
+            "sale": sale.get("sale_title") or "",
+            "year": sale.get("sale_year") or "",
+            "hip": sale.get("hip") or "",
+            "price_raw": price_raw,
+            "price_num": price_num,
+            "is_rna": is_rna,
+            "purchaser": sale.get("purchaser") or "",
         })
     out.sort(key=lambda item: (
         -(item["similarity"] if item["similarity"] is not None else -1),
-        -(int(item["year"] or 0)),
+        -(int(str(item["year"] or "0") or 0) if str(item["year"] or "").isdigit() else 0),
         -(item["price_num"] or 0),
     ))
     return out[:limit]

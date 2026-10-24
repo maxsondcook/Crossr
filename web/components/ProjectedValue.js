@@ -16,19 +16,15 @@ function parseMoney(raw) {
   return Number.isFinite(num) && num > 0 ? num : null;
 }
 
-/** True when this hip should never show a breeding-value column (male racing prospects). */
-function isMaleYoungstock(vp, lot) {
+function isGelding(vp, lot) {
   const kind = String(vp?.kind || "").toLowerCase();
-  if (kind === "colt" || kind === "gelding") return true;
-  const role = String(vp?.role || "").toLowerCase();
+  if (kind === "gelding") return true;
   const sex = String(lot?.sex_letter || lot?.sex || "").trim().toUpperCase();
-  if (role === "youngstock" && ["C", "H", "R", "G"].includes(sex.slice(0, 1))) return true;
-  if (/^(COLT|HORSE|RIDGLING|GELDING)/.test(sex)) return true;
-  return false;
+  return sex.slice(0, 1) === "G" || sex.startsWith("GELDING");
 }
 
 function breedingLabel(vp, lot) {
-  if (!vp || isMaleYoungstock(vp, lot)) return "";
+  if (!vp || isGelding(vp, lot)) return "";
   if (vp.breeding_ok === false && !vp.display && vp.point == null) return "";
   if (vp.display) return vp.display;
   if (vp.low != null && vp.high != null && vp.low !== vp.high) {
@@ -59,12 +55,11 @@ function soldLabel(lot) {
 
 function totalLabel(vp, lot, breedingShown, raceShown) {
   const raceN = parseMoney(raceShown || vp?.projected_race_earnings);
-  const allowBreeding = breedingShown && !isMaleYoungstock(vp, lot);
+  const allowBreeding = Boolean(breedingShown) && !isGelding(vp, lot);
   let low = allowBreeding ? Number(vp?.low) : null;
   let high = allowBreeding ? Number(vp?.high) : null;
   let point = allowBreeding ? Number(vp?.point) : null;
   if (allowBreeding && (!Number.isFinite(low) || !Number.isFinite(high))) {
-    // Parse display like "$122,365–$151,921"
     const disp = String(vp?.display || breedingShown || "");
     const parts = disp.split(/[–—-]/).map((p) => parseMoney(p)).filter((n) => n != null);
     if (parts.length >= 2) {
@@ -108,13 +103,13 @@ export default function ProjectedValue({ valueProjector, lot, showSold }) {
       <div className={`pv-grid cols-${Math.min(cols || 1, 4)}`}>
         {showBreeding ? (
           <div className="pv-item" data-pv="breeding">
-            <span className="pv-label">Breeding value</span>
+            <span className="pv-label">Breeding</span>
             <b className="money">{breeding}</b>
           </div>
         ) : null}
         {showRace ? (
           <div className="pv-item" data-pv="race">
-            <span className="pv-label">Projected race value</span>
+            <span className="pv-label">Race</span>
             <b className="money">{race}</b>
           </div>
         ) : null}

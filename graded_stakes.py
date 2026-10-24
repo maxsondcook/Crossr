@@ -40,7 +40,10 @@ _cached_records = {}
 
 def _default_csv_path():
     here = os.path.dirname(os.path.abspath(__file__))
+    # Prefer the canonical 8-CSV sample store; fall back to legacy winners export.
     candidates = [
+        os.path.join(os.getcwd(), "data", "graded_stakes.csv"),
+        os.path.join(here, "data", "graded_stakes.csv"),
         os.path.join(os.getcwd(), STAKES_CSV_NAME),
         os.path.join(here, STAKES_CSV_NAME),
     ]

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { apiGet, apiPost, horseHref } from "../../lib/api";
+import { horseCaps } from "../../lib/display";
 import {
   clearHypomatingSession,
   loadHypomatingSession,
@@ -14,6 +15,7 @@ import { saveHypofoal } from "../../lib/barn";
 import PedigreeChart from "../../components/PedigreeChart";
 import FemaleFamily from "../../components/FemaleFamily";
 import HorseText from "../../components/HorseText";
+import HypofoalDetail from "../../components/HypofoalDetail";
 
 function HypomatingInner() {
   const params = useSearchParams();
@@ -26,8 +28,11 @@ function HypomatingInner() {
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const [openLogic, setOpenLogic] = useState(null);
-  const [lineage, setLineage] = useState(null);
+  const [openLineage, setOpenLineage] = useState(null);
+  const [lineageData, setLineageData] = useState(null);
+  const [lineageLoading, setLineageLoading] = useState(false);
   const [report, setReport] = useState(null);
+  const [reportLoading, setReportLoading] = useState(false);
   const [sireCrosses, setSireCrosses] = useState(null);
   const [yearChoices, setYearChoices] = useState(null);
   const [restored, setRestored] = useState(false);
@@ -41,7 +46,8 @@ function HypomatingInner() {
       setMinFee(saved.minFee || "");
       setMaxFee(saved.maxFee || "");
       setResult(saved.result);
-      setLineage(saved.lineage || null);
+      setOpenLineage(saved.openLineage || null);
+      setLineageData(saved.lineage || null);
       setReport(saved.report || null);
     }
     setRestored(true);
@@ -93,18 +99,53 @@ function HypomatingInner() {
     }
   }
 
-  async function loadLineage(name) {
-    const data = await apiGet(`/api/hypomating/lineage/${encodeURIComponent(name)}${maxFee ? `?max_fee=${maxFee}` : ""}`);
-    setLineage(data);
+  async function toggleLineage(name) {
+    if (openLineage === name) {
+      setOpenLineage(null);
+      return;
+    }
+    setOpenLineage(name);
+    setLineageLoading(true);
+    setError("");
+    try {
+      const data = await apiGet(
+        `/api/hypomating/lineage/${encodeURIComponent(name)}${maxFee ? `?max_fee=${maxFee}` : ""}`,
+      );
+      setLineageData(data);
+      saveHypomatingSession({
+        mare, surface, minFee, maxFee, result, report,
+        lineage: data, openLineage: name,
+      });
+    } catch (e) {
+      setError(e.message);
+      setLineageData(null);
+    } finally {
+      setLineageLoading(false);
+    }
   }
 
   async function makeReport(sire) {
-    const data = await apiPost("/api/hypomating/report", { sire, dam: result.mare });
-    setReport(data);
-    saveHypofoal({ foal_name: data.foal_name, sire, dam: data.dam });
+    if (!result?.mare) return;
+    setReportLoading(true);
+    setError("");
+    try {
+      const data = await apiPost("/api/hypomating/report", { sire, dam: result.mare });
+      setReport(data);
+      saveHypofoal({ foal_name: data.foal_name, sire, dam: data.dam });
+      saveHypomatingSession({
+        mare, surface, minFee, maxFee, result, lineage: lineageData, openLineage, report: data,
+      });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setReportLoading(false);
+    }
   }
 
   const brood = result?.broodmare;
+  const lineageOptions = (lineageData?.options || []).filter(
+    (o) => o.rank != null && String(o.rank).toUpperCase() !== "N/A",
+  );
 
   if (sireFromPage) {
     return (
@@ -112,8 +153,8 @@ function HypomatingInner() {
         <div className="panel">
           <h2>TOP BROODMARE SIRE CROSSES</h2>
           <p className="sub">
-            Daughters of these broodmare sires have produced stakes winners when crossed with{" "}
-            <Link href={horseHref(sireFromPage)}>{sireFromPage}</Link>.
+            DAUGHTERS OF THESE BROODMARE SIRES HAVE PRODUCED STAKES WINNERS WHEN CROSSED WITH{" "}
+            <Link href={horseHref(sireFromPage)}>{horseCaps(sireFromPage)}</Link>.
           </p>
           {loading ? <p className="empty">Loading proven nicks…</p> : null}
           {error ? <p className="error">{error}</p> : null}
@@ -124,17 +165,17 @@ function HypomatingInner() {
             <div key={c.broodmare_sire} className="suggest-card">
               <div>
                 <strong>
-                  {idx + 1}. <Link href={horseHref(c.broodmare_sire)}>{c.broodmare_sire}</Link>
+                  {idx + 1}. <Link href={horseHref(c.broodmare_sire)}>{horseCaps(c.broodmare_sire)}</Link>
                 </strong>
                 <div className="parents">
-                  Broodmare sire rank: {c.rank ? `#${c.rank}` : "Unranked"} · {c.winners?.length || 0} stakes winner{(c.winners?.length || 0) === 1 ? "" : "s"}
+                  BROODMARE SIRE RANK: {c.rank ? `#${c.rank}` : "UNRANKED"} · {c.winners?.length || 0} STAKES WINNER{(c.winners?.length || 0) === 1 ? "" : "S"}
                 </div>
                 <div className="logic">
                   {(c.winners || []).map((w) => (
                     <p key={w.name}>
-                      <Link href={horseHref(w.name)}>{w.name}</Link>
-                      {" "}({w.status})
-                      {w.dam ? <> · out of {w.dam}, a daughter of {c.broodmare_sire}</> : null}
+                      <Link href={horseHref(w.name)}>{horseCaps(w.name)}</Link>
+                      {" "}({horseCaps(w.status)})
+                      {w.dam ? <> · OUT OF {horseCaps(w.dam)}, A DAUGHTER OF {horseCaps(c.broodmare_sire)}</> : null}
                     </p>
                   ))}
                 </div>
@@ -146,36 +187,52 @@ function HypomatingInner() {
     );
   }
 
+  if (report || reportLoading) {
+    return (
+      <HypofoalDetail
+        report={report}
+        loading={reportLoading}
+        error={error}
+        onBack={() => {
+          setReport(null);
+          saveHypomatingSession({
+            mare, surface, minFee, maxFee, result, lineage: lineageData, openLineage, report: null,
+          });
+        }}
+      />
+    );
+  }
+
   return (
     <div>
       {!result ? (
         <form className="wizard" onSubmit={run}>
           <h2>HYPOMATING</h2>
           <div className="field">
-            <label>Enter your broodmare name</label>
+            <label>ENTER YOUR BROODMARE NAME</label>
             <input value={mare} onChange={(e) => setMare(e.target.value)} required />
           </div>
           <div className="field">
-            <label>What is your price range?</label>
+            <label>WHAT IS YOUR PRICE RANGE?</label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <input value={minFee} onChange={(e) => setMinFee(e.target.value)} placeholder="Min stud fee" />
               <input value={maxFee} onChange={(e) => setMaxFee(e.target.value)} placeholder="Max stud fee" />
             </div>
           </div>
           <div className="field">
-            <label>Desired surface</label>
+            <label>DESIRED SURFACE</label>
             <div className="surfaces">
               {["dirt", "turf", "neither"].map((s) => (
                 <label key={s}>
                   <input type="radio" name="surface" checked={surface === s} onChange={() => setSurface(s)} />
-                  {s[0].toUpperCase() + s.slice(1)}
+                  {horseCaps(s)}
                 </label>
               ))}
             </div>
           </div>
           {yearChoices ? (
             <div className="field">
-              <p className="sub">Multiple horses named {yearChoices.name} are in the pedigree database. Which foaling year do you want?</p>
+              <p className="sub">MULTIPLE HORSES NAMED {horseCaps(yearChoices.name)} ARE IN THE PEDIGREE DATABASE. WHICH FOALING YEAR DO YOU WANT?</p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {(yearChoices.years || []).map((year) => (
                   <button
@@ -187,14 +244,14 @@ function HypomatingInner() {
                       setYearChoices(null);
                     }}
                   >
-                    {yearChoices.name} ({year})
+                    {horseCaps(yearChoices.name)} ({year})
                   </button>
                 ))}
               </div>
             </div>
           ) : null}
           {error ? <p className="error">{error}</p> : null}
-          <button className="primary" disabled={loading}>{loading ? "Searching crosses…" : "Find stallions"}</button>
+          <button className="primary" disabled={loading}>{loading ? "SEARCHING CROSSES…" : "FIND STALLIONS"}</button>
         </form>
       ) : (
         <div>
@@ -203,32 +260,18 @@ function HypomatingInner() {
             onClick={() => {
               clearHypomatingSession();
               setResult(null);
-              setLineage(null);
+              setOpenLineage(null);
+              setLineageData(null);
               setReport(null);
             }}
           >
-            ← New search
+            ← NEW SEARCH
           </button>
-          <div className="dash" style={{ marginTop: 12, gridTemplateColumns: "minmax(720px, 1.55fr) minmax(360px, 1fr)" }}>
+          <div className="hypo-results">
             <div className="panel">
-              <h4>BROODMARE · {result.mare}</h4>
-              {result.damsire ? <p className="sub">Damsire: {result.damsire}</p> : null}
+              <h4>BROODMARE · {horseCaps(result.mare)}</h4>
+              {result.damsire ? <p className="sub">DAMSIRE: {horseCaps(result.damsire)}</p> : null}
               <PedigreeChart tree={brood?.pedigree} />
-              <h4 style={{ marginTop: 12 }}>Race record</h4>
-              {(brood?.own?.races || []).length ? (
-                <ul>{brood.own.races.map((r) => <li key={r}>{r}</li>)}</ul>
-              ) : (
-                <p className="empty">No graded stakes record on file for this mare.</p>
-              )}
-              <h4>Progeny</h4>
-              {(brood?.progeny || []).map((p) => (
-                <div key={p.name} className="suggest-card">
-                  <div>
-                    <Link href={horseHref(p.name)}>{p.name}</Link>
-                    <div className="parents">by {p.sire} · {p.class || p.status}</div>
-                  </div>
-                </div>
-              ))}
               <div className="family-panel" style={{ marginTop: 12 }}>
                 <h4>FEMALE FAMILY</h4>
                 <FemaleFamily family={brood?.female_family || []} />
@@ -244,8 +287,10 @@ function HypomatingInner() {
                   <div key={s.name} className="suggest-card suggest-card-stack">
                     <div className="suggest-card-main">
                       <div>
-                        <strong>{s.name}</strong>
-                        <div className="parents">Rank #{s.rank} · {s.stud_fee}</div>
+                        <strong>
+                          <Link href={horseHref(s.name)}>{horseCaps(s.name)}</Link>
+                        </strong>
+                        <div className="parents">RANK #{s.rank} · {horseCaps(s.stud_fee)}</div>
                         {openLogic === s.name ? (
                           <div className="logic">
                             {(s.cross_meta || []).map((m) => {
@@ -275,7 +320,7 @@ function HypomatingInner() {
                                 ].filter(Boolean);
                                 return (
                                   <p key={msg}>
-                                    {tier}: <HorseText text={msg} names={linkNames} />
+                                    {horseCaps(tier)}: <HorseText text={msg} names={linkNames} />
                                   </p>
                                 );
                               })
@@ -289,60 +334,99 @@ function HypomatingInner() {
                           href={horseHref(s.name)}
                           onClick={() => {
                             saveHypomatingSession({
-                              mare, surface, minFee, maxFee, result, lineage, report,
+                              mare, surface, minFee, maxFee, result,
+                              lineage: lineageData, openLineage, report,
                             });
                             recordAppView("/hypomating", "Hypomating");
                           }}
                         >
-                          Profile
+                          SEE PROFILE
                         </Link>
-                        <button className="ghost" onClick={() => setOpenLogic(openLogic === s.name ? null : s.name)}>Logic</button>
-                        <button className="primary" onClick={() => makeReport(s.name)}>Create hypofoal</button>
+                        <button className="ghost" onClick={() => setOpenLogic(openLogic === s.name ? null : s.name)}>LOGIC</button>
+                        <button className="primary" onClick={() => makeReport(s.name)}>CREATE HYPOFOAL</button>
                       </div>
                     </div>
                     {s.has_lineage ? (
                       <div className="suggest-alts">
-                        <span className="meta-label">Alternatives</span>
-                        <button className="ghost" type="button" onClick={() => loadLineage(s.name)}>
-                          Lineage options of {s.name}
+                        <span className="meta-label">ALTERNATIVES</span>
+                        <button className="ghost" type="button" onClick={() => toggleLineage(s.name)}>
+                          LINEAGE OPTIONS OF {horseCaps(s.name)}
                         </button>
+                        {openLineage === s.name ? (
+                          <div className="lineage-inline">
+                            <h4>LINEAGE OPTIONS · {horseCaps(s.name)}</h4>
+                            {lineageLoading ? <p className="empty">Loading lineage…</p> : null}
+                            {!lineageLoading && !lineageOptions.length ? (
+                              <p className="empty">No ranked lineage options in this fee band.</p>
+                            ) : null}
+                            {lineageOptions.map((o) => (
+                              <div key={o.name} className="suggest-card">
+                                <div>
+                                  <Link href={horseHref(o.name)}>{horseCaps(o.name)}</Link>
+                                  <div className="parents">RANK #{o.rank} · {horseCaps(o.stud_fee)}</div>
+                                </div>
+                                <div className="suggest-actions">
+                                  <Link className="ghost" href={horseHref(o.name)}>SEE PROFILE</Link>
+                                  <button className="primary" type="button" onClick={() => makeReport(o.name)}>
+                                    CREATE HYPOFOAL
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
                 ))}
               </div>
               {(result.lineage_groups || []).length ? (
-                <div className="panel" style={{ marginTop: 12 }}>
-                  <h4>ALTERNATIVES</h4>
-                  {(result.lineage_groups || []).map((g) => (
-                    <div key={g.anchor} className="suggest-card">
-                      <div>
-                        <strong>Lineage alternatives of {g.anchor}</strong>
-                        <div className="parents">{g.variant ? "Cross variant" : "Related sires in budget"}</div>
+                <div style={{ marginTop: 12 }}>
+                  {/* OPEN expands ABOVE the ALTERNATIVES list as LINEAGE OPTIONS OF {SIRE}. */}
+                  {openLineage
+                    && (result.lineage_groups || []).some((g) => g.anchor === openLineage)
+                    && !(result.suggestions || []).some((s) => s.name === openLineage) ? (
+                    <div className="panel" style={{ marginBottom: 12 }}>
+                      <h4>LINEAGE OPTIONS OF {horseCaps(openLineage)}</h4>
+                      {lineageLoading ? <p className="empty">Loading lineage…</p> : null}
+                      {!lineageLoading && !lineageOptions.length ? (
+                        <p className="empty">No ranked lineage options in this fee band.</p>
+                      ) : null}
+                      <div className="lineage-inline" style={{ border: "none", padding: 0, background: "transparent" }}>
+                        {lineageOptions.map((o) => (
+                          <div key={o.name} className="suggest-card">
+                            <div>
+                              <Link href={horseHref(o.name)}>{horseCaps(o.name)}</Link>
+                              <div className="parents">RANK #{o.rank} · {horseCaps(o.stud_fee)}</div>
+                            </div>
+                            <div className="suggest-actions">
+                              <Link className="ghost" href={horseHref(o.name)}>SEE PROFILE</Link>
+                              <button className="primary" type="button" onClick={() => makeReport(o.name)}>
+                                CREATE HYPOFOAL
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <button className="ghost" onClick={() => loadLineage(g.anchor)}>Open</button>
                     </div>
-                  ))}
+                  ) : null}
+                  <div className="panel">
+                    <h4>ALTERNATIVES</h4>
+                    {(result.lineage_groups || []).map((g) => (
+                      <div key={g.anchor} className="suggest-card">
+                        <div>
+                          <strong>LINEAGE ALTERNATIVES OF {horseCaps(g.anchor)}</strong>
+                          <div className="parents">{g.variant ? "CROSS VARIANT" : "RELATED SIRES IN BUDGET"}</div>
+                        </div>
+                        <button className="ghost" type="button" onClick={() => toggleLineage(g.anchor)}>
+                          {openLineage === g.anchor ? "CLOSE" : "OPEN"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : null}
-              {lineage ? (
-                <div className="panel" style={{ marginTop: 12 }}>
-                  <h4>LINEAGE OPTIONS · {lineage.stallion}</h4>
-                  {lineage.options.map((o) => (
-                    <div key={o.name} className="suggest-card">
-                      <div>{o.name} · #{o.rank} · {o.stud_fee}</div>
-                      <button className="primary" onClick={() => makeReport(o.name)}>Use</button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {report ? (
-                <div className="panel" style={{ marginTop: 12 }}>
-                  <h4>SAVE HYPOFOAL · {report.foal_name}</h4>
-                  <PedigreeChart tree={report.pedigree} />
-                  <p>Inbreeding coefficient: {report.inbreeding?.coefficient_pct}%</p>
-                </div>
-              ) : null}
+              {error ? <p className="error">{error}</p> : null}
             </div>
           </div>
         </div>
