@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 import threading
 from typing import Any, Dict, Optional
+
+# Statistical sale-price / Boom% model (crossr_core/sales_model.py). Set
+# CROSSR_SALES_MODEL=0 to fall back to the empirical fee-band projection.
+USE_SALES_MODEL = os.environ.get("CROSSR_SALES_MODEL", "1") != "0"
 
 _LOCK = threading.Lock()
 _PRICE_ROWS = None
@@ -167,7 +172,31 @@ def annotate_lot_kinds(
         )
         if kind and not (lot.get("sold_as") or "").strip():
             lot["sold_as"] = kind
+    _annotate_hip_pct(lots)
     return modal
+
+
+def _hip_number(raw: Any) -> Optional[int]:
+    digits = re.search(r"\d+", str(raw or ""))
+    return int(digits.group(0)) if digits else None
+
+
+def _annotate_hip_pct(lots: list) -> None:
+    """Hip position within the catalog (rank / n), matching the sales model's training feature."""
+    hips = [(_hip_number(lot.get("hip")), lot) for lot in lots]
+    nums = sorted(h for h, _ in hips if h is not None)
+    if len(nums) < 2:
+        return
+    n = len(nums)
+    first: Dict[int, int] = {}
+    count: Dict[int, int] = {}
+    for i, h in enumerate(nums, start=1):
+        first.setdefault(h, i)
+        count[h] = count.get(h, 0) + 1
+    for h, lot in hips:
+        if h is not None:
+            # average rank on ties, same as pandas rank(pct=True)
+            lot["hip_pct"] = (first[h] + (count[h] - 1) / 2.0) / n
 
 
 def warm_price_model(force: bool = False) -> Dict[str, Any]:
@@ -397,6 +426,36 @@ def _empirical_market_payload(
         return {"ok": False, "error": str(exc), "sold_as": sold_as, "current_fee": fee}
 
 
+def _sales_model_payload(
+    lot: dict,
+    *,
+    kind: Optional[str],
+    year: Optional[int],
+    foaled: Optional[int],
+    catalog_title: str,
+) -> Optional[Dict[str, Any]]:
+    """Fitted sale-price + Boom% model (None when untrained or not a Y/W lot)."""
+    if not USE_SALES_MODEL or not kind or not year:
+        return None
+    try:
+        from crossr_core import sales_model
+
+        hip_pct = lot.get("hip_pct")
+        return sales_model.predict_lot(
+            sire=lot.get("sire") or "",
+            dam=lot.get("dam") or "",
+            damsire=lot.get("damsire") or lot.get("sire_of_dam") or "",
+            sex=lot.get("sex_letter") or lot.get("sex") or "",
+            kind=kind,
+            sale_year=int(year),
+            birth_year=foaled,
+            catalog_title=catalog_title or lot.get("catalog_title") or "",
+            hip_pct=float(hip_pct) if hip_pct is not None else None,
+        )
+    except Exception:
+        return None
+
+
 def _clamp(v: float, lo: float = -1.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, v))
 
@@ -558,8 +617,36 @@ def project_lot_market(
         else {"ok": False, "error": "not yearling/weanling", "sold_as": sold_as or None}
     )
 
-    # Expected Market Value: empirical fee-band hammer ranges for Y/W.
-    if empirical.get("ok"):
+    model = _sales_model_payload(
+        lot, kind=kind, year=year, foaled=foaled, catalog_title=catalog_title
+    )
+
+    # Expected Market Value: fitted sales model first, else empirical fee-band ranges.
+    if model:
+        hold = (model.get("holdout") or {}).get("price") or {}
+        expected = {
+            "sire_stud_fee": fee,
+            "sale_year": year,
+            "low": model["low"],
+            "high": model["high"],
+            "mid": model["median"],
+            "label": f"{_money(model['low'])} – {_money(model['high'])}",
+            "p10": model["p10"],
+            "p25": model["low"],
+            "p50": model["median"],
+            "p75": model["high"],
+            "p90": model["p90"],
+            "rule": (
+                f"Sales model · median {_money(model['median'])} · p25–p75"
+                + (f" · held-out R² {hold['r2']:.2f}" if hold.get("r2") is not None else "")
+                + (" · in-sample (sale already in training data)" if model.get("in_sample") else "")
+            ),
+            "source": "sales_model",
+            "sold_as": kind,
+            "n_matched": None,
+            "fee_basis": "sire_stud_fee_at_conception",
+        }
+    elif empirical.get("ok"):
         expected = {
             "sire_stud_fee": fee,
             "sale_year": year,
@@ -625,6 +712,30 @@ def project_lot_market(
         }
 
     expected["value_projector"] = value
+    expected["sales_model"] = (
+        {
+            k: model.get(k)
+            for k in (
+                "median",
+                "fair_value",
+                "mean",
+                "low",
+                "high",
+                "p10",
+                "p90",
+                "in_sample",
+                "boom_pct",
+                "variant",
+                "fee_at_cover",
+                "sale_matched",
+                "damsire_used",
+                "trained_through",
+                "holdout",
+            )
+        }
+        if model
+        else None
+    )
     # Alias for locked UI label; keep expected_market key for API compatibility.
     expected["panel"] = "projected_price"
     expected["show_projected_price"] = bool(kind)
@@ -682,6 +793,9 @@ def project_lot_market(
         "sire_history": (price.get("sire_history") if isinstance(price, dict) else None) or {"n": 0},
     }
     prediction = _market_prediction(pred_price, value, fee)
+    # Boom% = P(graded/Group winner); Bust% (never starts) waits on dam produce records.
+    prediction["boom_pct"] = round(model["boom_pct"], 2) if model else None
+    prediction["bust_pct"] = None
     return {
         "expected_market": expected,
         "market_prediction": prediction,
