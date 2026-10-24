@@ -732,6 +732,29 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .cat-g3,
 .cat-g4,
 .cat-g5 { font-size: 1em; }
+/* Expand control and full-screen pedigree view. */
+.ped-tools { display: flex; justify-content: flex-end; margin: -6px 0 8px; }
+.ped-expand { padding: 5px 10px; font-size: 12px; letter-spacing: 0.06em; }
+.ped-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 20px;
+  background: var(--bg);
+}
+.ped-overlay-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ped-overlay-bar h4 { margin: 0; letter-spacing: 0.12em; }
+.ped-overlay-stage { flex: 1; min-height: 0; overflow: hidden; }
+.ped-overlay-chart { transform-origin: top left; }
+.ped-overlay .pedigree-fit,
+.ped-overlay .catalog-ped { width: 100%; max-width: none; }
+.catalog-ped.ped-wide { font-size: 14px; }
+.catalog-ped.ped-wide .cat-cell-inner { flex-direction: row; justify-content: flex-start; align-items: baseline; flex-wrap: wrap; column-gap: 1ch; }
+.catalog-ped.ped-wide .cat-name { flex-direction: row; flex-wrap: wrap; column-gap: 0.6ch; }
+.catalog-ped.ped-wide .cat-cell { padding: 0.15em 1ch; }
 .cat-cell.sire { border-left: 2px solid var(--teal); }
 .cat-cell.dam { border-left: 2px solid var(--pink); }
 /* Hypomating results: pedigree column hugs the chart; suggested stallions take the rest. */

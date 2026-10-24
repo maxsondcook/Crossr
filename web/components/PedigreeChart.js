@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { horseHref } from "../lib/api";
 
@@ -98,7 +98,67 @@ function Cell({ n, className, style, hrefFor }) {
   );
 }
 
+/** Full-screen pedigree: wide columns, scaled so the whole chart fits the window without scrolling. */
+function ExpandedPedigree({ title, onClose, children }) {
+  const stageRef = useRef(null);
+  const chartRef = useRef(null);
+  const [fit, setFit] = useState({ scale: 1, width: null });
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    const chart = chartRef.current;
+    if (!stage || !chart) return undefined;
+    const measure = () => {
+      const stageW = stage.clientWidth;
+      const stageH = stage.clientHeight;
+      chart.style.width = `${stageW}px`;
+      const naturalH = chart.scrollHeight;
+      const scale = naturalH > stageH ? stageH / naturalH : 1;
+      setFit({ scale, width: stageW / scale });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(stage);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div className="ped-overlay" role="dialog" aria-modal="true" aria-label="Expanded pedigree">
+      <div className="ped-overlay-bar">
+        <h4>{title}</h4>
+        <button className="ghost" type="button" onClick={onClose}>Close</button>
+      </div>
+      <div className="ped-overlay-stage" ref={stageRef}>
+        <div
+          ref={chartRef}
+          className="ped-overlay-chart"
+          style={{
+            width: fit.width ? `${fit.width}px` : undefined,
+            transform: `scale(${fit.scale})`,
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PedigreeChart({ tree, showSubject = true, hrefFor = null }) {
+  const [expanded, setExpanded] = useState(false);
   const map = useMemo(() => {
     const m = {};
     flatten(tree, 0, 0, m);
@@ -154,14 +214,14 @@ export default function PedigreeChart({ tree, showSubject = true, hrefFor = null
   const subjectLines = tree.name ? wrapHorseName(tree.name) : [];
   const gridCols = colWidths.map((ch) => `${ch}ch`).join(" ");
 
-  return (
+  const renderChart = (wide) => (
     <div
       className="pedigree-fit"
       style={{
-        "--ped-grid-cols": gridCols,
+        "--ped-grid-cols": wide ? `repeat(${colWidths.length}, minmax(0, 1fr))` : gridCols,
       }}
     >
-      <div className={`catalog-ped gen-5${showSubject ? "" : " no-subject"}`}>
+      <div className={`catalog-ped gen-5${showSubject ? "" : " no-subject"}${wide ? " ped-wide" : ""}`}>
         {showSubject ? (
           <div className="cat-subject">
             <Link
@@ -181,5 +241,24 @@ export default function PedigreeChart({ tree, showSubject = true, hrefFor = null
         {cells}
       </div>
     </div>
+  );
+
+  return (
+    <>
+      <div className="ped-tools">
+        <button className="ghost ped-expand" type="button" onClick={() => setExpanded(true)}>
+          ⤢ Expand
+        </button>
+      </div>
+      {renderChart(false)}
+      {expanded ? (
+        <ExpandedPedigree
+          title={tree.name ? `PEDIGREE · ${String(tree.name).toUpperCase()}` : "PEDIGREE"}
+          onClose={() => setExpanded(false)}
+        >
+          {renderChart(true)}
+        </ExpandedPedigree>
+      ) : null}
+    </>
   );
 }
