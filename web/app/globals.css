@@ -877,7 +877,8 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   flex-direction: column;
   gap: 6px;
 }
-.suggest-alts .ghost { width: 100%; text-align: left; }
+.suggest-alts > .ghost { width: 100%; text-align: left; }
+.lineage-inline .suggest-card { align-items: center; }
 .alts-btn { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .alts-toggle { color: var(--teal); font-size: 13px; letter-spacing: 0.08em; }
 .lineage-inline {
