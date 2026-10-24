@@ -1287,8 +1287,9 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 }
 @media (max-width: 900px) {
   .topbar { flex-wrap: wrap; }
-  /* Row 1: logo + account; row 2: links; row 3: search. */
+  /* Row 1: logo + account; row 2: links with the search box beside them. */
   .topbar > .ghost, .nav-account { order: 1; margin-left: auto; }
-  .nav { order: 2; flex-basis: 100%; justify-content: flex-start; flex-wrap: wrap; gap: 14px; }
-  .nav-search { order: 3; flex-basis: 100%; min-width: 0; }
+  .topbar::after { content: ""; order: 1; flex-basis: 100%; }
+  .nav { order: 2; flex: 0 1 auto; justify-content: flex-start; flex-wrap: wrap; gap: 14px; }
+  .nav-search { order: 3; flex: 1 1 180px; min-width: 0; }
 }
