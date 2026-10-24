@@ -8,7 +8,8 @@ Three services in one Railway project:
 | **api** | FastAPI (`crossr_api`) | `Dockerfile` |
 | **web** | Next.js site | `web/Dockerfile` |
 
-Live project: `vigilant-strength` (production). Build settings live on the
+Live project: `vigilant-strength` (production).
+Site: https://web-production-cbb1f5.up.railway.app · API: https://api-production-f372.up.railway.app/api/health Build settings live on the
 services themselves; Railway no longer accepts `railway.json` config files.
 
 When `DATABASE_URL` is set the app reads and writes Postgres. Without it, it
