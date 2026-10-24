@@ -447,7 +447,7 @@ function HorsePage() {
           {s.career_highlight ? (
             <div className="notes" style={{ marginTop: 16 }}>{s.career_highlight}</div>
           ) : null}
-          <div style={{ marginTop: 16 }}>
+          <div style={{ marginTop: 16, textAlign: "center" }}>
             <Link className="primary" href={data.has_profile ? `/hypomating?sire=${encodeURIComponent(data.name)}` : `/hypomating?mare=${encodeURIComponent(data.name)}`}>
               {data.has_profile ? "Select for hypomating" : "Use as broodmare"}
             </Link>
