@@ -459,7 +459,12 @@ def build_horse_summaries(records):
         race_name = str(r.get('Race Name') or "").strip()
         race_year = r.get('Race Year') or ""
         
-        race_line = f"{h_name} won the {race_year} edition of the {purse} {grade} {race_name} over {clean_dist} on the {surface}"
+        label = "" if grade.upper() == "STAKES" else grade  # "the Sanford Stakes", not "the Stakes Sanford Stakes"
+        race_line = f"{h_name} won the {race_year} edition of the {purse} {label} {race_name}"
+        if clean_dist:
+            race_line += f" over {clean_dist} on the {surface}"
+        elif surface != "track":
+            race_line += f" on the {surface}"
         horses[h_name]['races'].append(" ".join(race_line.split()))
         horses[h_name]['wins'].append({"year": str(race_year), "grade": grade, "race": race_name})
         
