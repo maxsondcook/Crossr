@@ -425,6 +425,14 @@ function HorsePage() {
           {backLabel}
         </button>
         <button className="ghost" type="button" onClick={goBack}>Close</button>
+        <button
+          className="ghost star-btn"
+          type="button"
+          title="Star"
+          onClick={() => { toggleStar(data.name); saveFavorite(data.name); setTick((n) => n + 1); }}
+        >
+          {isStarred(data.name) && tick >= 0 ? "★" : "☆"}
+        </button>
       </div>
       <div>
         <div className="panel">
@@ -596,13 +604,6 @@ function HorsePage() {
             <p className="catalog-empty">No top progeny recorded for this stallion yet.</p>
           )}
         </div>
-      </div>
-
-      <div className="tools">
-        <button onClick={() => { toggleStar(data.name); saveFavorite(data.name); setTick((n) => n + 1); }} title="Star">
-          {isStarred(data.name) && tick >= 0 ? "★" : "☆"}
-        </button>
-        <button type="button" onClick={goBack} title="Go Back">←</button>
       </div>
     </div>
   );

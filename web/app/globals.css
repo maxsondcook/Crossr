@@ -405,7 +405,7 @@ button, input, select { font: inherit; color: inherit; }
 .dash {
   display: grid;
   /* Pedigree column hugs the chart so no dead space sits beside it. */
-  grid-template-columns: max-content minmax(260px, 1fr) minmax(220px, 0.85fr) 48px;
+  grid-template-columns: max-content minmax(260px, 1fr) minmax(220px, 0.85fr);
   gap: 12px;
   align-items: start;
 }
@@ -701,21 +701,6 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .catalog-empty { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 8px 0 0; }
 
 .notes { white-space: pre-wrap; color: #c9d4e5; font-size: 13px; line-height: 1.45; }
-.tools {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: center;
-  padding-top: 8px;
-}
-.tools button {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  cursor: pointer;
-}
 
 .wizard {
   max-width: 720px;
@@ -990,6 +975,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .sales-return-bar .ghost {
   white-space: nowrap;
 }
+.sales-return-bar .star-btn { color: var(--gold); font-size: 18px; line-height: 1; padding: 9px 12px; }
 .phys-row {
   display: flex;
   justify-content: space-between;
