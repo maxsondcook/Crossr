@@ -195,11 +195,15 @@ function HypomatingInner() {
   }
 
   const brood = result?.broodmare;
-  const lineageOptions = (lineageData?.options || []).filter(
-    (o) => o.rank != null && String(o.rank).toUpperCase() !== "N/A",
-  );
   // Lineage groups already shown on a suggestion card open there; only list the rest separately.
   const suggestionNames = new Set((result?.suggestions || []).map((s) => s.name));
+  const suggestionKeys = new Set([...suggestionNames].map((n) => String(n).toUpperCase()));
+  // Alternatives skip stallions already suggested above.
+  const lineageOptions = (lineageData?.options || []).filter(
+    (o) => o.rank != null
+      && String(o.rank).toUpperCase() !== "N/A"
+      && !suggestionKeys.has(String(o.name).toUpperCase()),
+  );
   const extraLineageGroups = (result?.lineage_groups || []).filter((g) => !suggestionNames.has(g.anchor));
 
   if (sireFromPage) {
@@ -442,7 +446,7 @@ function HypomatingInner() {
                       <div className="suggest-card-main">
                         <div>
                           <strong>{horseCaps(g.anchor)}</strong>
-                          <div className="parents">{g.variant ? "CROSS VARIANT" : "RELATED SIRES IN BUDGET"}</div>
+                          <div className="parents">{g.variant ? "PROVEN CROSS · NOT STANDING" : "RELATED SIRES IN BUDGET"}</div>
                         </div>
                         <button className="ghost alts-btn" type="button" onClick={() => toggleLineage(g.anchor)}>
                           <span>ALTERNATIVES</span>
