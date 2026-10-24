@@ -79,7 +79,10 @@ function totalLabel(vp, lot, breedingShown, raceShown) {
   }
   if (Number.isFinite(low) && Number.isFinite(high) && low > 0 && high > 0) {
     const r = raceN || 0;
-    return `${money(low + r)}–${money(high + r)}`;
+    const tLow = low + r;
+    const tHigh = high + r;
+    if (Math.round(tLow) === Math.round(tHigh)) return money(tLow);
+    return `${money(tLow)}–${money(tHigh)}`;
   }
   const base = Number.isFinite(point) && point > 0 ? point : parseMoney(breedingShown);
   if (base != null && raceN != null) return money(base + raceN);
