@@ -220,7 +220,7 @@ function mergeRegionalLists(meta) {
       ...regional.map((r) => ({ key: r.key, label: r.label, type: "money" })),
     ];
   }
-  return combineCropLists({ lists, columns, rows });
+  return splitSalesList(combineCropLists({ lists, columns, rows }));
 }
 
 // First/second/third-crop lists cover one year each, so they show as one list with a Crop column.
@@ -245,6 +245,47 @@ const CROP_LIST_GROUPS = [
   },
 ];
 
+// First-crop-only stats read as mostly blank across three crops, so leave them out.
+const CROP_HIDDEN_KEYS = new Set(["repeat_winners", "current_2yos", "yearling_average"]);
+
+// Yearling sale figures published with the AEI list get their own Sales Results list.
+const AEI_LIST = "leading_sires_by_aei";
+const SALES_LIST = "yearling_sales_results";
+const SALES_KEYS = [
+  "lifetime_yearlings_sold",
+  "lifetime_yearling_average",
+  "yearling_window",
+  "window_yearlings_sold",
+  "window_yearling_average",
+];
+
+const SALES_LABELS = {
+  lifetime_yearlings_sold: "Lifetime Sold",
+  lifetime_yearling_average: "Lifetime Avg",
+  yearling_window: "Window",
+  window_yearlings_sold: "Window Sold",
+  window_yearling_average: "Window Avg",
+};
+
+function splitSalesList(meta) {
+  const aeiCols = meta.columns[AEI_LIST];
+  if (!aeiCols || !aeiCols.some((c) => SALES_KEYS.includes(c.key))) return meta;
+  const columns = { ...meta.columns };
+  columns[AEI_LIST] = aeiCols.filter((c) => !SALES_KEYS.includes(c.key));
+  columns[SALES_LIST] = [
+    { key: "year", label: "Year", type: "number" },
+    ...aeiCols
+      .filter((c) => SALES_KEYS.includes(c.key))
+      .map((c) => ({ ...c, label: SALES_LABELS[c.key] || c.label })),
+  ];
+  const rows = { ...meta.rows, [SALES_LIST]: meta.rows[AEI_LIST] || [] };
+  const lists = [...meta.lists];
+  const at = lists.findIndex((l) => l.id === AEI_LIST);
+  if (at === -1) return meta;
+  lists.splice(at + 1, 0, { ...lists[at], id: SALES_LIST, label: "Yearling Sales Results" });
+  return { lists, columns, rows };
+}
+
 function cropGroupFor(listId) {
   return CROP_LIST_GROUPS.find((g) => g.parts.some(([id]) => id === listId)) || null;
 }
@@ -264,6 +305,7 @@ function combineCropLists(meta) {
     for (const [id, crop] of present) {
       for (const row of rows[id] || []) merged.push({ ...row, crop, crop_num: parseInt(crop, 10) });
       for (const col of columns[id] || []) {
+        if (CROP_HIDDEN_KEYS.has(col.key)) continue;
         if (!cols.some((c) => c.key === col.key)) cols.push(col);
       }
     }
