@@ -153,7 +153,7 @@ function SalesPage() {
   const [loadingPast, setLoadingPast] = useState(false);
   const [loadingUpcoming, setLoadingUpcoming] = useState(false);
   const [loadingCatalogs, setLoadingCatalogs] = useState(false);
-  const [pastOpen, setPastOpen] = useState(true);
+  const [pastOpen, setPastOpen] = useState(false);
   const [upcomingOpen, setUpcomingOpen] = useState(true);
   const [catalog, setCatalog] = useState(null);
   const [lots, setLots] = useState([]);
@@ -506,12 +506,17 @@ function SalesPage() {
     router.replace(next, { scroll: false });
   }, [salesReturn, pathname, router]);
 
+  // Past and upcoming are alternatives: opening one closes the other.
   function togglePastSection() {
-    setPastOpen((open) => !open);
+    const next = !pastOpen;
+    setPastOpen(next);
+    if (next) setUpcomingOpen(false);
   }
 
   function toggleUpcomingSection() {
-    setUpcomingOpen((open) => !open);
+    const next = !upcomingOpen;
+    setUpcomingOpen(next);
+    if (next) setPastOpen(false);
   }
 
   function openCatalog(item, nextMode) {
