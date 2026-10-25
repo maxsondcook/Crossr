@@ -118,7 +118,7 @@ def load_and_process_csv(file_path: Path, gender_filter=None, sort_choice="3", h
             consign_key = next((headers[k] for k in ['property line', 'consignor', 'consigned by', 'seller'] if k in headers), None)
             damsire_key = next((headers[k] for k in ['sire of dam', 'damsire', 'broodmare sire'] if k in headers), None)
             barn_key = next((headers[k] for k in ['barn'] if k in headers), None)
-            foaled_loc_key = next((headers[k] for k in ['foaled'] if k in headers), None)
+            foaled_loc_key = next((headers[k] for k in ['foaled', 'state foaled'] if k in headers), None)
             sold_as_key = next((headers[k] for k in ['sold as', 'sold as description'] if k in headers), None)
 
             is_fasig = "fasig" in file_name_lower or "sale title" in headers
