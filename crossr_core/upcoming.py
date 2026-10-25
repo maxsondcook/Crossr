@@ -328,7 +328,8 @@ def filter_lots(lots, sex=None, color=None, max_price=None, height=None, starred
             if not coat or str(color).lower() not in coat:
                 continue
         if max_price not in (None, ""):
-            price = lot.get("price_num") or 0
+            # Upcoming lots have no hammer price yet: use the Expected Market price the API attached.
+            price = lot.get("price_num") or lot.get("filter_price") or 0
             if not price or price > float(max_price):
                 continue
         if height:

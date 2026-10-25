@@ -116,6 +116,21 @@ sales_lots 399,590   pedigrees 39,213
 `https://<api domain>/api/health` should return `"backend": "postgres"` and
 `"sales_index": true`.
 
+## End-to-end checks
+
+`tests/e2e` drives the whole API in-process against a test database and fails
+on any empty panel: stallion profiles (American Pharoah, Into Mischief, Not This
+Time, Justify, Curlin, Essential Quality, Tapit, Flightline, Sierra Leone,
+Fierceness), hypomating for Virginia Key, Sippican Harbor, Off Topic and Stage
+Magic, and every hip of a made-up upcoming "Saratoga Sale (2026)" built from
+the real 2026 Fasig-Tipton Saratoga catalog. It refuses to run against
+production.
+
+```bash
+export DATABASE_URL="postgresql://...:.../crossr_dev"
+python3 -m pytest tests/e2e -q -rf
+```
+
 ## Scrapers
 
 With `DATABASE_URL` exported, the pipeline (`scripts/pipeline/run.py`) and the
