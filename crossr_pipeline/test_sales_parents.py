@@ -74,3 +74,19 @@ def test_pick_row_merges_duplicate_queue_rows():
         {"id": "2", "sire": "Holy Bull", "foal_year": None, "status": "pending"},
     ]
     assert sp.pick_row(rows, item)[0]["id"] == "1"
+
+
+def test_breeding_stallion_name_drops_southern_count_only():
+    from crossr_pipeline.breeding_import import stallion_name
+
+    assert stallion_name("Gun Runner (6)") == "Gun Runner"
+    assert stallion_name("Candy Ride (ARG)") == "Candy Ride (ARG)"
+
+
+def test_backfill_maps_equibase_values():
+    from crossr_pipeline.sales_backfill import is_named, map_color, map_place
+
+    assert map_color("DK B/BR") == "DB/BR" and map_color("Gr/ro") == "GR/RO"
+    assert map_place("KY") == "KENTUCKY" and map_place("IRE") == "IRE"
+    assert is_named("Adventurous Lady")
+    assert not is_named("Hip 0002") and not is_named("TAPIT x ZAGORA '24") and not is_named("2025-QUARIA DREAM")

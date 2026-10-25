@@ -57,13 +57,58 @@ def cmd_scrape(args) -> int:
 def cmd_sales_import(args) -> int:
     from crossr_pipeline.sales_import import sales_import
 
+    from crossr_pipeline.breeding_import import breeding_import
+    from crossr_pipeline.sales_backfill import sales_backfill
+
     conn = _conn()
     try:
-        result = sales_import(conn, force=set(args.force or []), dry_run=args.dry_run)
+        force = set(args.force or [])
+        if args.force_all:
+            from crossr_pipeline.sales_import import SALES_DIR
+            force = {path.name for path in SALES_DIR.glob("*.csv")}
+        result = sales_import(conn, force=force, dry_run=args.dry_run)
+        print(result)
+        print(breeding_import(conn, dry_run=args.dry_run))
+        if result["changed"] and not args.dry_run:
+            print("Backfilling blank sales fields...", flush=True)
+            sales_backfill(conn)
     finally:
         conn.close()
-    print(result)
     return 1 if result["failed"] else 0
+
+
+def cmd_sales_backfill(args) -> int:
+    from crossr_pipeline.sales_backfill import counts, sales_backfill
+
+    conn = _conn()
+    try:
+        before = counts(conn)
+        sales_backfill(conn)
+        after = counts(conn)
+    finally:
+        conn.close()
+    _print_counts(before, after)
+    return 0
+
+
+def cmd_breeding_import(args) -> int:
+    from crossr_pipeline.breeding_import import breeding_import
+
+    conn = _conn()
+    try:
+        print(breeding_import(conn, dry_run=args.dry_run))
+    finally:
+        conn.close()
+    return 0
+
+
+def _print_counts(before: dict, after: dict) -> None:
+    fields = ("damsire", "color", "foaled_location", "birth_year_blank", "mare_bad_year")
+    print(f"{'year':<6}{'lots':>7}  " + "  ".join(f"{f:>22}" for f in fields))
+    for year in sorted(after):
+        b, a = before.get(year, {}), after[year]
+        cells = [f"{b.get(f, 0):>9} -> {a[f]:<9}" for f in fields]
+        print(f"{year:<6}{a['lots']:>7}  " + "  ".join(f"{c:>22}" for c in cells))
 
 
 def cmd_racing_post(args) -> int:
@@ -164,7 +209,15 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("sales-import", help="Load new/changed sales_data/*.csv into sales_lots")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--force", nargs="*", metavar="FILE", help="Reload these file names even if unchanged")
+    p.add_argument("--force-all", action="store_true", help="Reload every sales file (after a parser change)")
     p.set_defaults(func=cmd_sales_import)
+
+    p = sub.add_parser("sales-backfill", help="Fill blank damsire/color/foaled/birth year in sales_lots from our other data")
+    p.set_defaults(func=cmd_sales_backfill)
+
+    p = sub.add_parser("breeding-import", help="Load live_foal_statistics/*.csv years into breeding_seasons")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_breeding_import)
 
     p = sub.add_parser("racing-post", help="Racing Post fee history for every sire (adds missing stud_fees years)")
     p.add_argument("--delay", type=float, default=3.0, help="Seconds between page loads (plus jitter)")

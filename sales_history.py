@@ -119,6 +119,7 @@ def load_and_process_csv(file_path: Path, gender_filter=None, sort_choice="3", h
             damsire_key = next((headers[k] for k in ['sire of dam', 'damsire', 'broodmare sire'] if k in headers), None)
             barn_key = next((headers[k] for k in ['barn'] if k in headers), None)
             foaled_loc_key = next((headers[k] for k in ['foaled'] if k in headers), None)
+            sold_as_key = next((headers[k] for k in ['sold as', 'sold as description'] if k in headers), None)
 
             is_fasig = "fasig" in file_name_lower or "sale title" in headers
 
@@ -148,13 +149,20 @@ def load_and_process_csv(file_path: Path, gender_filter=None, sort_choice="3", h
                     elif "weanling" in file_name_lower:
                         extracted_birth_year = str(catalog_year)
                     else:
+                        sold_as = safe_str(row.get(sold_as_key, "")).strip().upper() if sold_as_key else ""
                         sex_upper = raw_sex.upper()
-                        if "WEANLING" in sex_upper:
+                        age_hint = f"{sold_as} {sex_upper}"
+                        if "WEANLING" in age_hint:
                             extracted_birth_year = str(catalog_year)
-                        elif "YEARLING" in sex_upper:
+                        elif "YEARLING" in age_hint:
                             extracted_birth_year = str(catalog_year - 1)
-                        elif "2YO" in sex_upper or "TWO-YEAR-OLD" in sex_upper:
+                        elif "2YO" in age_hint or "TWO-YEAR-OLD" in age_hint or "TWO YEAR OLD" in age_hint:
                             extracted_birth_year = str(catalog_year - 2)
+                        elif sold_as or sex_upper in ("M", "H", "MARE", "HORSE", "STALLION"):
+                            # Broodmares, prospects, stallions and horses of
+                            # racing age: the file gives no age, so leave the
+                            # year blank rather than guess a yearling's.
+                            extracted_birth_year = ""
                         else:
                             extracted_birth_year = str(catalog_year - 1)
 
