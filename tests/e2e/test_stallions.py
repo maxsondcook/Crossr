@@ -94,6 +94,8 @@ def test_stud_card(api, name):
 
 @pytest.mark.parametrize("name", NAMES)
 def test_mares_bred_last_season(api, name):
+    if STALLIONS[name]["entered_stud"] > LAST_SEASON:
+        pytest.skip(f"{name} entered stud after {LAST_SEASON}")
     p = profile(api, name)
     rows = {row.get("year"): row for row in p.get("stud_book") or []}
     row = rows.get(LAST_SEASON) or {}
