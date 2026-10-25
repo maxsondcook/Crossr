@@ -8,6 +8,7 @@ keep serving while scrapes merge new rows.
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 import threading
@@ -339,10 +340,27 @@ def graded_stakes_winners() -> list[dict]:
     return records
 
 
+_FEE_HISTORY: tuple[object, dict[str, dict[int, int]]] | None = None
+
+
 def stud_fee_history() -> dict[str, dict[int, int]]:
-    """stallion name_key -> {year: fee_int} from stud_fees."""
+    """stallion name_key -> {year: fee in US dollars} from stud_fees.
+
+    Cached per table version: catalog pages call this once per lot. Foreign fees
+    are converted (JPY 4,000,000 is ~$25,850, not $4,000,000); fees in currencies
+    without a rate and "Private" rows are left out. Where two sources list the
+    same season, a dollar fee wins.
+    """
+    global _FEE_HISTORY
+    from crossr_core.fees import parse_fee, usd_estimate
+
+    rows = load_table("stud_fees")
+    version = _MTIME.get("stud_fees")
+    if _FEE_HISTORY is not None and _FEE_HISTORY[0] == version:
+        return _FEE_HISTORY[1]
     out: dict[str, dict[int, int]] = {}
-    for row in load_table("stud_fees"):
+    dollars: set[tuple[str, int]] = set()
+    for row in rows:
         key = name_key(row.get("Stallion") or "")
         if not key:
             continue
@@ -350,12 +368,14 @@ def stud_fee_history() -> dict[str, dict[int, int]]:
             year = int(str(row.get("Year") or "").strip())
         except ValueError:
             continue
-        fee_raw = str(row.get("Stud Fee") or "")
-        digits = re.sub(r"[^\d]", "", fee_raw)
-        if not digits:
+        amount, currency = parse_fee(row.get("Stud Fee"))
+        fee = usd_estimate(amount, currency)
+        if not fee or ((key, year) in dollars and currency != "USD"):
             continue
-        fee = int(digits)
+        if currency == "USD":
+            dollars.add((key, year))
         out.setdefault(key, {})[year] = fee
+    _FEE_HISTORY = (version, out)
     return out
 
 
@@ -422,8 +442,51 @@ def broodmare_sire_rows(year: int | None = None) -> list[dict]:
     return out
 
 
+_FOAL_YEARS: tuple[object, dict[str, list[int]]] | None = None
+
+
+def _foal_years_by_key() -> dict[str, list[int]]:
+    """name_key -> foaling years of every race_horses row with that name (cached per table version)."""
+    global _FOAL_YEARS
+    rows = load_table("race_horses")
+    version = _MTIME.get("race_horses")
+    if _FOAL_YEARS is not None and _FOAL_YEARS[0] == version:
+        return _FOAL_YEARS[1]
+    out: dict[str, list[int]] = {}
+    for row in rows:
+        key = name_key(row.get("name_key") or row.get("display_name") or "")
+        try:
+            y = int(str(row.get("foal_year") or "").strip())
+        except ValueError:
+            continue
+        if key:
+            out.setdefault(key, []).append(y)
+    _FOAL_YEARS = (version, out)
+    return out
+
+
+def _foal_year_for_stud(years: list[int], first_season: int) -> int:
+    """The namesake old enough to stand in first_season (a sire is 3+ at his first season)."""
+    fits = [y for y in set(years) if y <= first_season - 2]
+    return max(fits) if fits else 0
+
+
+def stallion_foal_year(name: str, first_season: int) -> int:
+    """Foaling year of the stallion called name who stood by first_season (0 if unknown)."""
+    return _foal_year_for_stud(_foal_years_by_key().get(name_key(name), []), first_season)
+
+
 def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
-    """Active stud cards derived from stud_fees (+ latest breeding_seasons)."""
+    """Active stud cards derived from stud_fees (+ latest breeding_seasons).
+
+    "Stud Duty Year" is the FIRST season in stud_fees or breeding_seasons (entered stud). The fee is
+    from the latest season up to the current year: announced future seasons
+    (Racing Post lists next year's fees) never count as the current fee.
+    "Latest Season" is that season's year.
+    """
+    from crossr_core.fees import format_fee, parse_fee, usd_estimate
+
+    current_year = datetime.date.today().year
     fees = load_table("stud_fees")
     by_stallion: dict[str, list] = {}
     for row in fees:
@@ -432,12 +495,14 @@ def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
             continue
         by_stallion.setdefault(key, []).append(row)
     breeding = {}
+    first_bred: dict[str, int] = {}
     for row in load_table("breeding_seasons"):
         key = name_key(row.get("stallion") or "")
         try:
             y = int(str(row.get("breeding_year") or "").strip())
         except ValueError:
             continue
+        first_bred[key] = min(y, first_bred.get(key, y))
         prior = breeding.get(key)
         if prior is None or y > prior[0]:
             breeding[key] = (y, row)
@@ -454,6 +519,7 @@ def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
         prior = ranks.get(key)
         if prior is None or y > prior[0]:
             ranks[key] = (y, r)
+    foal_years = _foal_years_by_key()
 
     profiles = {}
     for key, rows in by_stallion.items():
@@ -466,19 +532,33 @@ def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
             dated.append((y, row))
         if not dated:
             continue
+        # A mares-bred report counts as a season even when no fee was listed.
+        first_season = min([y for y, _ in dated] + ([first_bred[key]] if key in first_bred else []))
         if year is not None:
-            dated = [pair for pair in dated if pair[0] == year] or dated
-        y, row = max(dated, key=lambda p: p[0])
-        fee_digits = re.sub(r"[^\d]", "", str(row.get("Stud Fee") or ""))
-        fee = int(fee_digits) if fee_digits else 0
+            pool = [pair for pair in dated if pair[0] == year]
+        else:
+            pool = [pair for pair in dated if pair[0] <= current_year]
+        pool = pool or dated
+        y = max(p[0] for p in pool)
+        # Same season from two sources: prefer a row with a fee (and in dollars).
+        season_rows = [r for yy, r in pool if yy == y]
+        row = max(
+            season_rows,
+            key=lambda r: (parse_fee(r.get("Stud Fee"))[0] is not None, parse_fee(r.get("Stud Fee"))[1] == "USD"),
+        )
+        amount, currency = parse_fee(row.get("Stud Fee"))
+        fee = usd_estimate(amount, currency) or 0
         mb = breeding.get(key)
         rank = ranks.get(key)
         display = (row.get("Stallion") or "").strip()
         profiles[display] = {
             "Farm": row.get("Farm") or "",
-            "Year Born": 0,
-            "Stud Duty Year": y,
+            "Year Born": _foal_year_for_stud(foal_years.get(key, []), first_season),
+            "Stud Duty Year": first_season,
+            "Latest Season": y,
             "Stud Fee": fee,
+            "Stud Fee Display": format_fee(row.get("Stud Fee")) or "",
+            "Stud Fee Currency": currency or "",
             "Status": "active",
             "Surface": "",
             "Height": "N/A",

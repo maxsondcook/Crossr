@@ -120,6 +120,14 @@ def _profile_by_key(profiles):
     return out
 
 
+def _roster_foal_year(name, data, stud_year):
+    """Profile year, else race_horses; None when neither knows the horse."""
+    from crossr_core import sample_db
+
+    year = _intish((data or {}).get("Year Born"))
+    return year or sample_db.stallion_foal_year(name, stud_year or 2026) or None
+
+
 def build_stallion_roster(profiles=None):
     """Cheap list cache: 2026 mares-bred roster + profile/CSV parents. No pedigree scans."""
     global _STALLION_ROSTER
@@ -155,7 +163,8 @@ def build_stallion_roster(profiles=None):
             "crop": crop_l,
             "major_wins": (data or {}).get("Major Wins", ""),
         }
-        fee_display = f"${fee_n:,}" if fee_n > 0 else "Private / N/A"
+        fee_display = (data or {}).get("Stud Fee Display") if fee_n > 0 else None
+        fee_display = fee_display or (f"${fee_n:,}" if fee_n > 0 else "Private / N/A")
         roster.append({
             "name": display or row["name"],
             "key": key,
@@ -164,7 +173,7 @@ def build_stallion_roster(profiles=None):
             "farm": farm_title,
             "stud_fee": fee_display,
             "stud_fee_num": fee_n,
-            "year_foaled": (data or {}).get("Year Born"),
+            "year_foaled": _roster_foal_year(display or row["name"], data, stud_year),
             "entered_stud": stud_year,
             "rank": rank if rank is not None else 9999,
             "crop": crop_l,
@@ -669,6 +678,38 @@ def _slot_overlap_percent(tree_a, tree_b, cache):
     return int(round(min(100.0, 100.0 * matches / len(both))))
 
 
+def _blood_weights(tree, cache, max_depth=5):
+    """Horse name -> share of blood (1 for the horse itself, 1/2 per parent, ...) over 5 generations."""
+    weights = {}
+
+    def walk(node, depth):
+        name = _horse_id(node).partition("|")[0]
+        if not name:
+            return
+        weights[name] = weights.get(name, 0.0) + 0.5 ** depth
+        if depth < max_depth:
+            for parent in _parents_of(node, cache):
+                walk(parent, depth + 1)
+
+    walk(tree, 0)
+    return weights
+
+
+def _shared_blood(tree_a, tree_b, cache):
+    """Position-independent kinship: percent of 5-generation blood both horses carry,
+    plus the closest shared ancestors. A sire and son, or two horses sharing
+    Mr. Prospector in different slots, score here but not in the slot overlap."""
+    wa = _blood_weights(tree_a, cache)
+    wb = _blood_weights(tree_b, cache)
+    total = (sum(wa.values()) + sum(wb.values())) / 2
+    if not total:
+        return 0, []
+    shared = {name: min(wa[name], wb[name]) for name in wa.keys() & wb.keys()}
+    percent = int(round(min(100.0, 100.0 * sum(shared.values()) / total)))
+    top = sorted(shared, key=lambda n: -shared[n])[:5]
+    return percent, top
+
+
 def _full_siblings(sire_a, dam_a, sire_b, dam_b):
     return bool(
         _horse_id(sire_a)
@@ -678,8 +719,15 @@ def _full_siblings(sire_a, dam_a, sire_b, dam_b):
     )
 
 
-def pedigree_similarity(a=None, b=None, a_tree=None, b_tree=None, a_sire=None, a_dam=None, b_sire=None, b_dam=None):
-    """Percent of matching 5-generation ancestor slots; sibling floors as a safety net."""
+def pedigree_similarity(
+    a=None, b=None, a_tree=None, b_tree=None, a_sire=None, a_dam=None, b_sire=None, b_dam=None, kinship=False
+):
+    """Percent of matching 5-generation ancestor slots; sibling floors as a safety net.
+
+    kinship=True (the standalone compare) also scores shared blood regardless of
+    slot, so two established stallions or a sire and son don't read 0%.
+    Reports keep the slot score: their filters are tuned to it.
+    """
     tree_a = resolve_pedigree_tree(name=a, tree=a_tree, sire=a_sire, dam=a_dam)
     tree_b = resolve_pedigree_tree(name=b, tree=b_tree, sire=b_sire, dam=b_dam)
     if not _horse_id(tree_a) or not _horse_id(tree_b):
@@ -709,12 +757,29 @@ def pedigree_similarity(a=None, b=None, a_tree=None, b_tree=None, a_sire=None, a
     elif same_sire:
         percent = max(percent, 50)
         label = "Same sire"
-    return {
+    result = {
         "percent": percent,
         "label": label,
         "a": a or (tree_a.get("Horse") if isinstance(tree_a, dict) else None),
         "b": b or (tree_b.get("Horse") if isinstance(tree_b, dict) else None),
     }
+    if kinship:
+        shared, ancestors = _shared_blood(tree_a, tree_b, cache)
+        result["slot_percent"] = percent
+        result["shared_blood_percent"] = shared
+        result["shared_ancestors"] = [a_name.title() for a_name in ancestors]
+        if shared > percent:
+            result["percent"] = shared
+            if not label:
+                a_name = _horse_id(tree_a).partition("|")[0]
+                b_name = _horse_id(tree_b).partition("|")[0]
+                if a_name in _blood_weights(tree_b, cache, max_depth=1):
+                    result["label"] = "Parent and offspring"
+                elif b_name in _blood_weights(tree_a, cache, max_depth=1):
+                    result["label"] = "Parent and offspring"
+                elif ancestors:
+                    result["label"] = "Shared ancestors"
+    return result
 
 
 def _same_dam_stakes_rows(dam_name, reference_tree=None, exclude_names=None):
@@ -1222,15 +1287,9 @@ def search_horses(query, limit=15, profiles=None):
 
 
 def _format_stud_fee(raw):
-    text = str(raw or "").strip()
-    if not text:
-        return None
-    if text.lower() == "private":
-        return "Private"
-    usd = re.match(r"^USD\s*([\d,]+)$", text, re.I)
-    if usd:
-        return f"${int(usd.group(1).replace(',', '')):,}"
-    return text
+    from crossr_core.fees import format_fee
+
+    return format_fee(raw)
 
 
 def _intish(val):
@@ -1270,7 +1329,11 @@ def load_book_stats():
         year = _intish(row.get("Year"))
         if not name or not year:
             continue
-        fees.setdefault(name, {})[year] = _format_stud_fee(row.get("Stud Fee"))
+        label = _format_stud_fee(row.get("Stud Fee"))
+        prior = fees.setdefault(name, {}).get(year)
+        # Two sources for one season: keep a real amount over "Private" / "N/A".
+        if not (prior and re.search(r"\d", prior) and not re.search(r"\d", label or "")):
+            fees[name][year] = label
 
     mares = {}
     for row in sample_db.load_table("breeding_seasons"):
@@ -1936,7 +1999,7 @@ def get_horse_profile(search_name, profiles=None):
         birth_year = data.get("Year Born", current_year)
         raw_fee = data.get("Stud Fee", 0)
         if isinstance(raw_fee, int) and raw_fee > 0:
-            stud_fee_display = f"${raw_fee:,}"
+            stud_fee_display = data.get("Stud Fee Display") or f"${raw_fee:,}"
         elif str(raw_fee).strip().upper() == "N/A" or raw_fee == 0:
             stud_fee_display = "Private / N/A"
         else:

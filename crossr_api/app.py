@@ -278,6 +278,7 @@ def pedigree_similarity(
         a_dam=a_dam or None,
         b_sire=b_sire or None,
         b_dam=b_dam or None,
+        kinship=True,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Could not compare pedigrees")

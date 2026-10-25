@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import math
 import os
 import re
@@ -271,7 +272,9 @@ def resolve_stud_fee(
                 priors = [y for y in hist if y <= year and hist[y] > 0]
                 fee = hist[max(priors)] if priors else None
         elif hist:
-            fee = hist[max(hist)]
+            # Latest season so far: announced future fees aren't the current fee.
+            current = [y for y in hist if y <= datetime.date.today().year] or list(hist)
+            fee = hist[max(current)]
     except Exception:
         fee = None
     if fee and fee > 0:

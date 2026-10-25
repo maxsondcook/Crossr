@@ -522,7 +522,7 @@ def get_profile_meta(name, all_profiles):
     raw_fee = profile.get("Stud Fee", 0)
     try:
         fee_num = int(str(raw_fee).replace(",", "").replace("$", ""))
-        fee_str = f"${fee_num:,.0f}"
+        fee_str = profile.get("Stud Fee Display") or f"${fee_num:,.0f}"
     except ValueError:
         fee_num = 0
         fee_str = "$0" if not raw_fee else str(raw_fee)
@@ -532,9 +532,9 @@ def get_profile_meta(name, all_profiles):
     # SIMPLIFICATION RULE: Check if horse is in profiles AND status is not pensioned
     is_pensioned = str(profile.get("Status", "")).strip().lower() == "pensioned"
     # Only suggest stallions standing now: a published fee and a recent stud season.
-    # Dead or retired sires keep "active" status but lose their fee / duty year.
+    # Dead or retired sires keep "active" status but lose their fee / latest season.
     try:
-        duty_year = int(str(profile.get("Stud Duty Year") or "").strip()[:4])
+        duty_year = int(str(profile.get("Latest Season") or profile.get("Stud Duty Year") or "").strip()[:4])
     except ValueError:
         duty_year = None
     is_standing = fee_num > 0 and (duty_year is None or duty_year >= datetime.date.today().year - 1)
