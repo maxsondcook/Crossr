@@ -1,15 +1,13 @@
-"""Single entry point for the pedigree map.
+"""Single entry point for the pedigree map: the ``pedigrees`` table in Postgres.
 
-Railway Postgres (pedigrees table) when DATABASE_URL is set, otherwise the local
-pedigrees_database.py module. Callers get the same {key: tree} dict either way.
+Callers get a {key: tree} dict (a CompactPedigreeMap in the API). The old
+pedigrees_database.py file is only read by scripts/load_railway.py.
 """
 
 from __future__ import annotations
 
-import importlib
 import json
 import os
-import sys
 import threading
 from collections import OrderedDict
 
@@ -114,47 +112,27 @@ _cache: dict | None = None
 _cache_version: float | None = None
 
 
-def _pg():
+def get_pedigree_map(refresh: bool = False) -> dict:
+    """Return the shared pedigree map (treat as read-only; copy before mutating).
+
+    Reloads when the pedigrees table version changes.
+    """
+    global _cache, _cache_version
     from crossr_core import railway_db
 
-    return railway_db if railway_db.enabled() else None
-
-
-def _from_module(refresh: bool) -> dict:
-    import pedigrees_database  # 49 MB module, imported lazily
-
-    if refresh and "pedigrees_database" in sys.modules:
-        pedigrees_database = importlib.reload(sys.modules["pedigrees_database"])
-    data = getattr(pedigrees_database, "pedigree_map", {})
-    if not isinstance(data, dict):
-        return {}
-    if compact_enabled():
-        compact = CompactPedigreeMap({key: encode_tree(tree) for key, tree in data.items()})
-        # Drop the module so its ~450 MB of dicts can be freed.
-        sys.modules.pop("pedigrees_database", None)
-        return compact
-    return data
-
-
-def get_pedigree_map(refresh: bool = False) -> dict:
-    """Return the shared pedigree map (treat as read-only; copy before mutating)."""
-    global _cache, _cache_version
-    pg = _pg()
     with _lock:
-        if pg is None:
-            if _cache is None or refresh:
-                _cache = _from_module(refresh)
-            return _cache
-        version = pg.table_version("pedigrees", max_age=0 if refresh else None)
+        version = railway_db.table_version("pedigrees", max_age=0 if refresh else None)
         if _cache is None or refresh or version != _cache_version:
-            _cache = pg.read_pedigree_map(compact=compact_enabled())
+            _cache = None  # let the old copy go before reading the new one
+            _cache = railway_db.read_pedigree_map(compact=compact_enabled())
             _cache_version = version
         return _cache
 
 
 def sync_to_railway(items: dict) -> int:
-    """Upsert trees into Railway when it is configured; no-op locally."""
-    pg = _pg()
-    if pg is None or not items:
+    """Upsert trees into the pedigrees table."""
+    if not items:
         return 0
-    return pg.upsert_pedigrees(items)
+    from crossr_core import railway_db
+
+    return railway_db.upsert_pedigrees(items)

@@ -1,6 +1,15 @@
-import os
+"""Saved hypothetical matings ({cross key: combined pedigree tree}) in Postgres.
 
-HYPO_FILE = "hypofoals.py"
+Stored in the ``hypofoals`` table (crossr_core.railway_db). The old hypofoals.py
+file is only read once by scripts/load_railway.py to fill that table.
+"""
+
+import threading
+
+_lock = threading.Lock()
+_cache = None
+_cache_version = None
+
 
 def clean_hypo_key(sire_name: str, dam_name: str) -> str:
     """Normalizes the cross key names accurately for consistent dictionary mappings."""
@@ -9,35 +18,22 @@ def clean_hypo_key(sire_name: str, dam_name: str) -> str:
     cleaned = cleaned.replace("(", " ").replace(")", " ")
     return " ".join(cleaned.split()).strip()
 
-def load_hypo_database() -> dict:
-    """Safely retrieves the HYPO_FOALS map using dedicated script evaluations."""
-    if not os.path.exists(HYPO_FILE) or os.path.getsize(HYPO_FILE) == 0:
-        return {}
-    try:
-        namespace = {}
-        with open(HYPO_FILE, "r", encoding="utf-8") as f:
-            exec(f.read(), namespace)
-        return namespace.get("HYPO_FOALS", {})
-    except Exception as e:
-        print(f"⚠️ Warning loading hypothetical database ({e}). Starting fresh.")
-        return {}
 
-def save_hypo_database(hypo_foals_map: dict):
-    """Saves the map back to the flat file structure matching your main registry formats."""
-    try:
-        with open(HYPO_FILE, "w", encoding="utf-8") as f:
-            f.write('"""\nAutomatically compiled hypothetical foal mating database\n"""\n\n')
-            f.write("HYPO_FOALS = {\n")
-            for cross_key, tree in sorted(hypo_foals_map.items()):
-                f.write(f"    {repr(cross_key)}: {repr(tree)},\n")
-            f.write("}\n")
-        print("💾 Success! Hypothetical mating saved successfully to hypofoals.py.")
-    except Exception as e:
-        print(f"❌ Error saving hypothetical foal entry: {e}")
+def load_hypo_database() -> dict:
+    """All saved matings (treat as read-only). Reloads when the table changes."""
+    global _cache, _cache_version
+    from crossr_core import railway_db
+
+    version = railway_db.table_version("hypofoals")
+    with _lock:
+        if _cache is None or version != _cache_version:
+            _cache = railway_db.read_pedigree_map(table="hypofoals")
+            _cache_version = version
+        return _cache
+
 
 def register_new_hypo_foal(sire_name: str, dam_name: str, combined_tree: dict):
-    """High-level registration pipeline hook."""
-    hypo_db = load_hypo_database()
-    lookup_key = clean_hypo_key(sire_name, dam_name)
-    hypo_db[lookup_key] = combined_tree
-    save_hypo_database(hypo_db)
+    """Save (or replace) one mating."""
+    from crossr_core import railway_db
+
+    railway_db.upsert_pedigrees({clean_hypo_key(sire_name, dam_name): combined_tree}, table="hypofoals")

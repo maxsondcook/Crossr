@@ -1,7 +1,10 @@
 #!/bin/sh
+# Local API. All data comes from Postgres: point DATABASE_URL at the crossr_dev
+# database (or a copy) first - see docs/RAILWAY.md.
 set -e
 cd "$(dirname "$0")/.."
-if [ ! -f crossr_sales.db ]; then
-  python3 scripts/index_sales.py
+if [ -z "$DATABASE_URL" ]; then
+  echo "DATABASE_URL is not set (Crossr reads everything from Postgres; see docs/RAILWAY.md)." >&2
+  exit 1
 fi
 uvicorn crossr_api.app:app --reload --port 8000

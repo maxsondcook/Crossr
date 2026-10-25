@@ -1,4 +1,4 @@
-"""Rich BloodHorse stallion ranking history from data/stallion_rankings.csv.
+"""Rich BloodHorse stallion ranking history from the stallion_rankings table (Postgres).
 
 Surfaces AEI, CI, earnings, runners, and every other published metric column
 for the stallion profile STALLION RANKINGS panel.
@@ -7,15 +7,13 @@ from __future__ import annotations
 
 import os
 import re
-import sqlite3
-import threading
 
 import main
 from crossr_core import sample_db
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# BloodHorse SQLite list/table → UI list id + label.
+# BloodHorse list/table → UI list id + label.
 _DB_LIST_META = {
     ("General", ""): ("leading_sire", "Leading Sire Rankings"),
     ("Lifetime AEI", ""): ("leading_sires_by_aei", "Leading Sires by AEI"),
@@ -164,16 +162,24 @@ _SKIP_NUM_KEYS = {
 }
 
 
-def _db_path():
-    return str(sample_db.csv_path("stallion_rankings"))
+_COLUMNS = sample_db.TABLES["stallion_rankings"]
+_SQL = (
+    "SELECT " + ", ".join('"' + c + '"' for c in _COLUMNS) + " FROM stallion_rankings "
+    "WHERE upper(stallion) = upper(%s) OR upper(stallion) LIKE upper(%s) || ' (%%' "
+    "ORDER BY COALESCE(year, '') COLLATE \"C\" DESC, COALESCE(list, '') COLLATE \"C\", "
+    "COALESCE(table_name, '') COLLATE \"C\", _rid"
+)
 
 
-# The in-memory rankings DB is one shared connection; concurrent requests must not query it at once.
-_QUERY_LOCK = threading.Lock()
+def _ranking_rows(key):
+    """All ranking rows for one stallion as dicts of strings ('' for blanks)."""
+    from crossr_core import railway_db
 
-
-def _conn():
-    return sample_db.rankings_connection()
+    with railway_db.connect() as conn:
+        return [
+            {c: ("" if v is None else str(v)) for c, v in zip(_COLUMNS, rec)}
+            for rec in conn.execute(_SQL, (key, key))
+        ]
 
 
 def _intish(val):
@@ -227,10 +233,6 @@ def _rank_list_id(label):
 
 def rich_rankings_from_db(stallion_name, entered_stud=None):
     """Full ranking history for one stallion: lists, rows, columns."""
-    conn = _conn()
-    if conn is None:
-        return {"lists": [], "rows": {}, "columns": {}}
-
     key = main.clean_horse_name(stallion_name)
     if not key:
         return {"lists": [], "rows": {}, "columns": {}}
@@ -240,18 +242,8 @@ def rich_rankings_from_db(stallion_name, entered_stud=None):
         start = None
 
     try:
-        with _QUERY_LOCK:
-            raw_rows = conn.execute(
-                """
-                SELECT *
-                FROM stallion_rankings
-                WHERE upper(stallion) = upper(?)
-                   OR upper(stallion) LIKE upper(?) || ' (%'
-                ORDER BY year DESC, list, table_name
-                """,
-                (key, key),
-            ).fetchall()
-    except sqlite3.Error:
+        raw_rows = _ranking_rows(key)
+    except Exception:
         return {"lists": [], "rows": {}, "columns": {}}
 
     buckets = {}

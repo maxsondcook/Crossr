@@ -1,8 +1,8 @@
 # Crossr
 
-Thoroughbred pedigree, stallion, sales, and mating research. The same data powers a **Next.js** site (`web/`) and a **Python CLI** (`main.py`).
+Thoroughbred pedigree, stallion, sales, and mating research. A **Next.js** site (`web/`) on a **FastAPI** JSON API (`crossr_api/`), with all data in Postgres.
 
-The public UI never sees Keeneland/Fasig-Tipton CSVs or `graded_stakes_winners.csv`. Those stay on the API machine; the browser only gets JSON.
+The browser only ever gets JSON from the API; raw catalogs and results never leave Postgres.
 
 ## What it does
 
@@ -16,9 +16,10 @@ Horses are stored as `NAME (YYYY)`. If a search hits two or more foaling years, 
 
 ## Data on Railway
 
-Crossr's data lives in **Railway Postgres**. Set `DATABASE_URL` (see `.env.example`) and the
-API, CLI and scrapers all use it; leave it unset to run from local `data/*.csv` files.
-Setup, data loading and deployment: [`docs/RAILWAY.md`](docs/RAILWAY.md).
+Crossr's data lives **only** in **Railway Postgres**: the API, the scrapers and the
+training script all need `DATABASE_URL` (see `.env.example`), and nothing reads local
+data files at runtime. Locally, use the `crossr_dev` database. What lives in which
+table, loading and deployment: [`docs/RAILWAY.md`](docs/RAILWAY.md).
 
 ## Run locally
 
@@ -26,8 +27,8 @@ Python 3.11+ and Node 18+.
 
 ```bash
 python3 -m pip install -r requirements.txt
-python3 scripts/index_sales.py          # once, or after sales_data/ changes
-python3 -m uvicorn crossr_api.app:app --reload --port 8000
+export DATABASE_URL="postgresql://...:.../crossr_dev"   # see docs/RAILWAY.md
+./scripts/run_api.sh                    # http://localhost:8000
 ```
 
 ```bash
@@ -36,41 +37,21 @@ npm install
 npm run dev                             # http://localhost:3000
 ```
 
-Or `./scripts/run_api.sh` (indexes sales if `crossr_sales.db` is missing, then starts the API).
+Docker: `docker compose up --build` (with `DATABASE_URL` set).
 
-Docker (after the sales index exists):
-
-```bash
-docker compose up --build
-```
-
-Do not upload `sales_data/` or stakes CSVs to a public frontend host.
-
-## CLI
-
-```bash
-python3 main.py
-```
-
-1. Search a horse profile / pedigree  
-2. Farm rosters  
-3. Interactive pedigree builder (`add_pedigrees.py`)  
-4. Stallion stats  
-5. Hypomating  
-6. Sales history  
-
-If a horse is missing from `pedigrees_database.py`, the builder walks the 5-generation tree and writes it back.
+The terminal menus (`main.py`, hypomating, sales history, sale analyzer) are retired;
+everything runs through the site.
 
 ## Horse profile panels
 
-On `/horses/{name}` (and in the CLI stallion printout):
+On `/horses/{name}`:
 
 | Panel | Source |
 | --- | --- |
-| Pedigree + female family | `pedigrees_database.py` |
-| Stud fee & mares bred | `stud_fee_database.csv`, `live_foal_statistics/` |
-| **Stallion rankings** | BloodHorse lists in `stallion_rankings_data/` (2001–2026), plus computed mares-bred and USD stud-fee ranks |
-| **Broodmare sire** | Leading Broodmare Sires lists + average sold yearling price (damsire) from `crossr_sales.db` |
+| Pedigree + female family | `pedigrees` table; stakes status from `race_starts` (+ `graded_stakes`) |
+| Stud fee & mares bred | `stud_fees`, `breeding_seasons` tables |
+| **Stallion rankings** | `stallion_rankings` table (BloodHorse lists 2001–2026), plus computed mares-bred and USD stud-fee ranks |
+| **Broodmare sire** | Leading Broodmare Sires lists + average sold yearling price (damsire) from the sales index |
 
 Ranking dropdowns only include lists that stallion actually appears on. Years before he entered stud are omitted. **2027 stud fees are hidden.**
 
@@ -80,17 +61,17 @@ Ranking dropdowns only include lists that stallion actually appears on. Years be
 
 ## Data
 
+All runtime data is in Postgres; the table-by-table map is in
+[`docs/RAILWAY.md`](docs/RAILWAY.md#what-lives-where). The folders below are
+scraper / loader inputs only (`.dockerignore` keeps them out of the API image):
+
 | Path | Role |
 | --- | --- |
-| `pedigrees_database.py` | 5-generation trees (live file; importer writes here) |
-| `stallion_profiles.py` | Commercial stallion cards (farm, fee, crop, race record) |
-| `stallion_rankings_data/` | Year folders of BloodHorse ranking CSVs (28 lists × 2001–2026) |
-| `stud_fee_database.csv` | Year / stallion / advertised fee |
-| `live_foal_statistics/` | Jockey Club-style mares bred / live foals |
-| `ifha_scraper/ifha_graded_stakes_2003_2026.csv` | IFHA G1–G3 results, worldwide |
-| `graded_stakes_winners.csv` | Derived GSW file used by hypomating |
-| `sales_data/` | Catalog CSVs (API only) |
-| `crossr_sales.db` | Indexed lots (`scripts/index_sales.py`) |
+| `data/*.csv`, `pedigrees_database.py` | Initial load for the 8 tables and pedigrees (`scripts/load_railway.py`) |
+| `Upcoming Sales/`, `Analyzed Sales/` | Sale catalogs and fitted models; publish with `scripts/load_railway.py --only catalogs models` |
+| `sales_data/` | Raw Keeneland / Fasig-Tipton catalogs for the pipeline (`sales_lots`) |
+| `stallion_rankings_data/`, `live_foal_statistics/` | BloodHorse lists and mares-bred reports for the pipeline |
+| `ifha_scraper/ifha_graded_stakes_2003_2026.csv` | IFHA G1–G3 results, worldwide (`graded_stakes`) |
 
 ## Pipelines (optional)
 
@@ -122,16 +103,10 @@ python3 -m equibase_scraper.run --show "American Pharoah" --year 2012
 python3 -m equibase_scraper.run --fill-pedigrees --delay 1
 ```
 
-**Re-index sales** after adding catalogs:
-
-```bash
-python3 scripts/index_sales.py
-```
-
 ## Layout
 
 ```
-main.py                 CLI + shared name cleaning / pedigree lookup
+main.py                 Shared name cleaning / pedigree lookup / inbreeding
 hypomating_engine.py    Mating suggestions from GSW crosses
 crossr_api/             FastAPI JSON API (:8000)
 crossr_core/            Horse profiles, sales queries, auth
@@ -139,7 +114,7 @@ web/                    Next.js 14 UI (:3000)
 pq_scraper/             Pedigree Query / Wayback importer
 ifha_scraper/           IFHA graded-stakes scrape + validation
 stallion_rankings_data/ BloodHorse ranking CSVs + fee builders
-scripts/                Sales indexer, API helper
+scripts/                Data loader (load_railway.py), pipeline, API helper
 ```
 
 Web routes: `/` home, `/stallions`, `/horses/[name]`, `/hypomating`, `/sales`, `/compare`, `/barn`, `/signin`.

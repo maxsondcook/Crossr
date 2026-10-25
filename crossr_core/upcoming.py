@@ -1,11 +1,14 @@
-"""Read upcoming-sale catalogs from Upcoming Sales/ (and Analyzed Sales/)."""
-import csv
-import os
+"""Upcoming-sale catalogs (Upcoming and Analyzed), stored in Postgres.
+
+scripts/load_railway.py loads each "Upcoming Sales/*.csv" and "Analyzed Sales/
+analyzed_*.csv" file into upcoming_catalogs / upcoming_catalog_rows (id = file
+name without .csv; one JSON object per CSV row). Starred hips and notes live in
+upcoming_lot_marks and override the catalog's own STARRED / NOTES columns.
+"""
 import re
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ANALYZED_DIR = os.path.join(ROOT, "Analyzed Sales")
-UPCOMING_DIR = os.path.join(ROOT, "Upcoming Sales")
+from crossr_core import railway_db
+
 _ID_RE = re.compile(r"[A-Za-z0-9._()\- ]+")
 _PLACEHOLDER_NAME = re.compile(r"^(?:hip\s*\d+|\d{4}-)", re.I)
 
@@ -33,28 +36,14 @@ def _hip_sort(hip):
     return int(digits) if digits else 10**9
 
 
-def _safe_csv(folder, stem):
-    if not stem or not isinstance(stem, str):
-        return None
-    if stem != stem.strip() or not _ID_RE.fullmatch(stem):
-        return None
-    if ".." in stem:
-        return None
-    path = os.path.join(folder, stem + ".csv")
-    if not os.path.isfile(path):
-        return None
-    real = os.path.realpath(path)
-    root = os.path.realpath(folder)
-    if real != root and not real.startswith(root + os.sep):
-        return None
-    return real
+def _valid_id(catalog_id):
+    if not catalog_id or not isinstance(catalog_id, str):
+        return False
+    return catalog_id == catalog_id.strip() and bool(_ID_RE.fullmatch(catalog_id)) and ".." not in catalog_id
 
 
-def _count_hips(path):
-    try:
-        _, rows = _read_rows(path)
-    except OSError:
-        return 0
+def count_hips(rows):
+    """Rows with a hip or a horse name (the loader stores this per catalog)."""
     count = 0
     for row in rows:
         if _blank(_col(row, "HIP", "HIP NUMBER", "LOT")) or _blank(_col(row, "HORSE NAME", "NAME", "HORSE")):
@@ -62,14 +51,12 @@ def _count_hips(path):
     return count
 
 
-def _catalog_entry(stem, path, source):
-    year = _year(stem)
-    title = _title(stem)
+def _catalog_entry(stem, hips, source):
     return {
         "id": stem,
-        "title": title,
-        "year": year,
-        "hips": _count_hips(path),
+        "title": _title(stem),
+        "year": _year(stem),
+        "hips": hips,
         "source": source,
     }
 
@@ -161,18 +148,11 @@ def _birth_date(raw):
     return _year(text)
 
 
-def _path_for(catalog_id):
-    """Resolve catalog CSV from Analyzed Sales/ first, then Upcoming Sales/."""
-    path = _safe_csv(ANALYZED_DIR, catalog_id)
-    if path:
-        return path
-    return _safe_csv(UPCOMING_DIR, catalog_id)
-
-
-def _read_rows(path):
-    with open(path, encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        return list(reader.fieldnames or []), list(reader)
+def _read_catalog(catalog_id):
+    """(columns, rows) for a catalog id, or None."""
+    if not _valid_id(catalog_id):
+        return None
+    return railway_db.read_upcoming_catalog(catalog_id)
 
 
 def _col(row, *names):
@@ -216,7 +196,7 @@ def _sold_as(row, birth_year=None, sale_year=None):
         return ""
 
 
-def _lot_from_csv(row, sale_year=None):
+def _lot_from_row(row, sale_year=None):
     sex = _blank(_col(row, "SEX"))
     price_raw = _blank(_col(row, "PRICE", "PRICE_RAW", "SALE PRICE", "AUCTION PRICE"))
     starred = _blank(_col(row, "STARRED")).lower()
@@ -255,37 +235,19 @@ def _lot_from_csv(row, sale_year=None):
 
 
 def list_catalogs():
-    """Prefer analyzed catalogs; also surface raw files still in Upcoming Sales."""
+    """Prefer analyzed catalogs; also surface raw Upcoming catalogs not analyzed yet."""
+    stored = railway_db.list_upcoming_catalogs()
     by_key = {}
-    if os.path.isdir(ANALYZED_DIR):
-        for name in sorted(os.listdir(ANALYZED_DIR)):
-            if not name.lower().endswith(".csv") or name.startswith("."):
+    for row in stored:
+        if row["source"] == "analyzed":
+            by_key[row["id"].lower()] = _catalog_entry(row["id"], row["hip_count"], "analyzed")
+    for row in stored:
+        if row["source"] != "analyzed":
+            key = row["id"].lower()
+            if f"analyzed_{key}" in by_key or key in by_key:
                 continue
-            stem = name[:-4]
-            path = _safe_csv(ANALYZED_DIR, stem)
-            if not path:
-                continue
-            by_key[stem.lower()] = _catalog_entry(stem, path, "analyzed")
-    if os.path.isdir(UPCOMING_DIR):
-        for name in sorted(os.listdir(UPCOMING_DIR)):
-            if not name.lower().endswith(".csv") or name.startswith("."):
-                continue
-            stem = name[:-4]
-            path = _safe_csv(UPCOMING_DIR, stem)
-            if not path:
-                continue
-            key = stem.lower()
-            analyzed_key = f"analyzed_{key}"
-            if analyzed_key in by_key or key in by_key:
-                continue
-            by_key[key] = _catalog_entry(stem, path, "upcoming")
+            by_key[key] = _catalog_entry(row["id"], row["hip_count"], "upcoming")
     return sorted(by_key.values(), key=lambda row: row["title"].lower())
-
-
-def _pg():
-    from crossr_core import railway_db
-
-    return railway_db if railway_db.enabled() else None
 
 
 def _apply_mark(lot, mark):
@@ -299,17 +261,15 @@ def _apply_mark(lot, mark):
 
 
 def list_lots(catalog_id):
-    path = _path_for(catalog_id)
-    if not path:
+    catalog = _read_catalog(catalog_id)
+    if catalog is None:
         return None
     sale_year = _year(catalog_id)
-    _, rows = _read_rows(path)
-    # With Postgres, stars/notes live in upcoming_lot_marks and override the CSV.
-    pg = _pg()
-    marks = pg.read_lot_marks(catalog_id) if pg else {}
+    _, rows = catalog
+    marks = railway_db.read_lot_marks(catalog_id)
     lots = []
     for row in rows:
-        lot = _lot_from_csv(row, sale_year=sale_year)
+        lot = _lot_from_row(row, sale_year=sale_year)
         lot["sale_year"] = sale_year
         _apply_mark(lot, marks.get(lot["hip"]))
         if lot["hip"] or lot["name"]:
@@ -339,44 +299,16 @@ def get_lot(catalog_id, hip):
 
 
 def update_lot(catalog_id, hip, starred=None, notes=None):
-    path = _path_for(catalog_id)
-    if not path:
+    catalog = _read_catalog(catalog_id)
+    if catalog is None:
         return None
-    fieldnames, rows = _read_rows(path)
-    if not fieldnames:
-        return None
-    upper = {name.upper(): name for name in fieldnames}
-    if starred is not None and "STARRED" not in upper:
-        fieldnames.append("STARRED")
-        upper["STARRED"] = "STARRED"
-    if notes is not None and "NOTES" not in upper:
-        fieldnames.append("NOTES")
-        upper["NOTES"] = "NOTES"
+    _, rows = catalog
     want = str(hip).strip()
-    found = None
-    for row in rows:
-        if _blank(_col(row, "HIP", "HIP NUMBER", "LOT")) == want:
-            found = row
-            break
+    found = next((row for row in rows if _blank(_col(row, "HIP", "HIP NUMBER", "LOT")) == want), None)
     if found is None:
         return None
-    pg = _pg()
-    if pg:
-        # The CSV ships inside the container and resets on deploy; store in Postgres.
-        mark = pg.set_lot_mark(catalog_id, want, starred=starred, notes=notes)
-        return _apply_mark(_lot_from_csv(found), mark)
-    if starred is not None:
-        found[upper["STARRED"]] = "*" if starred else ""
-    if notes is not None:
-        found[upper["NOTES"]] = notes
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore", lineterminator="\n")
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({key: (row.get(key) if row.get(key) is not None else "") for key in fieldnames})
-    os.replace(tmp, path)
-    return _lot_from_csv(found)
+    mark = railway_db.set_lot_mark(catalog_id, want, starred=starred, notes=notes)
+    return _apply_mark(_lot_from_row(found), mark)
 
 
 def filter_lots(lots, sex=None, color=None, max_price=None, height=None, starred=None, exclude_hips=None, only_hips=None):
@@ -396,7 +328,8 @@ def filter_lots(lots, sex=None, color=None, max_price=None, height=None, starred
             if not coat or str(color).lower() not in coat:
                 continue
         if max_price not in (None, ""):
-            price = lot.get("price_num") or 0
+            # Upcoming lots have no hammer price yet: use the Expected Market price the API attached.
+            price = lot.get("price_num") or lot.get("filter_price") or 0
             if not price or price > float(max_price):
                 continue
         if height:

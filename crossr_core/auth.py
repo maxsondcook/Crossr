@@ -1,23 +1,15 @@
-"""Local user accounts and saved barn preferences."""
+"""User accounts, sessions and saved barn preferences (Postgres users / sessions / preferences)."""
 import hashlib
 import hmac
 import json
 import os
 import re
 import secrets
-import sqlite3
 import time
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_DB = os.path.join(ROOT, "crossr_users.db")
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,24}$")
 SESSION_DAYS = 30
-
-
-def db_path():
-    return os.environ.get("USERS_DB_PATH", DEFAULT_DB)
 
 
 class _PgCursor:
@@ -33,13 +25,14 @@ class _PgCursor:
 
 
 class _PgConn:
-    """Tiny sqlite3-style wrapper so the queries below run on Railway Postgres."""
+    """Tiny sqlite3-style wrapper (? placeholders, lastrowid) over a Postgres connection."""
 
     def __init__(self):
         import psycopg
         from psycopg.rows import dict_row
         from crossr_core import railway_db
 
+        railway_db.require()
         railway_db.ensure_schema()  # creates users / sessions / preferences
         self._conn = psycopg.connect(railway_db.database_url(), row_factory=dict_row, connect_timeout=10)
 
@@ -62,51 +55,13 @@ class _PgConn:
         self._conn.close()
 
 
-def _use_postgres() -> bool:
-    from crossr_core import railway_db
-
-    return railway_db.enabled() and not os.environ.get("USERS_DB_PATH")
-
-
 def connect():
-    if _use_postgres():
-        return _PgConn()
-    conn = sqlite3.connect(db_path())
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    return _PgConn()
 
 
 def init_db():
-    conn = connect()
-    try:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT NOT NULL UNIQUE,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                created_at INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS sessions (
-                token TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                created_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS preferences (
-                user_id INTEGER PRIMARY KEY,
-                payload TEXT NOT NULL,
-                updated_at INTEGER NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-            );
-            """
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    """Tables are created by railway_db.ensure_schema(); this just checks the connection."""
+    connect().close()
 
 
 def empty_prefs():

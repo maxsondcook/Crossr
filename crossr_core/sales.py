@@ -1,38 +1,63 @@
-"""Sales hub queries over data/sales_lots.csv (via sample_db in-memory index)."""
+"""Sales hub queries over the sales index in Postgres (sales_catalogs + sales_lot_index).
+
+The index is a typed copy of sales_lots that railway_db rebuilds whenever
+sales_lots changes, so every query here runs as SQL instead of in Python.
+"""
 import re
 
 import sales_history
-from crossr_core import sample_db
+from crossr_core import railway_db
 
 LOT_SELECT = """
     SELECT l.id, l.hip, l.name, l.sex, l.sex_letter, l.sire, l.dam, l.damsire,
            l.color, l.consignor, l.purchaser, l.barn, l.foaled_location, l.birth_year,
            l.price_raw, l.price_num, l.is_rna, l.is_out, l.is_fasig,
            c.year, c.title AS sale_title, c.month_index, l.catalog_id
-    FROM lots l
-    JOIN catalogs c ON c.id = l.catalog_id
+    FROM sales_lot_index l
+    JOIN sales_catalogs c ON c.id = l.catalog_id
 """
 
+# Leading digits of the hip, like SQLite's CAST(hip AS INTEGER).
+HIP_NUM = "COALESCE(substring(l.hip from '^\\s*([0-9]{1,9})')::bigint, 0)"
 
-class _SharedConn:
-    """Wrap the shared in-memory SQLite so callers' conn.close() is a no-op."""
 
-    def __init__(self, conn):
-        self._conn = conn
+class _Conn:
+    """One Postgres connection with the sqlite3-style calls this module uses.
 
-    def __getattr__(self, name):
-        return getattr(self._conn, name)
+    ``?`` placeholders become ``%s`` (literal ``%`` is escaped first) and rows
+    come back as dicts.
+    """
+
+    def __init__(self):
+        from psycopg.rows import dict_row
+
+        self._cm = railway_db.connect(row_factory=dict_row)
+        self._conn = self._cm.__enter__()
+
+    def execute(self, sql, params=()):
+        return self._conn.execute(sql.replace("%", "%%").replace("?", "%s"), params)
 
     def close(self):
+        self._cm.__exit__(None, None, None)
+
+
+def connect():
+    """Connection to the sales index, or None when sales_lots is empty."""
+    if not railway_db.ensure_sales_index():
         return None
+    return _Conn()
 
 
-def db_path():
-    return str(sample_db.csv_path("sales_lots"))
+def index_ready():
+    """True when the sales index is built and current (for /api/health)."""
+    try:
+        return railway_db.ensure_sales_index()
+    except Exception:
+        return False
 
 
 def ensure_damsire_index():
-    # Index is created when sample_db builds the in-memory sales DB.
+    # The damsire index is part of the sales index (railway_db).
     return
 
 
@@ -48,8 +73,8 @@ def damsire_yearling_averages(stallion_name):
         rows = conn.execute(
             """
             SELECT c.year AS year, COUNT(*) AS n, AVG(l.price_num) AS avg_price
-            FROM lots l
-            JOIN catalogs c ON c.id = l.catalog_id
+            FROM sales_lot_index l
+            JOIN sales_catalogs c ON c.id = l.catalog_id
             WHERE l.damsire_key = ?
               AND l.is_rna = 0 AND l.is_out = 0 AND l.price_num > 0
               AND (
@@ -71,12 +96,6 @@ def damsire_yearling_averages(stallion_name):
         conn.close()
 
 
-def connect():
-    """In-memory index derived from data/sales_lots.csv; refreshes on mtime."""
-    conn = sample_db.sales_connection()
-    return _SharedConn(conn) if conn is not None else None
-
-
 def _lot_from_row(row):
     d = dict(row)
     d["is_rna"] = bool(d.get("is_rna"))
@@ -92,7 +111,7 @@ def list_years():
     if not conn:
         return []
     try:
-        rows = conn.execute("SELECT DISTINCT year FROM catalogs ORDER BY year DESC").fetchall()
+        rows = conn.execute("SELECT DISTINCT year FROM sales_catalogs ORDER BY year DESC").fetchall()
         return [r["year"] for r in rows]
     finally:
         conn.close()
@@ -105,12 +124,12 @@ def list_catalogs(year=None):
     try:
         if year:
             rows = conn.execute(
-                "SELECT id, year, title, month_index FROM catalogs WHERE year = ? ORDER BY month_index, title",
+                "SELECT id, year, title, month_index FROM sales_catalogs WHERE year = ? ORDER BY month_index, title COLLATE \"C\", id",
                 (int(year),),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, year, title, month_index FROM catalogs ORDER BY year DESC, month_index, title"
+                "SELECT id, year, title, month_index FROM sales_catalogs ORDER BY year DESC, month_index, title COLLATE \"C\", id"
             ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -130,13 +149,13 @@ def _query_lots(where_sql, params, sort="price_desc", sex=None, limit=100, offse
     order = {
         "price_desc": "l.price_num DESC",
         "price_asc": "l.price_num ASC",
-        "hip": "l.hip ASC",
+        "hip": 'l.hip COLLATE "C" ASC',
         "year_desc": "c.year DESC, c.month_index DESC",
-        "name": "l.name ASC",
-    }.get(sort, "l.price_num DESC")
+        "name": 'l.name COLLATE "C" ASC',
+    }.get(sort, "l.price_num DESC") + ", l.id"
     try:
         total = conn.execute(
-            f"SELECT COUNT(*) AS n FROM lots l JOIN catalogs c ON c.id = l.catalog_id WHERE {where}",
+            f"SELECT COUNT(*) AS n FROM sales_lot_index l JOIN sales_catalogs c ON c.id = l.catalog_id WHERE {where}",
             args,
         ).fetchone()["n"]
         rows = conn.execute(
@@ -146,8 +165,8 @@ def _query_lots(where_sql, params, sort="price_desc", sex=None, limit=100, offse
         stat_rows = conn.execute(
             f"""
             SELECT l.price_num, l.is_rna, l.is_out, c.year
-            FROM lots l
-            JOIN catalogs c ON c.id = l.catalog_id
+            FROM sales_lot_index l
+            JOIN sales_catalogs c ON c.id = l.catalog_id
             WHERE {where}
             """,
             args,
@@ -221,7 +240,7 @@ def get_lot(lot_id):
                 f"""
                 {LOT_SELECT}
                 WHERE l.sire_key = ? AND l.id != ? AND l.is_out = 0 AND l.price_num > 0
-                ORDER BY ABS(l.price_num - ?) ASC
+                ORDER BY ABS(l.price_num - ?) ASC, l.id
                 LIMIT 8
                 """,
                 (sire_key, int(lot_id), lot.get("price_num") or 0),
@@ -243,7 +262,7 @@ def catalog_nav(catalog_id):
         return None
     try:
         cat = conn.execute(
-            "SELECT id, year, title FROM catalogs WHERE id = ?",
+            "SELECT id, year, title FROM sales_catalogs WHERE id = ?",
             (int(catalog_id),),
         ).fetchone()
         if not cat:
@@ -252,7 +271,7 @@ def catalog_nav(catalog_id):
             f"""
             {LOT_SELECT}
             WHERE l.catalog_id = ?
-            ORDER BY CAST(l.hip AS INTEGER), l.hip
+            ORDER BY {HIP_NUM}, l.hip COLLATE "C", l.id
             """,
             (int(catalog_id),),
         ).fetchall()
@@ -293,8 +312,30 @@ def _is_catalog_label(horse_name):
     return not text or bool(re.search(r"\s[xX]\s", text)) or text.upper().startswith(("UNNAMED", "NAME"))
 
 
+def _auction_candidates(name_keys, pairs):
+    """Sales-index rows whose name key or (sire, dam) keys match, in load order."""
+    conn = connect()
+    if not conn or not (name_keys or pairs):
+        return []
+    try:
+        return conn.execute(
+            f"""
+            SELECT l.name AS horse_name, l.nk, l.sk, l.dk, l.is_out, l.is_rna,
+                   l.price_num, l.price_raw, l.purchaser, l.birth_year, l.hip,
+                   c.title AS sale_title, CASE WHEN c.year > 0 THEN c.year::text ELSE '' END AS sale_year
+            FROM sales_lot_index l
+            JOIN sales_catalogs c ON c.id = l.catalog_id
+            WHERE l.nk = ANY(?) OR (l.sk, l.dk) IN (SELECT * FROM unnest(?::text[], ?::text[]))
+            ORDER BY l.id
+            """,
+            (list(name_keys), [p[0] for p in pairs], [p[1] for p in pairs]),
+        ).fetchall()
+    finally:
+        conn.close()
+
+
 def auctions_for_horses(crosses, limit=40):
-    """Sale rows from placeholderdatabase/sale_results.csv for similar-cross horses.
+    """Sale rows (sales index) for similar-cross horses.
 
     Catalog hips are stored as SIRE x DAM labels. Match each cross horse by:
     (1) cleaned horse_name, or (2) sire+dam pair from the pedigree DB / cross row.
@@ -342,13 +383,13 @@ def auctions_for_horses(crosses, limit=40):
             by_pair.setdefault((t["sire_key"], t["dam_key"]), t)
 
     out = []
-    for sale in placeholder_store.load_table("sale_results"):
-        if str(sale.get("is_out") or "0") in {"1", "true", "True"}:
+    for sale in _auction_candidates(list(by_name), list(by_pair)):
+        if sale["is_out"]:
             continue
         horse = sale.get("horse_name") or ""
-        hk = placeholder_store.name_key(horse)
-        sk = placeholder_store.name_key(sale.get("sire") or "")
-        dk = placeholder_store.name_key(sale.get("dam") or "")
+        hk = sale["nk"]
+        sk = sale["sk"]
+        dk = sale["dk"]
         # Same name must also be the same parents (older horses reuse names), and a
         # sire/dam match only counts for an unnamed hip of the same foal crop, not a sibling.
         match = by_name.get(hk)
@@ -365,7 +406,7 @@ def auctions_for_horses(crosses, limit=40):
             continue
         price_num = _sale_price_num(sale.get("price_num"))
         price_raw = sale.get("price_raw") or ""
-        is_rna = str(sale.get("is_rna") or "0") in {"1", "true", "True"} or (
+        is_rna = bool(sale.get("is_rna")) or (
             price_raw and "RNA" in str(price_raw).upper()
         )
         out.append({

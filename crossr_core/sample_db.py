@@ -1,27 +1,25 @@
-"""Canonical runtime store: the 8 Crossr tables (+ pedigrees).
+"""Canonical runtime store: the 8 Crossr tables, read from Postgres.
 
-Backend: Railway Postgres when DATABASE_URL is set (crossr_core.railway_db),
-otherwise the 8 CSVs under data/ and pedigrees_database.py.
-
-Scrapers and export scripts write here with atomic replace. The API reloads when
-mtime changes so :8000 can keep serving while scrapes merge new rows.
+All data lives in the database named by DATABASE_URL (crossr_core.railway_db);
+there is no local-file fallback. Scrapers and the pipeline write here with
+atomic replace, and the API reloads a table when its version changes so it can
+keep serving while scrapes merge new rows.
 """
 
 from __future__ import annotations
 
-import csv
+import datetime
 import os
 import re
-import sqlite3
 import threading
-import time
 from collections.abc import Mapping
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Source CSVs for scripts/load_railway.py and the pipeline's staging only; the app never reads them.
 DATA_DIR = Path(os.environ.get("CROSSR_SAMPLE_DATA", str(ROOT / "data")))
 
-# Exact eight sample-database tables (filenames without .csv).
+# The eight runtime tables (one per former data/*.csv; columns are the CSV headers).
 TABLES = {
     "stud_fees": ["Year", "Stallion", "Stud Fee", "Farm", "Source List", "Notes"],
     "race_horses": [
@@ -81,6 +79,19 @@ TABLES = {
     ],
 }
 
+# App-state tables (formerly placeholderdatabase/*.csv), stored in Postgres.
+APP_TABLES = {
+    "industry_roles": ["role_name", "description"],
+    "accounts": ["account_id", "display_name", "email", "industry_role", "created_at"],
+    "clients": ["client_id", "account_id", "client_name"],
+    "client_preferences": [
+        "preference_id", "client_id", "sex", "foaled", "surface",
+        "min_stud_fee", "max_stud_fee", "sire_name", "requires_producer_note",
+    ],
+    "notes": ["note_id", "account_id", "sale_title", "hip", "body", "source", "updated_at"],
+    "hypothetical_matings": ["mating_key", "horse_name", "sire_name", "dam_name", "pedigree_json"],
+}
+
 # Upsert identity keys per table (columns that uniquely identify a row).
 UPSERT_KEYS = {
     "stud_fees": ("Year", "Stallion", "Source List"),
@@ -96,10 +107,6 @@ UPSERT_KEYS = {
 _LOCK = threading.RLock()
 _ROWS: dict[str, list[dict]] = {}
 _MTIME: dict[str, float] = {}
-_SALES_MEM: sqlite3.Connection | None = None
-_SALES_MTIME: float | None = None
-_RANK_MEM: sqlite3.Connection | None = None
-_RANK_MTIME: float | None = None
 
 
 def csv_path(table: str) -> Path:
@@ -135,11 +142,12 @@ def _cell(value) -> str:
 def _pg():
     from crossr_core import railway_db
 
-    return railway_db if railway_db.enabled() else None
+    railway_db.require()
+    return railway_db
 
 
 def backend() -> str:
-    return "postgres" if _pg() else "csv"
+    return "postgres"
 
 
 class Row(Mapping):
@@ -203,37 +211,20 @@ def _compact_rows(table: str, tuples) -> list:
 
 def _read_tuples(table: str):
     """Yield one tuple of strings per row, in TABLES[table] column order."""
-    columns = TABLES[table]
-    pg = _pg()
-    if pg:
-        yield from pg.iter_table(table, columns)
-        return
-    path = csv_path(table)
-    if not path.exists():
-        return
-    with path.open(encoding="utf-8-sig", newline="") as handle:
-        reader = csv.reader(handle)
-        header = next(reader, None) or []
-        pos = {name: i for i, name in enumerate(header)}
-        picks = [pos.get(col) for col in columns]
-        for raw in reader:
-            n = len(raw)
-            yield tuple(raw[i] if i is not None and i < n else "" for i in picks)
+    yield from _pg().iter_table(table, TABLES[table])
 
 
 def _mtime(table: str) -> float:
-    pg = _pg()
-    if pg:
-        return pg.table_version(table)
-    path = csv_path(table)
-    try:
-        return path.stat().st_mtime
-    except FileNotFoundError:
-        return 0.0
+    return _pg().table_version(table)
+
+
+def table_version(table: str) -> float:
+    """Changes whenever the table is rewritten (cheap; cached for a few seconds)."""
+    return _mtime(table)
 
 
 def load_table(table: str, refresh: bool = False) -> list[dict]:
-    """Return rows for one of the 8 CSVs. Reloads when the file mtime changes."""
+    """Return rows for one of the 8 tables. Reloads when the table version changes."""
     with _LOCK:
         mtime = _mtime(table)
         if refresh or table not in _ROWS or _MTIME.get(table) != mtime:
@@ -248,59 +239,24 @@ def invalidate(table: str | None = None) -> None:
         if table is None:
             _ROWS.clear()
             _MTIME.clear()
-            global _SALES_MEM, _SALES_MTIME, _RANK_MEM, _RANK_MTIME
-            if _SALES_MEM is not None:
-                _SALES_MEM.close()
-            if _RANK_MEM is not None:
-                _RANK_MEM.close()
-            _SALES_MEM = None
-            _SALES_MTIME = None
-            _RANK_MEM = None
-            _RANK_MTIME = None
         else:
             _ROWS.pop(table, None)
             _MTIME.pop(table, None)
-            if table == "sales_lots":
-                if _SALES_MEM is not None:
-                    _SALES_MEM.close()
-                _SALES_MEM = None
-                _SALES_MTIME = None
-            if table == "stallion_rankings":
-                if _RANK_MEM is not None:
-                    _RANK_MEM.close()
-                _RANK_MEM = None
-                _RANK_MTIME = None
 
 
 def atomic_write_table(table: str, rows: list[dict]) -> int:
     """Replace the whole table atomically. Safe mid-scrape.
 
-    Postgres: one transaction (DELETE + COPY). CSV: tmp file + os.replace.
+    One transaction (DELETE + COPY); rows are streamed, not copied into a list.
     """
     columns = TABLES[table]
-    pg = _pg()
-    if pg:
-        normalized = [
-            {col: _cell(row.get(col) if isinstance(row, Mapping) else "") for col in columns}
-            for row in rows
-        ]
-        count = pg.replace_table(table, columns, normalized)
-        invalidate(table)
-        return count
-    path = csv_path(table)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + f".{os.getpid()}.{time.time_ns()}.tmp")
-    normalized = [
+    normalized = (
         {col: _cell(row.get(col) if isinstance(row, Mapping) else "") for col in columns}
         for row in rows
-    ]
-    with tmp.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns, lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(normalized)
-    os.replace(tmp, path)
+    )
+    count = _pg().replace_table(table, columns, normalized)
     invalidate(table)
-    return len(normalized)
+    return count
 
 
 def _row_key(table: str, row: dict) -> tuple:
@@ -352,175 +308,8 @@ def replace_partition(table: str, match: dict, incoming: list[dict]) -> dict:
     return {"removed": removed, "written": len(normalized), "total": total}
 
 
-# ---------------------------------------------------------------------------
-# Derived in-memory indexes (allowed by data-sources principle)
-# ---------------------------------------------------------------------------
-
-_SALES_SCHEMA = """
-CREATE TABLE catalogs (
-    id INTEGER PRIMARY KEY,
-    year INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    month_index INTEGER,
-    source_file TEXT,
-    UNIQUE(year, title)
-);
-CREATE TABLE lots (
-    id INTEGER PRIMARY KEY,
-    catalog_id INTEGER NOT NULL,
-    hip TEXT,
-    name TEXT,
-    name_key TEXT,
-    sex TEXT,
-    sex_letter TEXT,
-    sire TEXT,
-    sire_key TEXT,
-    dam TEXT,
-    dam_key TEXT,
-    damsire TEXT,
-    damsire_key TEXT,
-    color TEXT,
-    consignor TEXT,
-    purchaser TEXT,
-    barn TEXT,
-    foaled_location TEXT,
-    birth_year TEXT,
-    price_raw TEXT,
-    price_num REAL,
-    is_rna INTEGER,
-    is_out INTEGER,
-    is_fasig INTEGER
-);
-CREATE INDEX idx_lots_sire ON lots(sire_key);
-CREATE INDEX idx_lots_name ON lots(name_key);
-CREATE INDEX idx_lots_dam ON lots(dam_key);
-CREATE INDEX idx_lots_damsire ON lots(damsire_key);
-CREATE INDEX idx_lots_catalog ON lots(catalog_id);
-"""
-
-
-def _month_index(title: str) -> int:
-    try:
-        import sales_history
-        return sales_history.get_sale_month_index(title)
-    except Exception:
-        return 0
-
-
-def _truthy(val) -> int:
-    text = str(val or "").strip().lower()
-    return 1 if text in {"1", "true", "yes", "y", "t"} else 0
-
-
-def sales_connection() -> sqlite3.Connection | None:
-    """In-memory SQLite built from sales_lots.csv; rebuilds on mtime change."""
-    global _SALES_MEM, _SALES_MTIME
-    mtime = _mtime("sales_lots")
-    if not mtime:
-        return None
-    with _LOCK:
-        if _SALES_MEM is not None and _SALES_MTIME == mtime:
-            return _SALES_MEM
-        if _SALES_MEM is not None:
-            _SALES_MEM.close()
-        rows = load_table("sales_lots")
-        conn = sqlite3.connect(":memory:", check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.executescript(_SALES_SCHEMA)
-        catalogs: dict[tuple, int] = {}
-        lot_id = 0
-        for row in rows:
-            try:
-                year = int(str(row.get("catalog_year") or "0").strip() or 0)
-            except ValueError:
-                year = 0
-            title = (row.get("catalog_title") or "").strip() or (row.get("source_file") or "")
-            key = (year, title)
-            if key not in catalogs:
-                cur = conn.execute(
-                    "INSERT INTO catalogs (year, title, month_index, source_file) VALUES (?, ?, ?, ?)",
-                    (year, title, _month_index(title), row.get("source_file") or ""),
-                )
-                catalogs[key] = cur.lastrowid
-            lot_id += 1
-            try:
-                price = float(str(row.get("price_num") or "0").replace(",", "") or 0)
-            except ValueError:
-                price = 0.0
-            conn.execute(
-                """
-                INSERT INTO lots (
-                    id, catalog_id, hip, name, name_key, sex, sex_letter,
-                    sire, sire_key, dam, dam_key, damsire, damsire_key, color,
-                    consignor, purchaser, barn, foaled_location, birth_year,
-                    price_raw, price_num, is_rna, is_out, is_fasig
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    lot_id,
-                    catalogs[key],
-                    row.get("hip") or "",
-                    row.get("name") or "",
-                    row.get("name_key") or name_key(row.get("name") or ""),
-                    row.get("sex") or "",
-                    row.get("sex_letter") or "",
-                    row.get("sire") or "",
-                    row.get("sire_key") or name_key(row.get("sire") or ""),
-                    row.get("dam") or "",
-                    row.get("dam_key") or name_key(row.get("dam") or ""),
-                    row.get("damsire") or "",
-                    row.get("damsire_key") or name_key(row.get("damsire") or ""),
-                    row.get("color") or "",
-                    row.get("consignor") or "",
-                    row.get("purchaser") or "",
-                    row.get("barn") or "",
-                    row.get("foaled_location") or "",
-                    row.get("birth_year") or "",
-                    row.get("price_raw") or "",
-                    price,
-                    _truthy(row.get("is_rna")),
-                    _truthy(row.get("is_out")),
-                    _truthy(row.get("is_fasig")),
-                ),
-            )
-        conn.commit()
-        _SALES_MEM = conn
-        _SALES_MTIME = mtime
-        return _SALES_MEM
-
-
-def rankings_connection() -> sqlite3.Connection | None:
-    """In-memory SQLite built from stallion_rankings.csv."""
-    global _RANK_MEM, _RANK_MTIME
-    mtime = _mtime("stallion_rankings")
-    if not mtime:
-        return None
-    with _LOCK:
-        if _RANK_MEM is not None and _RANK_MTIME == mtime:
-            return _RANK_MEM
-        if _RANK_MEM is not None:
-            _RANK_MEM.close()
-        rows = load_table("stallion_rankings")
-        cols = TABLES["stallion_rankings"]
-        conn = sqlite3.connect(":memory:", check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        col_sql = ", ".join(f'"{c}" TEXT' for c in cols)
-        conn.execute(f"CREATE TABLE stallion_rankings ({col_sql})")
-        placeholders = ", ".join(["?"] * len(cols))
-        insert = f'INSERT INTO stallion_rankings VALUES ({placeholders})'
-        for row in rows:
-            conn.execute(insert, [row.get(c, "") for c in cols])
-        conn.execute(
-            'CREATE INDEX idx_rank_stallion ON stallion_rankings (stallion)'
-        )
-        conn.commit()
-        _RANK_MEM = conn
-        _RANK_MTIME = mtime
-        return _RANK_MEM
-
-
 def graded_stakes_winners() -> list[dict]:
-    """Winner rows from graded_stakes.csv (Place == 1), shaped for hypomating."""
+    """Winner rows from graded_stakes (Place == 1), shaped for hypomating."""
     records = []
     for row in load_table("graded_stakes"):
         place = str(row.get("Place") or "").strip()
@@ -551,10 +340,27 @@ def graded_stakes_winners() -> list[dict]:
     return records
 
 
+_FEE_HISTORY: tuple[object, dict[str, dict[int, int]]] | None = None
+
+
 def stud_fee_history() -> dict[str, dict[int, int]]:
-    """stallion name_key -> {year: fee_int} from stud_fees.csv."""
+    """stallion name_key -> {year: fee in US dollars} from stud_fees.
+
+    Cached per table version: catalog pages call this once per lot. Foreign fees
+    are converted (JPY 4,000,000 is ~$25,850, not $4,000,000); fees in currencies
+    without a rate and "Private" rows are left out. Where two sources list the
+    same season, a dollar fee wins.
+    """
+    global _FEE_HISTORY
+    from crossr_core.fees import parse_fee, usd_estimate
+
+    rows = load_table("stud_fees")
+    version = _MTIME.get("stud_fees")
+    if _FEE_HISTORY is not None and _FEE_HISTORY[0] == version:
+        return _FEE_HISTORY[1]
     out: dict[str, dict[int, int]] = {}
-    for row in load_table("stud_fees"):
+    dollars: set[tuple[str, int]] = set()
+    for row in rows:
         key = name_key(row.get("Stallion") or "")
         if not key:
             continue
@@ -562,12 +368,14 @@ def stud_fee_history() -> dict[str, dict[int, int]]:
             year = int(str(row.get("Year") or "").strip())
         except ValueError:
             continue
-        fee_raw = str(row.get("Stud Fee") or "")
-        digits = re.sub(r"[^\d]", "", fee_raw)
-        if not digits:
+        amount, currency = parse_fee(row.get("Stud Fee"))
+        fee = usd_estimate(amount, currency)
+        if not fee or ((key, year) in dollars and currency != "USD"):
             continue
-        fee = int(digits)
+        if currency == "USD":
+            dollars.add((key, year))
         out.setdefault(key, {})[year] = fee
+    _FEE_HISTORY = (version, out)
     return out
 
 
@@ -584,7 +392,7 @@ def breeding_for_stallion(stallion: str, year: int | None = None) -> list[dict]:
 
 
 def broodmare_sire_rows(year: int | None = None) -> list[dict]:
-    """Latest (or year-filtered) Broodmare list from stallion_rankings.csv."""
+    """Latest (or year-filtered) Broodmare list from stallion_rankings."""
     candidates = []
     for row in load_table("stallion_rankings"):
         if (row.get("list") or "").strip() != "Broodmare":
@@ -634,8 +442,59 @@ def broodmare_sire_rows(year: int | None = None) -> list[dict]:
     return out
 
 
+_FOAL_YEARS: dict[str, list[int]] = {}
+_FOAL_YEARS_VERSION: object = None
+
+
+def _foal_years_for(names) -> dict[str, list[int]]:
+    """name_key -> race_horses foaling years for just these names.
+
+    One SQL query for the names not cached yet: loading all of race_horses at
+    startup pushed the API past Railway's health-check window.
+    """
+    global _FOAL_YEARS_VERSION
+    version = table_version("race_horses")
+    if version != _FOAL_YEARS_VERSION:
+        _FOAL_YEARS.clear()
+        _FOAL_YEARS_VERSION = version
+    keys = {name_key(n) for n in names} - {""}
+    missing = [k for k in keys if k not in _FOAL_YEARS]
+    if missing:
+        found: dict[str, list[int]] = {k: [] for k in missing}
+        with _pg().connect() as conn:
+            rows = conn.execute(
+                "SELECT upper(name_key), foal_year FROM race_horses "
+                "WHERE upper(name_key) = ANY(%s) AND foal_year ~ '^[0-9]{4}$'",
+                (missing,),
+            ).fetchall()
+        for key, year in rows:
+            found.setdefault(name_key(key), []).append(int(year))
+        _FOAL_YEARS.update(found)
+    return {k: _FOAL_YEARS.get(k, []) for k in keys}
+
+
+def _foal_year_for_stud(years: list[int], first_season: int) -> int:
+    """The namesake old enough to stand in first_season (a sire is 3+ at his first season)."""
+    fits = [y for y in set(years) if y <= first_season - 2]
+    return max(fits) if fits else 0
+
+
+def stallion_foal_year(name: str, first_season: int) -> int:
+    """Foaling year of the stallion called name who stood by first_season (0 if unknown)."""
+    return _foal_year_for_stud(_foal_years_for([name]).get(name_key(name), []), first_season)
+
+
 def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
-    """Active stud cards derived from stud_fees (+ latest breeding_seasons)."""
+    """Active stud cards derived from stud_fees (+ latest breeding_seasons).
+
+    "Stud Duty Year" is the FIRST season in stud_fees or breeding_seasons (entered stud). The fee is
+    from the latest season up to the current year: announced future seasons
+    (Racing Post lists next year's fees) never count as the current fee.
+    "Latest Season" is that season's year.
+    """
+    from crossr_core.fees import format_fee, parse_fee, usd_estimate
+
+    current_year = datetime.date.today().year
     fees = load_table("stud_fees")
     by_stallion: dict[str, list] = {}
     for row in fees:
@@ -644,12 +503,14 @@ def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
             continue
         by_stallion.setdefault(key, []).append(row)
     breeding = {}
+    first_bred: dict[str, int] = {}
     for row in load_table("breeding_seasons"):
         key = name_key(row.get("stallion") or "")
         try:
             y = int(str(row.get("breeding_year") or "").strip())
         except ValueError:
             continue
+        first_bred[key] = min(y, first_bred.get(key, y))
         prior = breeding.get(key)
         if prior is None or y > prior[0]:
             breeding[key] = (y, row)
@@ -666,6 +527,7 @@ def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
         prior = ranks.get(key)
         if prior is None or y > prior[0]:
             ranks[key] = (y, r)
+    foal_years = _foal_years_for(by_stallion.keys())
 
     profiles = {}
     for key, rows in by_stallion.items():
@@ -678,19 +540,33 @@ def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
             dated.append((y, row))
         if not dated:
             continue
+        # A mares-bred report counts as a season even when no fee was listed.
+        first_season = min([y for y, _ in dated] + ([first_bred[key]] if key in first_bred else []))
         if year is not None:
-            dated = [pair for pair in dated if pair[0] == year] or dated
-        y, row = max(dated, key=lambda p: p[0])
-        fee_digits = re.sub(r"[^\d]", "", str(row.get("Stud Fee") or ""))
-        fee = int(fee_digits) if fee_digits else 0
+            pool = [pair for pair in dated if pair[0] == year]
+        else:
+            pool = [pair for pair in dated if pair[0] <= current_year]
+        pool = pool or dated
+        y = max(p[0] for p in pool)
+        # Same season from two sources: prefer a row with a fee (and in dollars).
+        season_rows = [r for yy, r in pool if yy == y]
+        row = max(
+            season_rows,
+            key=lambda r: (parse_fee(r.get("Stud Fee"))[0] is not None, parse_fee(r.get("Stud Fee"))[1] == "USD"),
+        )
+        amount, currency = parse_fee(row.get("Stud Fee"))
+        fee = usd_estimate(amount, currency) or 0
         mb = breeding.get(key)
         rank = ranks.get(key)
         display = (row.get("Stallion") or "").strip()
         profiles[display] = {
             "Farm": row.get("Farm") or "",
-            "Year Born": 0,
-            "Stud Duty Year": y,
+            "Year Born": _foal_year_for_stud(foal_years.get(key, []), first_season),
+            "Stud Duty Year": first_season,
+            "Latest Season": y,
             "Stud Fee": fee,
+            "Stud Fee Display": format_fee(row.get("Stud Fee")) or "",
+            "Stud Fee Currency": currency or "",
             "Status": "active",
             "Surface": "",
             "Height": "N/A",

@@ -4,7 +4,7 @@ Three services in one Railway project:
 
 | Service | What it is | Built from |
 | --- | --- | --- |
-| **Postgres** | All Crossr data: the 8 tables, pedigrees, accounts | Railway's Postgres template |
+| **Postgres** | All Crossr data (see [What lives where](#what-lives-where)) | Railway's Postgres template |
 | **api** | FastAPI (`crossr_api`) | `Dockerfile` |
 | **web** | Next.js site | `web/Dockerfile` |
 
@@ -13,9 +13,43 @@ Site: https://web-production-cbb1f5.up.railway.app · API: https://api-productio
 
 Build settings live on the services themselves; Railway no longer accepts `railway.json` config files.
 
-When `DATABASE_URL` is set the app reads and writes Postgres. Without it, it
-falls back to the local `data/*.csv` files and `pedigrees_database.py`, so local
-development still works offline.
+Crossr reads and writes **only** Postgres: the API, the training script and the
+pipeline all need `DATABASE_URL`, and nothing falls back to local files. The
+data files (`data/*.csv`, `pedigrees_database.py`, the sale catalogs, ...) are
+inputs to `scripts/load_railway.py` only, and `.dockerignore` keeps them out of
+the image.
+
+For local development, point `DATABASE_URL` at the `crossr_dev` database on the
+same Railway server (or a copy), never at production `railway`:
+
+```bash
+railway run -s Postgres -- sh -c 'echo "postgresql://$PGUSER:$PGPASSWORD@$RAILWAY_TCP_PROXY_DOMAIN:$RAILWAY_TCP_PROXY_PORT/crossr_dev"'
+export DATABASE_URL="postgresql://...:.../crossr_dev"
+./scripts/run_api.sh
+```
+
+## What lives where
+
+| Data | Postgres table(s) | Loaded from (by `scripts/load_railway.py`) |
+| --- | --- | --- |
+| Stud fees, race horses/seasons/starts, breeding seasons, stallion rankings, graded stakes, sales lots | `stud_fees`, `race_horses`, `race_seasons`, `race_starts`, `breeding_seasons`, `stallion_rankings`, `graded_stakes`, `sales_lots` | `data/<table>.csv`; then kept current by the pipeline |
+| Sales hub index (typed copy of `sales_lots`) | `sales_catalogs`, `sales_lot_index` | rebuilt automatically whenever `sales_lots` changes |
+| Pedigrees | `pedigrees` | `pedigrees_database.py`; then the scrapers |
+| Upcoming and Analyzed sale catalogs | `upcoming_catalogs`, `upcoming_catalog_rows` | `Upcoming Sales/*.csv`, `Analyzed Sales/analyzed_*.csv` (`--only catalogs`) |
+| Starred hips and notes on those catalogs | `upcoming_lot_marks` | written by the site; the loader never touches it |
+| Expected Market fee-band model, sales price / Boom% model | `crossr_models` (`fee_bands`, `sales_model`) | `Analyzed Sales/expected_market_fee_bands.json`, `Analyzed Sales/sales_model.json.gz` (`--only models`); `scripts/train_sales_model.py` stores a new sales model directly |
+| Saved hypothetical matings | `hypofoals` | `hypofoals.py` (`--only hypofoals`) |
+| Demo accounts / clients / notes | `industry_roles`, `accounts`, `clients`, `client_preferences`, `notes`, `hypothetical_matings` | `placeholderdatabase/*.csv` (`--only app_state`) |
+| Site accounts, sessions, saved barns | `users`, `sessions`, `preferences` | created by the site |
+| Change stamps | `crossr_table_versions` | every write bumps it; the API reloads only what changed |
+
+Stakes status (SW ... MG1W) is computed from `race_starts` joined to
+`race_horses`, with `graded_stakes` filling in horses and races Equibase lacks
+(see `graded_stakes.py`).
+
+To publish a new or updated sale catalog: put the CSV in `Upcoming Sales/` (or
+`Analyzed Sales/analyzed_*.csv`) and run `python3 scripts/load_railway.py --only catalogs`.
+No deploy is needed.
 
 ## 1. Push the repo
 
@@ -62,9 +96,12 @@ export DATABASE_URL="postgresql://postgres:...@...proxy.rlwy.net:PORT/railway"
 python3 scripts/load_railway.py
 ```
 
-Takes about a minute and needs ~5 GB of free RAM (mostly reading the 51 MB
-`pedigrees_database.py`). Re-run any time; each table is swapped in a single
-transaction. Load one table with `--only sales_lots`, or `--skip-pedigrees`.
+Takes a few minutes and needs ~5 GB of free RAM for the pedigrees (reading the
+51 MB `pedigrees_database.py`); everything else streams. Re-run any time; each
+part is swapped in a single transaction. Load one part with `--only sales_lots`
+(or `catalogs`, `models`, `hypofoals`, `app_state`, `pedigrees`), skip the
+pedigrees with `--skip-pedigrees`, or read the files from another checkout with
+`--source ~/Desktop/Crossr`.
 
 Expected counts (Oct 2026 data):
 
@@ -76,7 +113,23 @@ sales_lots 399,590   pedigrees 39,213
 
 ## 4. Check it
 
-`https://<api domain>/api/health` should return `"backend": "postgres"`.
+`https://<api domain>/api/health` should return `"backend": "postgres"` and
+`"sales_index": true`.
+
+## End-to-end checks
+
+`tests/e2e` drives the whole API in-process against a test database and fails
+on any empty panel: stallion profiles (American Pharoah, Into Mischief, Not This
+Time, Justify, Curlin, Essential Quality, Tapit, Flightline, Sierra Leone,
+Fierceness), hypomating for Virginia Key, Sippican Harbor, Off Topic and Stage
+Magic, and every hip of a made-up upcoming "Saratoga Sale (2026)" built from
+the real 2026 Fasig-Tipton Saratoga catalog. It refuses to run against
+production.
+
+```bash
+export DATABASE_URL="postgresql://...:.../crossr_dev"
+python3 -m pytest tests/e2e -q -rf
+```
 
 ## Scrapers
 
@@ -89,6 +142,7 @@ CSV import) is in [PIPELINE.md](PIPELINE.md).
 
 ## Known limits
 
-- The API still loads each table fully into memory the first time it is used
-  (~3.5 GB with everything loaded). Moving the heavy lookups to SQL queries is
-  the next step to cut RAM, and therefore cost.
+- Several horse/stallion lookups still load whole tables into memory on first
+  use (`race_horses`, `stud_fees`, `breeding_seasons`, `stallion_rankings`,
+  `graded_stakes`). The sales hub, auction history and stallion ranking history
+  now query Postgres directly instead of holding in-memory copies.

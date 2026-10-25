@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
+# Training output; scripts/train_sales_model.py also stores it in crossr_models("sales_model").
 ARTIFACT_PATH = ROOT / "Analyzed Sales" / "sales_model.json.gz"
 
 # A lot's stats only count history this many years back for sale levels.
@@ -385,16 +386,29 @@ _MODEL: Optional[Dict[str, Any]] = None
 _LOADED = False
 
 
-def load(path: Path = ARTIFACT_PATH, force: bool = False) -> Optional[Dict[str, Any]]:
-    """Load the trained artifact once; None when it has not been trained yet."""
+MODEL_NAME = "sales_model"
+
+
+def load(path: Optional[Path] = None, force: bool = False) -> Optional[Dict[str, Any]]:
+    """Load the trained artifact once from Postgres (crossr_models); None when not trained.
+
+    ``path`` reads a local artifact instead (training / tests only).
+    """
     global _MODEL, _LOADED
     with _LOCK:
         if _LOADED and not force:
             return _MODEL
         _LOADED = True
         try:
-            with gzip.open(path, "rt", encoding="utf-8") as fh:
-                blob = json.load(fh)
+            if path is not None:
+                with gzip.open(path, "rt", encoding="utf-8") as fh:
+                    blob = json.load(fh)
+            else:
+                from crossr_core import railway_db
+
+                blob = railway_db.read_model(MODEL_NAME)
+                if blob is None:
+                    raise KeyError(MODEL_NAME)
             blob["history"] = History.from_json(blob["history"])
             _MODEL = blob
         except (OSError, ValueError, KeyError):

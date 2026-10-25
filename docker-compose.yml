@@ -5,12 +5,8 @@ services:
       - "8000:8000"
     environment:
       CROSSR_FRONTEND_ORIGIN: http://localhost:3000,http://127.0.0.1:3000
-      SALES_DB_PATH: /app/crossr_sales.db
-    volumes:
-      - ./sales_data:/app/sales_data:ro
-      - ./graded_stakes_winners.csv:/app/graded_stakes_winners.csv:ro
-      - ./crossr_sales.db:/app/crossr_sales.db
-    # sales_data and stakes CSV stay on the API container only — never mounted into the web image.
+      # All data comes from Postgres; use crossr_dev (or a copy), never production.
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL to the crossr_dev database}
 
   web:
     build:

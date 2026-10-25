@@ -1,191 +1,244 @@
-"""Load graded/group stakes from data/graded_stakes.csv (sample DB).
+"""Race wins for stakes status: race results first, graded_stakes to fill gaps.
 
-Scraper staging (ifha_scraper / root dumps) is merged into that CSV by
-scripts/pipeline/run.py. This module is the runtime reader.
+Sources (all through crossr_core.sample_db, i.e. Railway Postgres):
 
-Normalization
--------------
-- ``Race Year`` is derived from ``Date (ISO)`` (``YYYY-MM-DD``), then ``Date``
-  (``27 September 2025``), then an existing ``Race Year`` column if present.
-- ``Grade`` is an alias of ``Group`` (G1/G2/G3) so older callers keep working.
-- Literal ``N/A`` strings are treated as missing. Object columns are filled
-  with ``""``; numeric columns are left numeric (no ``fillna('')``).
-- Rows with Horse Name ``N/A`` / blank are dropped (races with no result).
+1. ``race_starts`` joined to ``race_horses`` (Equibase results) - the main
+   source. Each win (place 1) is classified by ``grade`` and ``race_name``:
+   - G1/G2/G3: ``grade`` is 1, 2 or 3;
+   - Listed: the name carries "(Listed)" or "(Black Type)";
+   - Stakes: any other named US/Canadian race (e.g. "Phoenix Handicap",
+     a 1950s Preakness, restricted state-bred stakes). Generic race types
+     (Allowance, Claiming, Maiden..., Starter Handicap) and named races abroad
+     (Japanese "Stakes"/"Tokubetsu", UK novice races...) are not stakes.
+   Only stakes wins are returned from this source.
+2. ``graded_stakes`` - IFHA graded/group results plus hand-entered wins for
+   horses without an Equibase profile (allowance, maiden, ... marked in the
+   Group/Grade column). A row is used only when race_starts has no start for
+   that horse on that date, so it fills in horses not scraped yet and overseas
+   Group races Equibase lacks, without counting a race twice.
 
-Winner-only vs all finishers
-----------------------------
-Default ``winners_only=True`` keeps ``Place == 1`` only. Every existing
-feature (hypomating "won the X edition" summaries, sale analyzer, API stakes
-index) is winner-oriented.
+Black type (see is_black_type): G1-G3 ("Grade 1", "Group 2", "Gr3"), Listed / L,
+Stakes. Anything else is a win that shows in race lists but never counts as a
+stakes win.
 
-Pass ``winners_only=False`` if a future feature genuinely needs 2nd/3rd.
+Records keep the old graded_stakes shape (Horse Name, Foaling Year, Sex, Race
+Name, Race Year, Grade/Group, Place, Track, Country, Date (ISO), ...), so
+hypomating_engine.build_horse_summaries and the API stakes index are unchanged.
 """
 
 from __future__ import annotations
 
-import os
 import re
+import threading
 
-import pandas as pd
+from crossr_core import sample_db
 
-STAKES_CSV_NAME = "graded_stakes.csv"
 MISSING_NAMES = {"", "N/A", "NAN", "NONE", "<NA>"}
 
-_DATE_YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
+_YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
+_GRADE_RE = re.compile(r"^(?:G|GR|GRADE|GROUP)\s*\.?\s*([123])\b")
+_LISTED = {"L", "LR", "LISTED", "LISTED RACE", "STAKES", "STK", "BLACK TYPE", "BT"}
 
-_cached_frames = {}
-_cached_records = {}
-_cached_mtime = {}
+# Equibase's generic race types (the whole name is made of these words).
+_GENERIC_RACE = re.compile(
+    r"^(starter |waiver |optional |maiden |claiming |novice |selling |third class |rated |"
+    r"index race.*|premio/.*|condiciona.*|condizionata.*|clasico|winner|trial|conditions?|"
+    r"special weight|weight for age|handicap|allowance|claiming|maiden|plate|hurdle|juvenile|"
+    r"optional claiming|chase|steeplechase|stakes| )+(\(.*\))?$",
+    re.I,
+)
+_LISTED_TAG = re.compile(r"\((listed|black type)\)", re.I)
+_NOT_STAKES_WORDS = re.compile(
+    r"\b(starter|claiming|allowance|maiden|benchmark|novice|nursery|selling|rated|"
+    r"class \d|tokubetsu|condicional|premio)\b",
+    re.I,
+)
+_NORTH_AMERICA = {"USA", "CAN"}
+_CLASS_TAG = re.compile(r"\s*\((?:gr\.?\s*[123]|grade\s*[123]|listed|black type)\)", re.I)
 
-
-def _default_csv_path():
-    here = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
-        os.path.join(here, "data", STAKES_CSV_NAME),
-        os.path.join(os.getcwd(), "data", STAKES_CSV_NAME),
-    ]
-    for path in candidates:
-        if os.path.isfile(path):
-            return path
-    return candidates[0]
-
-
-def _year_from_iso(series):
-    iso = series.astype("string").str.strip()
-    return pd.to_numeric(iso.str.slice(0, 4), errors="coerce").astype("Int64")
-
-
-def _year_from_date_text(series):
-    parsed = pd.to_datetime(series, errors="coerce")
-    years = parsed.dt.year.astype("Int64")
-    if years.isna().any():
-        extracted = series.astype("string").str.extract(_DATE_YEAR_RE, expand=False)
-        years = years.fillna(pd.to_numeric(extracted, errors="coerce"))
-    return years.astype("Int64")
+_lock = threading.Lock()
+_cache: dict[bool, tuple[tuple, list[dict]]] = {}
 
 
-def _derive_race_year(df):
-    years = pd.Series(pd.NA, index=df.index, dtype="Int64")
-    if "Date (ISO)" in df.columns:
-        years = _year_from_iso(df["Date (ISO)"])
-    if years.isna().any() and "Date" in df.columns:
-        years = years.fillna(_year_from_date_text(df["Date"]))
-    if years.isna().any() and "Race Year" in df.columns:
-        years = years.fillna(pd.to_numeric(df["Race Year"], errors="coerce"))
-    df = df.copy()
-    df["Race Year"] = years.astype("Int64")
-    return df
+def graded_level(grade) -> int | None:
+    """1/2/3 for a graded or group race, else None."""
+    match = _GRADE_RE.match(str(grade or "").strip().upper())
+    return int(match.group(1)) if match else None
 
 
-def _stringify_year_col(series):
-    nums = pd.to_numeric(series, errors="coerce")
-    out = pd.Series("", index=series.index, dtype="object")
-    ok = nums.notna()
-    out.loc[ok] = nums.loc[ok].round().astype(int).astype(str)
-    return out
+def is_black_type(grade) -> bool:
+    """True for G1-G3, Listed and (ungraded) Stakes races; False for allowance etc."""
+    text = str(grade or "").strip().upper()
+    if not text:
+        return False
+    return graded_level(text) is not None or text in _LISTED
 
 
-def _read_and_normalize(path):
-    df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
-    df.columns = [str(c).replace("\ufeff", "").strip() for c in df.columns]
-    df = df.replace(to_replace=r"^\s*N/A\s*$", value=pd.NA, regex=True)
-
-    df = _derive_race_year(df)
-
-    if "Group" in df.columns:
-        df["Grade"] = df["Group"]
-    elif "Grade" not in df.columns:
-        df["Grade"] = pd.NA
-
-    if "Place" in df.columns:
-        df["Place"] = pd.to_numeric(df["Place"], errors="coerce").astype("Int64")
-
-    if "Horse Name" in df.columns:
-        names = df["Horse Name"].astype("string").str.strip()
-        bad = names.isna() | names.str.upper().isin(MISSING_NAMES)
-        df = df.loc[~bad].copy()
-        df["Horse Name"] = df["Horse Name"].astype("string").str.strip()
-    else:
-        df = df.iloc[0:0].copy()
-
-    if "Foaling Year" in df.columns:
-        df["Foaling Year"] = _stringify_year_col(df["Foaling Year"])
-    else:
-        df["Foaling Year"] = ""
-
-    for col in df.columns:
-        if col in ("Race Year", "Place"):
-            continue
-        if pd.api.types.is_object_dtype(df[col]) or str(df[col].dtype) in ("string", "string[python]"):
-            df[col] = df[col].astype("string").fillna("").str.strip()
-            df[col] = df[col].replace({"<NA>": "", "nan": "", "None": "", "NaN": ""})
-
-    return df.reset_index(drop=True)
+def classify_race(grade, race_name, country) -> str | None:
+    """Race class of an Equibase win: 'G1'..'G3', 'Listed', 'Stakes', or None (not a stakes)."""
+    grade = str(grade or "").strip()
+    if grade in ("1", "2", "3"):
+        return "G" + grade
+    name = str(race_name or "").strip()
+    if not name or name.upper() in MISSING_NAMES or _GENERIC_RACE.match(name):
+        return None
+    if _LISTED_TAG.search(name):
+        return "Listed"
+    if str(country or "").strip().upper() in _NORTH_AMERICA and not _NOT_STAKES_WORDS.search(name):
+        return "Stakes"
+    return None
 
 
-def load_graded_stakes_dataframe(path=None, winners_only=True):
-    """Return the normalized IFHA stakes DataFrame.
-
-    Derived columns: ``Race Year`` (nullable Int64) and ``Grade`` (alias of
-    ``Group``). Default is Place==1 winners only.
-    """
-    csv_path = path or _default_csv_path()
-    if not os.path.isfile(csv_path):
-        print(f"⚠️ Warning: data/{STAKES_CSV_NAME} not found.")
-        return pd.DataFrame()
-
-    cache_key = os.path.abspath(csv_path)
-    mtime = os.path.getmtime(csv_path)
-    if cache_key not in _cached_frames or _cached_mtime.get(cache_key) != mtime:
-        _cached_frames[cache_key] = _read_and_normalize(csv_path)
-        _cached_mtime[cache_key] = mtime
-        _cached_records.clear()
-
-    df = _cached_frames[cache_key]
-    if winners_only and "Place" in df.columns:
-        place = pd.to_numeric(df["Place"], errors="coerce")
-        df = df.loc[place == 1]
-    return df.copy()
+def horse_key(name, foal_year="") -> tuple[str, str]:
+    """(cleaned name, foal year) - same cleaning as main.clean_horse_name."""
+    cleaned = re.sub(r"\(.*?\)", "", str(name or ""))
+    cleaned = cleaned.replace(".", "").replace("'", "").replace(",", "")
+    year = str(foal_year or "").strip().split(".")[0]
+    return " ".join(cleaned.split()).strip().upper(), year
 
 
-def _records_from_frame(df):
-    if df.empty:
-        return []
-    ready = df.copy()
-    if "Race Year" in ready.columns:
-        years = pd.to_numeric(ready["Race Year"], errors="coerce")
-        ready["Race Year"] = [
-            int(y) if pd.notna(y) else "" for y in years
-        ]
-    if "Place" in ready.columns:
-        places = pd.to_numeric(ready["Place"], errors="coerce")
-        ready["Place"] = [
-            int(p) if pd.notna(p) else "" for p in places
-        ]
-    records = ready.to_dict("records")
-    for rec in records:
-        for key, value in list(rec.items()):
-            if value is None:
-                rec[key] = ""
-            else:
-                try:
-                    if pd.isna(value):
-                        rec[key] = ""
-                except (TypeError, ValueError):
-                    pass
-    return records
+def _clean(value) -> str:
+    text = "" if value is None else str(value).strip()
+    return "" if text.upper() in {"N/A", "NAN", "NONE", "<NA>"} else text
+
+
+def _int_or_blank(value):
+    text = _clean(value)
+    if not text:
+        return ""
+    try:
+        return int(round(float(text)))
+    except ValueError:
+        return ""
+
+
+def _race_year(row: dict):
+    iso = _clean(row.get("Date (ISO)"))
+    if len(iso) >= 4 and iso[:4].isdigit():
+        return int(iso[:4])
+    match = _YEAR_RE.search(_clean(row.get("Date")))
+    if match:
+        return int(match.group(1))
+    return _int_or_blank(row.get("Race Year"))
+
+
+def _normalize(row) -> dict | None:
+    rec = {col: _clean(row.get(col)) for col in sample_db.TABLES["graded_stakes"]}
+    if rec["Horse Name"].upper() in MISSING_NAMES:
+        return None
+    rec["Race Year"] = _race_year(rec)
+    rec["Grade"] = rec["Group"] or rec["Grade"]
+    rec["Place"] = _int_or_blank(rec["Place"])
+    year = _int_or_blank(rec["Foaling Year"])
+    rec["Foaling Year"] = str(year) if year != "" else ""
+    return rec
+
+
+# ---------------------------------------------------------------------------
+# race_starts
+# ---------------------------------------------------------------------------
+
+_STARTS_SQL = """
+    SELECT h.display_name, h.foal_year, h.sex, h.foaled_in,
+           s.race_date, s.place, s.grade, s.race_name, s.country, s.track
+    FROM race_starts s
+    JOIN race_horses h ON h.id = s.horse_id
+"""
+
+
+def _iter_starts():
+    """(display_name, foal_year, sex, foaled_in, race_date, place, grade, race_name, country, track)."""
+    with sample_db._pg().connect() as conn:
+        with conn.cursor(name="stakes_starts") as cur:
+            cur.itersize = 10000
+            cur.execute(_STARTS_SQL)
+            for rec in cur:
+                yield tuple("" if v is None else str(v) for v in rec)
+
+
+def _start_record(name, foal_year, sex, race_date, grade_class, race_name, country, track) -> dict:
+    return {
+        "Race Name": _CLASS_TAG.sub("", race_name).strip(),
+        "Horse Name": name,
+        "Year Foaled": foal_year,
+        "Foaling Year": foal_year,
+        "Sex": sex,
+        "Place": 1,
+        "Country": country,
+        "Track": track,
+        "Date": race_date,
+        "Date (ISO)": race_date,
+        "Race Year": int(race_date[:4]) if race_date[:4].isdigit() else "",
+        "Distance": "",
+        "Age": "",
+        "Purse": "",
+        "Group": grade_class,
+        "Grade": grade_class,
+        "Source": "race_starts",
+    }
+
+
+def _versions() -> tuple:
+    return tuple(sample_db.table_version(t) for t in ("race_starts", "race_horses", "graded_stakes"))
 
 
 def load_stakes_records(path=None, winners_only=True):
-    """List-of-dicts form used by hypomating, sale analyzer, and the API."""
-    csv_path = os.path.abspath(path or _default_csv_path())
-    cache_key = (csv_path, bool(winners_only))
-    if cache_key not in _cached_records:
-        df = load_graded_stakes_dataframe(path=csv_path, winners_only=winners_only)
-        _cached_records[cache_key] = _records_from_frame(df)
-    return _cached_records[cache_key]
+    """Merged race records (see module doc). ``path`` is ignored (kept for old callers).
+
+    Reloads when race_starts, race_horses or graded_stakes change.
+    """
+    version = _versions()
+    key = bool(winners_only)
+    with _lock:
+        hit = _cache.get(key)
+        if hit and hit[0] == version:
+            return hit[1]
+
+    # Fill-in candidates first, so only their horses' start dates are kept while streaming.
+    fill = []
+    for row in sample_db.load_table("graded_stakes"):
+        rec = _normalize(row)
+        if rec is None or (winners_only and rec["Place"] != 1):
+            continue
+        fill.append(rec)
+    names = {horse_key(rec["Horse Name"])[0] for rec in fill}
+
+    records = []
+    # race dates of fill-in horses' starts -> the stakes record built from that start (or None)
+    started: dict[tuple, dict] = {}        # keyed by (name, foal_year)
+    started_any_year: dict[str, dict] = {}  # by name, when race_horses has no foal year
+    for name, foal_year, sex, _foaled, race_date, place, grade, race_name, country, track in _iter_starts():
+        k = horse_key(name, foal_year)
+        rec = None
+        if not winners_only or place.strip() == "1":
+            grade_class = classify_race(grade, race_name, country)
+            if grade_class is not None:
+                rec = _start_record(name, foal_year, sex, race_date, grade_class, race_name, country, track)
+                records.append(rec)
+        if k[0] in names:
+            bucket = started.setdefault(k, {}) if k[1] else started_any_year.setdefault(k[0], {})
+            bucket[race_date] = rec or bucket.get(race_date)
+
+    for rec in fill:
+        k = horse_key(rec["Horse Name"], rec["Foaling Year"])
+        date = rec.get("Date (ISO)") or ""
+        dates = started.get(k) or started_any_year.get(k[0]) or {}
+        if date and date in dates:
+            # Same race already counted from race_starts; borrow the details it lacks.
+            twin = dates[date]
+            if twin is not None:
+                for col in ("Purse", "Distance", "Age"):
+                    if not twin.get(col) and rec.get(col):
+                        twin[col] = rec[col]
+            continue
+        rec["Source"] = "graded_stakes"
+        records.append(rec)
+
+    with _lock:
+        _cache[key] = (version, records)
+    return records
 
 
 def load_stakes_data(path=None, winners_only=True):
-    """Backward-compatible name: Place==1 winners from the IFHA CSV."""
+    """Backward-compatible name: winners (see load_stakes_records)."""
     return load_stakes_records(path=path, winners_only=winners_only)

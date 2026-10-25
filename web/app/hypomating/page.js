@@ -123,8 +123,10 @@ function HypomatingInner() {
       .finally(() => setLoading(false));
   }, [sireFromPage]);
 
-  async function run(ev) {
+  // chosenMare: run straight away with a name the user just picked (state updates are async).
+  async function run(ev, chosenMare) {
     ev?.preventDefault();
+    const mareName = chosenMare ?? mare;
     setLoading(true);
     setError("");
     setReport(null);
@@ -132,13 +134,13 @@ function HypomatingInner() {
     setYearChoices(null);
     try {
       const data = await apiPost("/api/hypomating/suggest", {
-        mare,
+        mare: mareName,
         surface,
         min_fee: minFee ? Number(minFee) : null,
         max_fee: maxFee ? Number(maxFee) : null,
       });
       setResult(data);
-      saveHypomatingSession({ mare, surface, minFee, maxFee, result: data });
+      saveHypomatingSession({ mare: mareName, surface, minFee, maxFee, result: data });
     } catch (e) {
       if (e.status === 409 && e.detail?.error === "ambiguous_year") {
         setYearChoices(e.detail);
@@ -300,8 +302,9 @@ function HypomatingInner() {
                     type="button"
                     className="primary"
                     onClick={() => {
-                      setMare(`${yearChoices.name} (${year})`);
-                      setYearChoices(null);
+                      const chosen = `${yearChoices.name} (${year})`;
+                      setMare(chosen);
+                      run(null, chosen);
                     }}
                   >
                     {horseCaps(yearChoices.name)} ({year})
@@ -341,7 +344,14 @@ function HypomatingInner() {
               <div className="panel">
                 <h4>SUGGESTED STALLIONS</h4>
                 {(result.suggestions || []).length === 0 ? (
-                  <p className="empty">No stallions in this fee band. Check the alternatives below.</p>
+                  <p className="empty">
+                    {minFee || maxFee ? "No stallions in this fee band." : "No standing stallions matched this mare."}
+                    {extraLineageGroups.length
+                      ? " Check the alternatives below."
+                      : minFee || maxFee
+                        ? " Try widening the fee range."
+                        : ""}
+                  </p>
                 ) : null}
                 {(result.suggestions || []).map((s) => (
                   <div key={s.name} className="suggest-card suggest-card-stack">

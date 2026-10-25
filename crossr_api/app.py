@@ -173,7 +173,7 @@ def _clear_session(response: Response):
 def health():
     from crossr_core import sample_db
 
-    return {"ok": True, "backend": sample_db.backend(), "sales_index": os.path.exists(sales_svc.db_path())}
+    return {"ok": True, "backend": sample_db.backend(), "sales_index": sales_svc.index_ready()}
 
 
 @app.post("/api/auth/register")
@@ -278,6 +278,7 @@ def pedigree_similarity(
         a_dam=a_dam or None,
         b_sire=b_sire or None,
         b_dam=b_dam or None,
+        kinship=True,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Could not compare pedigrees")
