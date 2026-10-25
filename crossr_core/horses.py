@@ -174,8 +174,76 @@ def build_stallion_roster(profiles=None):
             "state": row.get("state"),
             "avatar": (display or row["name"] or "?")[:1].upper(),
         })
+    roster.extend(_abroad_roster_rows(profiles, {r["key"] for r in roster}, parents, ranks))
     _STALLION_ROSTER = roster
     return roster
+
+
+_US_STATES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA",
+    "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM",
+    "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA",
+    "WV", "WI", "WY", "PR",
+}
+
+
+def _farm_region(farm):
+    """Trailing location code of a farm string ('Shizunai Stallion Station, JPN' -> 'JPN')."""
+    text = str(farm or "").strip().rstrip(".")
+    if not text:
+        return ""
+    return text.rsplit(",", 1)[-1].strip().upper()
+
+
+def _abroad_roster_rows(profiles, existing_keys, parents, ranks):
+    """Stallions standing outside the US: not in the US mares-bred report, but in stallion stats."""
+    rows = []
+    min_year = datetime.datetime.now().year - 1
+    for name, data in (profiles or {}).items():
+        key = main.clean_horse_name(name)
+        if not key or key in existing_keys or not isinstance(data, dict):
+            continue
+        region = _farm_region(data.get("Farm"))
+        if not region or region in _US_STATES:
+            continue
+        if str(data.get("Status", "")).strip().lower() == "pensioned":
+            continue
+        fee = data.get("Stud Fee", 0)
+        fee_n = int((fee if isinstance(fee, int) else _fee_num(fee)) or 0)
+        try:
+            stud_year = int(data.get("Stud Duty Year") or 0)
+        except (TypeError, ValueError):
+            stud_year = 0
+        if fee_n <= 0 or stud_year < min_year:
+            continue
+        existing_keys.add(key)
+        sire, dam = parents.get(key, (None, None))
+        rank = ranks.get(key)
+        # Duty year is the current season; a relocated sire's crops date from his first book.
+        fees_hist, mares_hist = load_book_stats()
+        book_years = set(fees_hist.get(key, {})) | set(mares_hist.get(key, {}))
+        if book_years and min(book_years) < stud_year:
+            stud_year = min(book_years)
+        crop_l = crop_label(stud_year)
+        rows.append({
+            "name": name,
+            "key": key,
+            "sire": sire,
+            "dam": dam,
+            "farm": str(data.get("Farm", "")).replace("_", " ").strip(),
+            "stud_fee": f"${fee_n:,}",
+            "stud_fee_num": fee_n,
+            "year_foaled": data.get("Year Born"),
+            "entered_stud": stud_year,
+            "rank": rank if rank is not None else 9999,
+            "crop": crop_l,
+            "badge": stallion_badge({"rank": rank, "crop": crop_l, "major_wins": data.get("Major Wins", "")}),
+            "surface": data.get("Surface", "Both"),
+            "mares_bred_2026": None,
+            "state": region,
+            "avatar": (name or "?")[:1].upper(),
+        })
+    return rows
 
 
 def crop_label(entered_stud, current_year=None):
@@ -261,7 +329,7 @@ _RACE_INDEX = None
 
 
 def _race_index():
-    """name_key -> [(horse_id, foal_year)] and horse_id -> season rows, built once."""
+    """CSV mode only: name_key -> [(horse_id, foal_year)] and horse_id -> season rows."""
     global _RACE_INDEX
     if _RACE_INDEX is None:
         from crossr_core import sample_db
@@ -280,34 +348,127 @@ def _race_index():
     return _RACE_INDEX
 
 
-def race_seasons_for(name, foal_year=None):
-    """Season-by-season race record from race_horses / race_seasons (career row skipped)."""
-    horses, seasons = _race_index()
-    matches = horses.get(main.clean_horse_name(name or ""), [])
-    if foal_year:
-        matches = [m for m in matches if m[1] == foal_year] or matches
-    if not matches:
-        return []
-    horse_id, born = matches[0]
+def _pedigree_foal_year(name):
+    entry = main.PEDIGREE_DATABASE.get(main.clean_horse_name(name or "")) or {}
+    found = re.search(r"\((\d{4})\)", str(entry.get("Horse") or ""))
+    return int(found.group(1)) if found else None
+
+
+def _race_name_keys(names):
+    """race_horses.name_key spellings to try for these names (curly apostrophes etc.)."""
+    from crossr_core import sample_db
+
+    keys = []
+    for name in names:
+        for key in (main.clean_horse_name(name or ""), sample_db.name_key(name or "")):
+            if key and key not in keys:
+                keys.append(key)
+    return keys
+
+
+# Same horse is often queued under several pedigree keys; take the row with results.
+_RACE_HORSE_SQL = """
+SELECT h.id FROM race_horses h
+WHERE h.name_key = ANY(%s) AND h.foal_year = %s AND h.status = 'ok'
+ORDER BY EXISTS (SELECT 1 FROM race_seasons s WHERE s.horse_id = h.id) DESC,
+         (h.pedigree_key = h.name_key) DESC, length(h.id), h.id
+LIMIT 1
+"""
+_RACE_SEASONS_SQL = """
+SELECT year, starts, firsts, seconds, thirds, earnings FROM race_seasons
+WHERE horse_id = %s AND year ~ '^[0-9]{4}$'
+"""
+_RACE_WINS_SQL = """
+SELECT race_date, track, country, race_name, grade FROM race_starts
+WHERE horse_id = %s AND place = '1'
+ORDER BY race_date
+"""
+
+
+def _season_row(year, born, row):
+    earnings = _intish(row.get("earnings"))
+    return {
+        "season": year,
+        "age": f"{year - born}YO" if born else "—",
+        "starts": _intish(row.get("starts")),
+        "firsts": _intish(row.get("firsts")),
+        "seconds": _intish(row.get("seconds")),
+        "thirds": _intish(row.get("thirds")),
+        "earnings": earnings,
+        "earnings_display": f"${earnings:,}" if earnings else "$0",
+        "accomplishments": "n/a",
+    }
+
+
+def _win_class(grade, race_name, country):
+    try:
+        import graded_stakes
+
+        classify = getattr(graded_stakes, "classify_race", None)
+    except ImportError:
+        classify = None
+    if classify:
+        return classify(grade, race_name, country)
+    grade = str(grade or "").strip()
+    return "G" + grade if grade in ("1", "2", "3") else None
+
+
+def _race_results_pg(pg, names, born):
+    keys = _race_name_keys(names)
+    if not keys:
+        return [], []
+    with pg.connect() as conn:
+        hit = conn.execute(_RACE_HORSE_SQL, (keys, str(born))).fetchone()
+        if not hit:
+            return [], []
+        seasons = conn.execute(_RACE_SEASONS_SQL, (hit[0],)).fetchall()
+        starts = conn.execute(_RACE_WINS_SQL, (hit[0],)).fetchall()
     rows = []
-    for row in seasons.get(horse_id, []):
-        year = _intish(row.get("year"))
-        if not year:
+    for year, starts_n, firsts, seconds, thirds, earnings in seasons:
+        year = int(year)
+        # Thoroughbreds first race at two; anything earlier is another horse's record.
+        if year < born + 2:
             continue
-        earnings = _intish(row.get("earnings"))
-        rows.append({
-            "season": year,
-            "age": f"{year - born}YO" if born else "—",
-            "starts": _intish(row.get("starts")),
-            "firsts": _intish(row.get("firsts")),
-            "seconds": _intish(row.get("seconds")),
-            "thirds": _intish(row.get("thirds")),
-            "earnings": earnings,
-            "earnings_display": f"${earnings:,}" if earnings else "$0",
-            "accomplishments": "n/a",
-        })
+        rows.append(_season_row(year, born, {
+            "starts": starts_n, "firsts": firsts, "seconds": seconds,
+            "thirds": thirds, "earnings": earnings,
+        }))
+    wins = [{
+        "date": race_date,
+        "track": track,
+        "country": country,
+        "race_name": race_name,
+        "grade": grade,
+        "class": _win_class(grade, race_name, country),
+    } for race_date, track, country, race_name, grade in starts]
+    return rows, wins
+
+
+def race_results_for(name, foal_year=None, aliases=()):
+    """(season rows, wins) for a horse from race_horses / race_seasons / race_starts.
+
+    Names are reused across generations, so a record only counts when its foaling year
+    matches the horse's; with no known foaling year there is no safe match. Seasons skip
+    the career row; wins are the horse's 1st-place starts, oldest first.
+    """
+    from crossr_core import sample_db
+
+    born = foal_year or _pedigree_foal_year(name)
+    if not born:
+        return [], []
+    pg = sample_db._pg()
+    if pg:
+        rows, wins = _race_results_pg(pg, [name, *aliases], born)
+    else:
+        horses, seasons = _race_index()
+        matches = [m for m in horses.get(main.clean_horse_name(name or ""), []) if m[1] == born]
+        rows, wins = [], []
+        for row in seasons.get(matches[0][0], []) if matches else []:
+            year = _intish(row.get("year"))
+            if year and year >= born + 2:
+                rows.append(_season_row(year, born, row))
     rows.sort(key=lambda r: r["season"])
-    return rows
+    return rows, wins
 
 
 def top_progeny_for_sire(sire_name, limit=12):
@@ -1760,8 +1921,15 @@ def get_horse_profile(search_name, profiles=None):
     if not data and not has_valid_pedigree:
         return None
 
-    race_rows = []
     race_totals = {"starts": 0, "firsts": 0, "seconds": 0, "thirds": 0, "earnings": 0}
+    # Race results from race_seasons win; the stud card's "Race Record" only fills in
+    # for horses Equibase hasn't been scraped for yet.
+    year_in_name = re.search(r"\((\d{4})\)", f"{search_name} {horse_name}")
+    birth_hint = (int(year_in_name.group(1)) if year_in_name else None) or _intish((data or {}).get("Year Born")) or None
+    race_rows, race_wins = race_results_for(clean_search, foal_year=birth_hint, aliases=(search_name, horse_name))
+    for season in race_rows:
+        for field in race_totals:
+            race_totals[field] += season[field]
     stallion = None
     if data:
         current_year = datetime.datetime.now().year
@@ -1775,7 +1943,7 @@ def get_horse_profile(search_name, profiles=None):
             stud_fee_display = str(raw_fee)
 
         race_record = data.get("Race Record", {}) or {}
-        if isinstance(race_record, dict):
+        if isinstance(race_record, dict) and not race_rows:
             for age_key, stats in race_record.items():
                 starts = stats.get("Starts", 0) or 0
                 firsts = stats.get("1sts", 0) or 0
@@ -1810,17 +1978,6 @@ def get_horse_profile(search_name, profiles=None):
                     "earnings_display": f"${earn_num:,}" if earn_num else "$0",
                     "accomplishments": stats.get("Major Accomplishments", "n/a"),
                 })
-
-    # Stallion-stats race records are often empty; fall back to scraped race seasons.
-    if not race_rows:
-        birth_hint = _intish((data or {}).get("Year Born")) or None
-        for season in race_seasons_for(clean_search, foal_year=birth_hint):
-            race_totals["starts"] += season["starts"]
-            race_totals["firsts"] += season["firsts"]
-            race_totals["seconds"] += season["seconds"]
-            race_totals["thirds"] += season["thirds"]
-            race_totals["earnings"] += season["earnings"]
-            race_rows.append(season)
 
     if data:
         mares_bred_val = None
@@ -1906,6 +2063,7 @@ def get_horse_profile(search_name, profiles=None):
         "stallion": stallion,
         "race_record": race_rows,
         "race_totals": race_totals,
+        "race_wins": race_wins,
         "pedigree": tree,
         "inbreeding": inbreeding,
         "top_progeny": payload_top,

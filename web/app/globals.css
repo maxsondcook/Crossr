@@ -477,15 +477,16 @@ button, input, select { font: inherit; color: inherit; }
 /* Horse page: info panels sit in pairs beside the pedigree; each row matches heights. */
 .horse-panels {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Pairs when each panel gets at least 340px; wide tables take a full row. */
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
   gap: 12px;
   align-items: stretch;
 }
 .horse-panels > .panel { min-width: 0; }
+/* Wide tables (rankings) take a full row; neighbours pack up to fill the gap. */
+.horse-panels { grid-auto-flow: row dense; }
+.horse-panels > .panel-wide { grid-column: 1 / -1; }
 .horse-panels .hero { padding-top: 6px; }
-@media (max-width: 1180px) {
-  .horse-panels { grid-template-columns: minmax(0, 1fr); }
-}
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -550,6 +551,9 @@ th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 4px; 
 td { padding: 7px 4px; border-top: 1px solid #243049; }
 td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .history-wrap { max-height: 280px; overflow: auto; margin-top: 6px; }
+/* Stud fee & mares bred: compact so all seven columns fit a narrow panel. */
+.book-table { font-size: 12px; }
+.book-table th, .book-table td { padding: 6px 3px; white-space: nowrap; }
 
 .stallion-rankings-panel .rankings-toolbar {
   display: flex;
@@ -1060,7 +1064,6 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .pv-section { margin-bottom: 6px; }
 .pv-badge { margin-left: 8px; padding: 1px 6px; border-radius: 6px; background: rgba(212, 175, 55, 0.15); color: var(--gold); font-size: 10px; letter-spacing: 0.06em; }
 .pv-boom b { color: var(--green); }
-.pv-boom-rel { color: var(--muted); font-size: 13px; font-weight: 600; }
 .pv-price b { display: block; margin-top: 4px; font-size: 18px; font-variant-numeric: tabular-nums; }
 .pv-note { color: var(--muted); font-size: 13px; margin: 10px 0 0; line-height: 1.45; }
 @media (max-width: 720px) {
