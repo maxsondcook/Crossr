@@ -2,7 +2,10 @@
 
 import pytest
 
-from conftest import AMBIGUOUS_MARES, BROODMARES, REPORT_STALLIONS, q
+from conftest import AMBIGUOUS_MARES, BROODMARES, REPORT_STALLIONS, STALLIONS, q
+
+# Report stallions with stakes-winning progeny; the others (Flightline) rightly have no proven crosses.
+PROVEN_STALLIONS = [s for s in REPORT_STALLIONS if STALLIONS[s]["progeny"]]
 
 SUGGEST = "/api/hypomating/suggest"
 
@@ -74,7 +77,7 @@ def test_surface_preference(api, mare, surface):
     assert data.get("suggestions") or data.get("lineage_groups"), f"{mare}: no {surface} suggestions"
 
 
-@pytest.mark.parametrize("stallion", REPORT_STALLIONS)
+@pytest.mark.parametrize("stallion", PROVEN_STALLIONS)
 def test_stallion_has_proven_crosses(api, stallion):
     crosses = api.ok(f"/api/hypomating/crosses/{q(stallion)}").get("crosses") or []
     assert crosses, f"{stallion}: no proven crosses"
@@ -89,9 +92,11 @@ def test_stallion_x_mare_report(api, stallion, mare):
     assert (ped.get("sire") or {}).get("name") and (ped.get("dam") or {}).get("name"), f"{stallion} x {mare}: foal pedigree incomplete"
     assert isinstance((rep.get("inbreeding") or {}).get("coefficient_pct"), (int, float)), f"{stallion} x {mare}: no inbreeding"
     assert rep.get("female_family"), f"{stallion} x {mare}: female family empty"
-    assert rep.get("similar_crosses"), f"{stallion} x {mare}: no similar crosses"
     assert rep.get("similar_stallions"), f"{stallion} x {mare}: no similar stallions"
-    assert rep.get("auction_history"), f"{stallion} x {mare}: no auction history"
+    # Similar crosses are the sire's stakes winners (and the auction history theirs).
+    if STALLIONS[stallion]["progeny"]:
+        assert rep.get("similar_crosses"), f"{stallion} x {mare}: no similar crosses"
+        assert rep.get("auction_history"), f"{stallion} x {mare}: no auction history"
 
 
 @pytest.mark.parametrize("mare", BROODMARES)

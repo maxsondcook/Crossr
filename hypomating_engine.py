@@ -349,47 +349,87 @@ SEX_MAP = {
     'g': 'gelding', 'm': 'mare', 'h': 'horse'
 }
 
-def get_sire_line_ancestry(horse_name):
-    clean_name = main.clean_horse_name(horse_name)
-    ancestry = [clean_name]
-    current = clean_name
-    while current in SIRE_PARENTS:
-        current = SIRE_PARENTS[current]
+# SIRE_PARENTS keyed by cleaned name ("harlan's holiday" -> "HARLANS HOLIDAY"), the form every
+# lookup uses. Matching the raw keys directly missed every name with an apostrophe or capitals.
+# Built on first use: main imports this module before defining clean_horse_name.
+_SIRE_MAPS = None
+
+
+def _sire_maps():
+    """(cleaned son -> cleaned sire, cleaned name -> name as written in SIRE_PARENTS)."""
+    global _SIRE_MAPS
+    if _SIRE_MAPS is None:
+        clean = main.clean_horse_name
+        _SIRE_MAPS = (
+            {clean(son): clean(sire) for son, sire in SIRE_PARENTS.items()},
+            {clean(name): name for pair in SIRE_PARENTS.items() for name in pair},
+        )
+    return _SIRE_MAPS
+
+
+def get_sire_line_ancestry(horse_name, node=None):
+    """Cleaned names up the male line: the horse, his sire, sire's sire, ...
+
+    Walks the horse's own pedigree (or ``node``, e.g. the damsire's branch of a
+    mare's tree when he has no record of his own), then continues through the
+    hand-kept SIRE_PARENTS map past the tree's top.
+    """
+    ancestry = []
+    own = main.pedigree_tree(horse_name)
+    if not (isinstance(own, dict) and own.get("Sire")) and isinstance(node, dict) and node.get("Sire"):
+        own = node
+    node = own or {"Horse": horse_name}
+    while isinstance(node, dict) and node.get("Horse"):
+        clean = main.clean_horse_name(node["Horse"])
+        if not clean or "UNKNOWN" in clean or clean in ancestry:
+            break
+        ancestry.append(clean)
+        node = node.get("Sire")
+        if isinstance(node, str):
+            node = {"Horse": node}
+    parents, _ = _sire_maps()
+    current = ancestry[-1] if ancestry else main.clean_horse_name(horse_name)
+    if not ancestry and current:
+        ancestry.append(current)
+    while current in parents:
+        current = parents[current]
+        if current in ancestry:
+            break
         ancestry.append(current)
     return ancestry
 
 def find_lineage_relatives(stallion_clean):
     """
     Finds the stallion's immediate sire, paternal half-brothers,
-    and all generations of deep sons/descendants.
+    and all generations of deep sons/descendants (names as written in SIRE_PARENTS).
     """
-    target = stallion_clean.strip().lower()
+    parents, raw_names = _sire_maps()
+    target = main.clean_horse_name(stallion_clean)
     relatives = set()
-    
+
     # 1. Find the immediate Sire
-    immediate_sire = SIRE_PARENTS.get(target, "").strip().lower()
+    immediate_sire = parents.get(target, "")
     if immediate_sire:
         relatives.add(immediate_sire)
-        
+
         # 2. Find Paternal Half-Brothers (Sires sharing the same father)
-        for son, parent in SIRE_PARENTS.items():
-            if parent.strip().lower() == immediate_sire and son.strip().lower() != target:
-                relatives.add(son.strip().lower())
-                
+        for son, parent in parents.items():
+            if parent == immediate_sire and son != target:
+                relatives.add(son)
+
     # 3. Find Sons and Deep Descendants (Recursive helper)
-    def get_all_sons(parent_name):
+    def get_all_sons(parent_name, seen):
         sons = []
-        for son, parent in SIRE_PARENTS.items():
-            if parent.strip().lower() == parent_name:
-                sons.append(son.strip().lower())
-                sons.extend(get_all_sons(son.strip().lower()))
+        for son, parent in parents.items():
+            if parent == parent_name and son not in seen:
+                seen.add(son)
+                sons.append(son)
+                sons.extend(get_all_sons(son, seen))
         return sons
 
-    descendants = get_all_sons(target)
-    for desc in descendants:
-        relatives.add(desc)
-
-    return list(relatives)
+    relatives.update(get_all_sons(target, {target}))
+    relatives.discard(target)
+    return [raw_names.get(name, name.lower()) for name in relatives]
 
 def get_mare_sire_from_pedigree(pedigree_dict):
     if not pedigree_dict or not isinstance(pedigree_dict, dict):
@@ -613,7 +653,7 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
     horse_summaries = build_horse_summaries(filtered_records)
     proven_cross_sires = {}
     direct_progeny_clean_names = set()
-    mare_sire_ancestry = get_sire_line_ancestry(mating_damsire)
+    mare_sire_ancestry = get_sire_line_ancestry(mating_damsire, node=mare_pedigree.get("Sire"))
 
     for h_name, h in horse_summaries.items():
         clean_h = main.clean_horse_name(h_name)

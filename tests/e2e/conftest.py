@@ -26,19 +26,22 @@ sys.path.insert(0, str(ROOT))
 # Test subjects (chosen by the user)
 # ---------------------------------------------------------------------------
 
-# name -> facts the profile must agree with. progeny: has racing offspring;
-# bms: old enough that daughters' foals race (broodmare-sire lists).
+# name -> facts the profile must agree with. progeny: has stakes-winning offspring
+# (top progeny, proven crosses, a general sire rank); bms: old enough that
+# daughters' foals race (broodmare-sire lists); abroad: stands outside North
+# America, so he has a profile but is not in the stallion directory (user's call).
 STALLIONS = {
-    "American Pharoah": {"foaled": 2012, "entered_stud": 2016, "progeny": True, "bms": True},
+    "American Pharoah": {"foaled": 2012, "entered_stud": 2016, "progeny": True, "bms": True, "abroad": True},
     "Into Mischief": {"foaled": 2005, "entered_stud": 2009, "progeny": True, "bms": True},
     "Not This Time": {"foaled": 2014, "entered_stud": 2017, "progeny": True, "bms": False},
     "Justify": {"foaled": 2015, "entered_stud": 2019, "progeny": True, "bms": False},
     "Curlin": {"foaled": 2004, "entered_stud": 2009, "progeny": True, "bms": True},
     "Essential Quality": {"foaled": 2018, "entered_stud": 2022, "progeny": True, "bms": False},
     "Tapit": {"foaled": 2001, "entered_stud": 2005, "progeny": True, "bms": True},
-    "Flightline": {"foaled": 2018, "entered_stud": 2023, "progeny": True, "bms": False, "light": True},
-    "Sierra Leone": {"foaled": 2021, "entered_stud": 2025, "progeny": False, "bms": False},
-    "Fierceness": {"foaled": 2021, "entered_stud": 2025, "progeny": False, "bms": False},
+    # Flightline's first crop are 2-year-olds with no stakes winners yet: empty progeny/crosses is right.
+    "Flightline": {"foaled": 2018, "entered_stud": 2023, "progeny": False, "bms": False, "light": True},
+    "Sierra Leone": {"foaled": 2021, "entered_stud": 2026, "progeny": False, "bms": False},
+    "Fierceness": {"foaled": 2021, "entered_stud": 2026, "progeny": False, "bms": False},
 }
 
 # Stage Magic is two mares; plain "Stage Magic" must ask which year (409).

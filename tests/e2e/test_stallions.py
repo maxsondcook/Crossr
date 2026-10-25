@@ -86,7 +86,8 @@ def test_stud_card(api, name):
         problems.append("no crop label")
     if not st.get("sire") or not st.get("dam"):
         problems.append(f"sire/dam {st.get('sire')!r}/{st.get('dam')!r}")
-    if st.get("rank") in (None, ""):
+    # A general sire rank needs earners; sires without stakes-winning progeny may have none.
+    if STALLIONS[name]["progeny"] and st.get("rank") in (None, ""):
         problems.append("no stud rank")
     assert not problems, f"{name}: " + "; ".join(problems)
 
@@ -198,6 +199,9 @@ def test_search_finds_stallion(api, name):
 def test_stallion_directory(api, name):
     rows = api.ok(f"/api/stallions?q={q(name)}").get("stallions") or []
     hit = next((r for r in rows if r.get("name", "").upper() == name.upper()), None)
+    if STALLIONS[name].get("abroad"):
+        assert not hit, f"{name} stands abroad and should not be in the stallion directory"
+        return
     assert hit, f"stallion directory search {name!r}: not listed ({[r.get('name') for r in rows[:5]]})"
     assert str(hit.get("entered_stud")) == str(STALLIONS[name]["entered_stud"]), (
         f"{name}: directory says entered stud {hit.get('entered_stud')!r} / crop {hit.get('crop')!r}, "

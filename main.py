@@ -4,6 +4,9 @@ import hypomating_engine
 import placeholder_store
 
 # NAME CLEANING
+_COLOR_SUFFIX = re.compile(r'\s+(?:GR/RO|GR/R|DK B/BR|B/BR)\s*$', re.I)
+
+
 def clean_horse_name(name: str) -> str:
     """
     Normalizes horse names accurately for absolute dictionary matches.
@@ -13,6 +16,8 @@ def clean_horse_name(name: str) -> str:
         return ""
     # Strip any trailing parenthetical years or country suffixes
     cleaned = re.sub(r'\(.*?\)', '', name)
+    # Some pedigree labels carry the coat colour: 'DARK ANGEL GR/R (2005)', 'X DK B/BR'.
+    cleaned = _COLOR_SUFFIX.sub('', cleaned)
     # Strip dots, punctuation, and enforce clean spacing
     cleaned = cleaned.replace(".", "").replace("'", "").replace(",", "")
     cleaned = " ".join(cleaned.split())
