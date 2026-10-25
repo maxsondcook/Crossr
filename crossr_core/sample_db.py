@@ -442,27 +442,35 @@ def broodmare_sire_rows(year: int | None = None) -> list[dict]:
     return out
 
 
-_FOAL_YEARS: tuple[object, dict[str, list[int]]] | None = None
+_FOAL_YEARS: dict[str, list[int]] = {}
+_FOAL_YEARS_VERSION: object = None
 
 
-def _foal_years_by_key() -> dict[str, list[int]]:
-    """name_key -> foaling years of every race_horses row with that name (cached per table version)."""
-    global _FOAL_YEARS
-    rows = load_table("race_horses")
-    version = _MTIME.get("race_horses")
-    if _FOAL_YEARS is not None and _FOAL_YEARS[0] == version:
-        return _FOAL_YEARS[1]
-    out: dict[str, list[int]] = {}
-    for row in rows:
-        key = name_key(row.get("name_key") or row.get("display_name") or "")
-        try:
-            y = int(str(row.get("foal_year") or "").strip())
-        except ValueError:
-            continue
-        if key:
-            out.setdefault(key, []).append(y)
-    _FOAL_YEARS = (version, out)
-    return out
+def _foal_years_for(names) -> dict[str, list[int]]:
+    """name_key -> race_horses foaling years for just these names.
+
+    One SQL query for the names not cached yet: loading all of race_horses at
+    startup pushed the API past Railway's health-check window.
+    """
+    global _FOAL_YEARS_VERSION
+    version = table_version("race_horses")
+    if version != _FOAL_YEARS_VERSION:
+        _FOAL_YEARS.clear()
+        _FOAL_YEARS_VERSION = version
+    keys = {name_key(n) for n in names} - {""}
+    missing = [k for k in keys if k not in _FOAL_YEARS]
+    if missing:
+        found: dict[str, list[int]] = {k: [] for k in missing}
+        with _pg().connect() as conn:
+            rows = conn.execute(
+                "SELECT upper(name_key), foal_year FROM race_horses "
+                "WHERE upper(name_key) = ANY(%s) AND foal_year ~ '^[0-9]{4}$'",
+                (missing,),
+            ).fetchall()
+        for key, year in rows:
+            found.setdefault(name_key(key), []).append(int(year))
+        _FOAL_YEARS.update(found)
+    return {k: _FOAL_YEARS.get(k, []) for k in keys}
 
 
 def _foal_year_for_stud(years: list[int], first_season: int) -> int:
@@ -473,7 +481,7 @@ def _foal_year_for_stud(years: list[int], first_season: int) -> int:
 
 def stallion_foal_year(name: str, first_season: int) -> int:
     """Foaling year of the stallion called name who stood by first_season (0 if unknown)."""
-    return _foal_year_for_stud(_foal_years_by_key().get(name_key(name), []), first_season)
+    return _foal_year_for_stud(_foal_years_for([name]).get(name_key(name), []), first_season)
 
 
 def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
@@ -519,7 +527,7 @@ def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
         prior = ranks.get(key)
         if prior is None or y > prior[0]:
             ranks[key] = (y, r)
-    foal_years = _foal_years_by_key()
+    foal_years = _foal_years_for(by_stallion.keys())
 
     profiles = {}
     for key, rows in by_stallion.items():

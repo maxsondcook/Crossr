@@ -138,7 +138,10 @@ def build_stallion_roster(profiles=None):
     parents = _parent_lookup()
     ranks = _rank_map()
     roster = []
-    for row in _load_mares_bred_2026():
+    mares_bred = _load_mares_bred_2026()
+    from crossr_core import sample_db
+    sample_db._foal_years_for(row["name"] for row in mares_bred)  # one query, not one per sire
+    for row in mares_bred:
         key = row["key"]
         display, data = by_profile.get(key, (row["name"], {}))
         status = str((data or {}).get("Status", "")).strip().lower()
@@ -1165,6 +1168,10 @@ def build_search_index(profiles=None):
             "has_pedigree": True,
             "has_profile": False,
         }
+    # Cleaned name -> index ids, built once (scanning every entry per stud card took minutes).
+    by_name = {}
+    for eid, item in entries.items():
+        by_name.setdefault(main.clean_horse_name(item.get("name", "")), []).append(eid)
     for key, data in profiles.items():
         ck = main.clean_horse_name(key)
         year = str(data.get("Year Born", "") or "")
@@ -1175,14 +1182,12 @@ def build_search_index(profiles=None):
             if year and not entries[eid]["year"]:
                 entries[eid]["year"] = year
         else:
-            same_name = [
-                k for k, item in entries.items()
-                if main.clean_horse_name(item.get("name", "")) == ck
-            ]
+            same_name = by_name.get(ck, [])
             if len(same_name) == 1:
                 entries[same_name[0]]["has_profile"] = True
                 entries[same_name[0]]["farm"] = str(data.get("Farm", "")).replace("_", " ").title()
             else:
+                by_name.setdefault(ck, []).append(eid)
                 entries[eid] = {
                     "key": eid,
                     "name": key,

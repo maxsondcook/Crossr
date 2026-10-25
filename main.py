@@ -17,7 +17,8 @@ def clean_horse_name(name: str) -> str:
     # Strip any trailing parenthetical years or country suffixes
     cleaned = re.sub(r'\(.*?\)', '', name)
     # Some pedigree labels carry the coat colour: 'DARK ANGEL GR/R (2005)', 'X DK B/BR'.
-    cleaned = _COLOR_SUFFIX.sub('', cleaned)
+    if "/" in cleaned:
+        cleaned = _COLOR_SUFFIX.sub('', cleaned)
     # Strip dots, punctuation, and enforce clean spacing
     cleaned = cleaned.replace(".", "").replace("'", "").replace(",", "")
     cleaned = " ".join(cleaned.split())
