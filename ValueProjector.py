@@ -125,7 +125,7 @@ sp_mod = _StallionProfilesProxy()
 # ---------------------------------------------------------------------------
 # Constants (from notebook)
 # ---------------------------------------------------------------------------
-STUD_DEAL_MULTIPLIER = 400
+from crossr_core.stud_value import STUD_DEAL_MULTIPLIER  # noqa: E402  (ISF × 400, one place)
 # Maxson locked crop: 8–12 foals × 0.7 live-foal rate → 5.6–8.4 live foals.
 LIVE_FOAL_RATE = 0.70
 FOALS_PER_BROODMARE_LOW = 8
@@ -135,10 +135,6 @@ EXPECTED_LIVE_FOALS_LOW = FOALS_PER_BROODMARE_LOW * LIVE_FOAL_RATE  # 5.6
 EXPECTED_LIVE_FOALS_HIGH = FOALS_PER_BROODMARE_HIGH * LIVE_FOAL_RATE  # 8.4
 EXPECTED_LIVE_FOALS = FOALS_PER_BROODMARE_MEAN * LIVE_FOAL_RATE  # 7.0
 
-# Colt similar-sire peer gates (pedigree % and stud-fee proximity).
-COLT_PEER_MIN_SIM = 50.0  # exclusive: require similarity > 50%
-COLT_PEER_FEE_ABS = 10_000
-COLT_PEER_FEE_PCT = 0.10
 
 # Opening / initial stud fees when known (current profile fee is used otherwise).
 # Notebook example: Flightline ISF = $200,000.
@@ -347,308 +343,61 @@ def stands_at_stud(profile: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Similar stallions (sons / grandsons)
+# Colt E[BV] — comparable stallions (crossr_core/stud_value.py, docs/stud-value.md)
 # ---------------------------------------------------------------------------
-def find_similar_stallions(
-    anchor_sire: str,
-    include_grandsons: bool = True,
-    exclude_names: Optional[set] = None,
-) -> List[Tuple[str, dict]]:
+def project_colt_bv(colt_sire: str, verbose: bool = True, year: Optional[int] = None) -> dict:
     """
-    Stallions in the roster whose sire (or grandsire) is anchor_sire.
-    Only horses that currently stand at stud (fee > 0) are returned;
-    non-stud horses contribute BV = 0 by omission from the sum.
+    Expected breeding value of a colt by `colt_sire`.
+
+    What his sire's colts are worth at stud per colt (sons' initial fee ×
+    STUD_DEAL_MULTIPLIER / colts): the sire's own record once his crops are old
+    enough, else stallions that looked like him at the same career stage (initial
+    fee and fee change since). No sire's-sire fallback: an unknown sire gets no value.
     """
-    exclude = {clean_horse_name(n) for n in (exclude_names or set())}
-    anchor = clean_horse_name(anchor_sire)
-    results: List[Tuple[str, dict]] = []
+    from crossr_core import stud_value
 
-    for name, profile in sp_mod.stallion_profiles.items():
-        if clean_horse_name(name) in exclude:
-            continue
-        if not stands_at_stud(profile):
-            continue
-        sire = get_sire_name(name)
-        gs = get_grandsire_name(name) if include_grandsons else None
-        if sire == anchor or (include_grandsons and gs == anchor):
-            results.append((name, profile))
-
-    results.sort(key=lambda x: initial_stud_fee(x[0], x[1]), reverse=True)
-    return results
-
-
-def resolve_sire_of_stallions(colt_sire: str) -> Tuple[str, str]:
-    """
-    Choose the Sire-of-Stallions (SS) used for F_SS and the similar set.
-
-    Prefer the colt's own sire when he already has sons/grandsons at stud.
-    Otherwise walk up one generation (notebook: Flightline → Tapit side).
-    """
-    direct = clean_horse_name(colt_sire)
-    similars = find_similar_stallions(direct)
-    if similars:
-        return direct, "direct"
-
-    parent = get_sire_name(colt_sire)
-    if parent:
-        return parent, "sire_side_fallback"
-
-    return direct, "direct_empty"
-
-
-# ---------------------------------------------------------------------------
-# Colt E[BV]
-# ---------------------------------------------------------------------------
-def colt_contribution(isf: float, foals_racing_age_ss: int) -> float:
-    """Single similar-stallion term: (ISF · 400) / (F_SS / 2)."""
-    male_foals = foals_racing_age_ss / 2.0
-    if male_foals <= 0 or isf <= 0:
-        return 0.0
-    return (isf * STUD_DEAL_MULTIPLIER) / male_foals
-
-
-def _current_stud_fee(name: str, profile: Optional[dict] = None) -> float:
-    """Current advertised stud fee (profile / fee DB), not initial."""
-    if profile is None:
-        _, profile = _profile_lookup(name)
-    if profile:
-        fee = parse_money(profile.get("Stud Fee", 0))
-        if fee > 0:
-            return fee
-    hist = _fee_history_map().get(clean_horse_name(name)) or {}
-    if hist:
-        return float(hist[max(hist)])
-    return 0.0
-
-
-def _fee_proximity_ok(
-    ref_isf: float,
-    ref_current: float,
-    peer_isf: float,
-    peer_current: float,
-) -> bool:
-    """True when peer fees are within $10k absolute OR 10% of initial OR 10% of current."""
-    pairs = [
-        (ref_isf, peer_isf),
-        (ref_isf, peer_current),
-        (ref_current, peer_isf),
-        (ref_current, peer_current),
-    ]
-    for a, b in pairs:
-        if a <= 0 or b <= 0:
-            continue
-        if abs(a - b) <= COLT_PEER_FEE_ABS:
-            return True
-        base = max(a, 1.0)
-        if abs(a - b) / base <= COLT_PEER_FEE_PCT:
-            return True
-    # Also compare like-for-like initial and current when both sides known.
-    if ref_isf > 0 and peer_isf > 0:
-        if abs(ref_isf - peer_isf) <= COLT_PEER_FEE_ABS:
-            return True
-        if abs(ref_isf - peer_isf) / max(ref_isf, 1.0) <= COLT_PEER_FEE_PCT:
-            return True
-    if ref_current > 0 and peer_current > 0:
-        if abs(ref_current - peer_current) <= COLT_PEER_FEE_ABS:
-            return True
-        if abs(ref_current - peer_current) / max(ref_current, 1.0) <= COLT_PEER_FEE_PCT:
-            return True
-    return False
-
-
-def _peer_sons_at_stud_ev(peer_name: str, peer_profile: Optional[dict] = None) -> Optional[dict]:
-    """Σ sons-at-stud initial fees / peer foal count."""
-    sons = [
-        (n, p)
-        for n, p in find_similar_stallions(peer_name, include_grandsons=False)
-        if get_sire_name(n) == clean_horse_name(peer_name)
-    ]
-    if not sons:
-        return None
-    sum_isf = 0.0
-    son_rows = []
-    for n, p in sons:
-        isf = initial_stud_fee(n, p)
-        if isf <= 0:
-            continue
-        sum_isf += isf
-        son_rows.append({"stallion": n, "isf": isf})
-    if sum_isf <= 0:
-        return None
-    foals = foals_of_racing_age(peer_name, peer_profile)
-    if foals <= 0:
-        foals = _bms_cum_foals_map().get(clean_horse_name(peer_name), 0)
-    if foals <= 0:
-        return None
-    return {
-        "sum_sons_isf": sum_isf,
-        "n_sons": len(son_rows),
-        "foals": foals,
-        "ev": sum_isf / float(foals),
-        "sons": son_rows,
-    }
-
-
-def similar_sire_peers_for_colt(colt_sire: str) -> List[dict]:
-    """
-    Standing sires with pedigree similarity >50% to `colt_sire` AND fee proximity
-    (within $10k or 10% of initial / current). No max peer cap.
-    """
-    canon, ref_profile = _profile_lookup(colt_sire)
-    display = canon or (colt_sire or "").strip()
-    ref_key = clean_horse_name(display)
-    ref_isf = initial_stud_fee(display, ref_profile)
-    ref_current = _current_stud_fee(display, ref_profile) or ref_isf
-    if ref_isf <= 0 and ref_current <= 0:
-        return []
-
-    try:
-        from crossr_core import horses as horse_svc
-    except Exception:
-        horse_svc = None
-
-    peers: List[dict] = []
-    for name, profile in sp_mod.stallion_profiles.items():
-        if clean_horse_name(name) == ref_key:
-            continue
-        if not stands_at_stud(profile):
-            continue
-        peer_isf = initial_stud_fee(name, profile)
-        peer_current = _current_stud_fee(name, profile) or peer_isf
-        if not _fee_proximity_ok(ref_isf, ref_current, peer_isf, peer_current):
-            continue
-        sim_pct = None
-        if horse_svc is not None:
-            try:
-                sim = horse_svc.pedigree_similarity(a=display, b=name)
-                sim_pct = (sim or {}).get("percent")
-            except Exception:
-                sim_pct = None
-        if sim_pct is None:
-            # Soft familial fallback when trees missing: same sire / grandsire.
-            if get_sire_name(name) and get_sire_name(name) == get_sire_name(display):
-                sim_pct = 50.0
-            elif get_grandsire_name(name) and get_grandsire_name(name) == clean_horse_name(display):
-                sim_pct = 50.0
-            else:
-                continue
-        if float(sim_pct) <= COLT_PEER_MIN_SIM:
-            continue
-        ev_pack = _peer_sons_at_stud_ev(name, profile)
-        if not ev_pack:
-            continue
-        peers.append(
-            {
-                "stallion": name,
-                "similarity": float(sim_pct),
-                "isf": peer_isf,
-                "current_fee": peer_current,
-                **ev_pack,
-            }
-        )
-    peers.sort(key=lambda p: (-p["similarity"], -p["ev"]))
-    return peers
-
-
-def project_colt_bv(colt_sire: str, verbose: bool = True) -> dict:
-    """
-    Expected breeding value of a yearling/colt by `colt_sire`.
-
-    Locked path: average across similar sires (sim >50% + fee proximity) of
-    (Σ sons-at-stud initial stud fees) / peer foal count. No peer cap.
-    Falls back to legacy sire-of-stallions sum when no peers qualify.
-    """
-    canon_sire, sire_profile = _profile_lookup(colt_sire)
-    display_sire = canon_sire or colt_sire.strip()
-
-    peers = similar_sire_peers_for_colt(display_sire)
-    contributions = []
-    peer_evs: List[float] = []
-    for peer in peers:
-        peer_evs.append(float(peer["ev"]))
-        contributions.append(
-            {
-                "stallion": peer["stallion"],
-                "isf": peer["isf"],
-                "stud_deal": peer["sum_sons_isf"],
-                "contribution": peer["ev"],
-                "relation": "similar_sire",
-                "similarity": peer["similarity"],
-                "n_sons": peer["n_sons"],
-                "foals": peer["foals"],
-            }
-        )
-
-    if peer_evs:
-        total = statistics.mean(peer_evs)
+    model = stud_value.load()
+    display_sire = (colt_sire or "").strip()
+    year = year or (model or {}).get("year_now")
+    res = stud_value.colt_value(display_sire, int(year), model=model) if model and year else None
+    if not res:
         result = {
             "kind": "colt",
             "colt_sire": display_sire,
-            "sire_of_stallions": display_sire,
-            "resolution": "similar_sire_peers",
-            "foals_of_racing_age_ss": None,
-            "male_foals_est": None,
-            "n_similar": len(contributions),
-            "contributions": contributions,
-            "peer_evs": peer_evs,
-            "expected_bv": total,
-            "note": (
-                "Mean of similar-sire peer EVs: "
-                "(Σ sons-at-stud ISF) / peer foals. "
-                "Mode of realized BV is 0."
-            ),
+            "resolution": "unavailable" if model else "model_missing",
+            "expected_bv": None,
+            "low": None,
+            "high": None,
+            "contributions": [],
+            "note": "No initial stud fee or mature crops on file for this sire.",
         }
-        if verbose:
-            _print_colt_report(result)
-        return result
-
-    # Legacy fallback when no pedigree+fee peers have sons-at-stud outcomes.
-    ss_name, resolution = resolve_sire_of_stallions(display_sire)
-    ss_canon, ss_profile = _profile_lookup(ss_name)
-    ss_display = ss_canon or ss_name
-
-    f_ss = foals_of_racing_age(ss_display, ss_profile)
-    if f_ss <= 0:
-        f_ss = _bms_cum_foals_map().get(clean_horse_name(ss_display), 0)
-
-    similar = find_similar_stallions(ss_display)
-    total = 0.0
-    for name, profile in similar:
-        isf = initial_stud_fee(name, profile)
-        if isf <= 0:
-            continue
-        term = colt_contribution(isf, f_ss)
-        contributions.append(
-            {
-                "stallion": name,
-                "isf": isf,
-                "stud_deal": isf * STUD_DEAL_MULTIPLIER,
-                "contribution": term,
-                "relation": (
-                    "son"
-                    if get_sire_name(name) == clean_horse_name(ss_display)
-                    else "grandson"
-                ),
-            }
-        )
-        total += term
-
-    result = {
-        "kind": "colt",
-        "colt_sire": display_sire,
-        "sire_of_stallions": ss_display,
-        "resolution": resolution + "_legacy",
-        "foals_of_racing_age_ss": f_ss,
-        "male_foals_est": f_ss / 2.0 if f_ss else 0.0,
-        "n_similar": len(contributions),
-        "contributions": contributions,
-        "expected_bv": total,
-        "note": (
-            "Legacy SS path (no similar-sire peers with sons-at-stud). "
-            "Mode of realized BV is 0."
-        ),
-    }
-
+    else:
+        result = {
+            "kind": "colt",
+            "colt_sire": display_sire,
+            "resolution": "own_record" if res["own_weight"] >= 0.5 else "comparable_stallions",
+            "expected_bv": res["point"],
+            "low": res["low"],
+            "high": res["high"],
+            "own_record": res["own"],
+            "own_weight": res["own_weight"],
+            "prediction": res["prediction"],
+            "initial_fee": res["initial_fee"],
+            "fee_now": res["fee_now"],
+            "first_season": res["first_season"],
+            "contributions": [
+                {
+                    "stallion": c["stallion"],
+                    "isf": c["initial_fee"],
+                    "fee_at_stage": c["fee_at_stage"],
+                    "contribution": c["value_per_colt"],
+                    "sons_at_stud": c["sons_at_stud"],
+                    "relation": "comparable",
+                }
+                for c in res["comparables"]
+            ],
+            "note": res["basis"] + ". Most colts never stand at stud, so the typical outcome is $0.",
+        }
     if verbose:
         _print_colt_report(result)
     return result
@@ -658,24 +407,22 @@ def _print_colt_report(r: dict) -> None:
     print("\n" + "=" * 72)
     print("  VALUE PROJECTOR — COLT BREEDING VALUE")
     print("=" * 72)
-    print(f"  Colt sire              : {r['colt_sire']}")
-    print(f"  Sire of stallions (SS) : {r['sire_of_stallions']}  [{r['resolution']}]")
-    print(f"  F_SS (foals racing age): {r['foals_of_racing_age_ss']:,}")
-    print(f"  Colts of racing age    : {r['male_foals_est']:,.0f}   (F_SS / 2)")
-    print(f"  Similar stallions (n)  : {r['n_similar']}")
+    print(f"  Colt sire       : {r['colt_sire']}  [{r['resolution']}]")
+    if r.get("expected_bv") is None:
+        print(f"  {r['note']}")
+        print("=" * 72 + "\n")
+        return
+    print(f"  Expected value  : {fmt_money(r['expected_bv'])} per colt")
+    if r.get("low") is not None:
+        print(f"  p25–p75         : {fmt_money(r['low'])} – {fmt_money(r['high'])}")
+    print(f"  Basis           : {r['note']}")
     print("-" * 72)
-    print(f"  {'Stallion':<22} {'Rel':<9} {'ISF':>12} {'Stud deal':>14} {'Contrib':>12}")
-    print("-" * 72)
+    print(f"  {'Comparable stallion':<24} {'ISF':>10} {'Fee @stage':>12} {'Value/colt':>12} {'Sons':>6}")
     for c in r["contributions"]:
         print(
-            f"  {c['stallion']:<22} {c['relation']:<9} "
-            f"{fmt_money(c['isf']):>12} {fmt_money(c['stud_deal']):>14} "
-            f"{fmt_money(c['contribution']):>12}"
+            f"  {c['stallion'].title():<24} {fmt_money(c['isf'] or 0):>10} "
+            f"{fmt_money(c['fee_at_stage'] or 0):>12} {fmt_money(c['contribution']):>12} {c['sons_at_stud']:>6}"
         )
-    print("-" * 72)
-    print(f"  E[BV]  =  Σ (ISF·{STUD_DEAL_MULTIPLIER}) / (F_SS/2)")
-    print(f"  Expected breeding value: {fmt_money(r['expected_bv'])}")
-    print(f"  ({r['note']})")
     print("=" * 72 + "\n")
 
 
@@ -998,17 +745,22 @@ def _project_broodmare_sire_filly(bms_name: str, verbose: bool = True) -> dict:
     sales = sales_by_dam_sire(display)
     used_fallback = False
     fallback_from = None
-    # Prefer the subject's own BMS sales; only borrow a similar-ISF peer when
-    # that peer has a meaningful auction sample (same bar used for ranges).
+    fallback_peers: List[str] = []
+    # Prefer the subject's own BMS sales; when thin, pool the nearest stallions by
+    # initial fee and race record (up to 5 with sales), never a single stand-in.
     if len(sales) < 5:
-        peers = similar_isf_peers(display, top_n=12)
-        for peer_name, _, dist in peers:
+        pooled: List[dict] = []
+        for peer_name, _, dist in similar_isf_peers(display, top_n=12):
             peer_sales = sales_by_dam_sire(peer_name)
-            if len(peer_sales) >= FILLY_RANGE_MIN_N:
-                sales = peer_sales
-                fallback_from = peer_name
-                used_fallback = True
+            if peer_sales:
+                pooled.extend(peer_sales)
+                fallback_peers.append(peer_name)
+            if len(fallback_peers) >= 5:
                 break
+        if len(pooled) >= FILLY_RANGE_MIN_N:
+            sales = pooled
+            fallback_from = ", ".join(fallback_peers)
+            used_fallback = True
 
     multipliers = []
     prices = []
@@ -1043,14 +795,14 @@ def _project_broodmare_sire_filly(bms_name: str, verbose: bool = True) -> dict:
     bring = mean_price if mean_price is not None else median_price
     projected = None
     projected_low = projected_high = None
-    if used_fallback and mean_per_dam is not None:
-        # Peer fallback: use observed mean Σ/dam (no full-career scale-up)
-        projected = mean_per_dam
-        projected_low = projected_high = mean_per_dam
-    elif bring is not None:
-        projected_low = EXPECTED_LIVE_FOALS_LOW * bring
-        projected_high = EXPECTED_LIVE_FOALS_HIGH * bring
+    if bring is not None:
+        # One quantity on both ends: a career of EXPECTED_LIVE_FOALS foals at the
+        # p25 / p75 foal price (point = mean price).
+        ordered = sorted(prices)
         projected = EXPECTED_LIVE_FOALS * bring
+        if len(ordered) >= 2:
+            projected_low = EXPECTED_LIVE_FOALS * _percentile(ordered, 0.25)
+            projected_high = EXPECTED_LIVE_FOALS * _percentile(ordered, 0.75)
     elif mean_per_dam is not None:
         projected = mean_per_dam
         projected_low = projected_high = mean_per_dam
@@ -1253,7 +1005,6 @@ def print_bm_sire_timeline() -> None:
 # single point would understate dispersion. Otherwise emit a point estimate.
 FILLY_RANGE_MIN_N = 20          # progeny sales for BMS / filly lens
 MARE_RANGE_MIN_N = 5            # progeny sales for a specific mare
-COLT_RANGE_MIN_SIMILAR = 5      # similar stallions at stud
 RANGE_MIN_RELATIVE_SPAN = 0.12  # collapse to point if (high-low)/mid < 12%
 
 _HIP_CACHE: Dict[str, dict] = {}
@@ -1330,39 +1081,22 @@ def _empty_vp(kind: str = "") -> dict:
 
 def _colt_vp_summary(colt_sire: str) -> dict:
     raw = project_colt_bv(colt_sire, verbose=False)
-    point = float(raw.get("expected_bv") or 0.0)
-    contribs = raw.get("contributions") or []
-    n = len(contribs)
-    if point <= 0 or n == 0:
+    point = raw.get("expected_bv")
+    if point is None:
         return _empty_vp("colt")
-
-    low = high = None
-    detail = f"n_similar={n}; resolution={raw.get('resolution')}"
-
-    peer_evs = sorted(float(x) for x in (raw.get("peer_evs") or []) if x and x > 0)
-    if len(peer_evs) >= 2:
-        low = _percentile(peer_evs, 0.25)
-        high = _percentile(peer_evs, 0.75)
-        low = min(low, point)
-        high = max(high, point)
-        detail += "; range=peer EV p25–p75"
-    elif n >= COLT_RANGE_MIN_SIMILAR:
-        vals = sorted(c["contribution"] for c in contribs if c.get("contribution"))
-        if len(vals) >= 2:
-            low = _percentile(vals, 0.25)
-            high = _percentile(vals, 0.75)
-            low = min(low, point)
-            high = max(high, point)
-            detail += "; range=contrib p25–p75"
-
-    return _pack_vp_result(
+    comps = raw.get("contributions") or []
+    detail = f"resolution={raw.get('resolution')}; comparables={len(comps)}; range=p25–p75 of value per colt"
+    packed = _pack_vp_result(
         kind="colt",
-        point=point,
-        low=low,
-        high=high,
-        n=n,
+        point=float(point),
+        low=raw.get("low"),
+        high=raw.get("high"),
+        n=len(comps),
         detail=detail,
     )
+    packed["basis"] = raw.get("note")
+    packed["comparables"] = comps
+    return packed
 
 
 def _filly_bms_vp_summary(bms_name: str) -> dict:
@@ -1391,23 +1125,8 @@ def _filly_bms_vp_summary(bms_name: str) -> dict:
 
     low = raw.get("projected_career_bv_low")
     high = raw.get("projected_career_bv_high")
-    # Prefer locked crop × bring range; widen with sale IQR when sample is rich.
-    if not used_fallback and n >= FILLY_RANGE_MIN_N:
-        bring = raw.get("broodmare_bring") or statistics.median(prices)
-        p25 = _percentile(prices, 0.25)
-        p75 = _percentile(prices, 0.75)
-        low = min(EXPECTED_LIVE_FOALS_LOW * bring, EXPECTED_LIVE_FOALS_LOW * p25)
-        high = max(EXPECTED_LIVE_FOALS_HIGH * bring, EXPECTED_LIVE_FOALS_HIGH * p75)
-        detail += "; range=crop×bring + sale IQR"
-    elif low is None or high is None:
-        bring = raw.get("broodmare_bring")
-        if bring:
-            low = EXPECTED_LIVE_FOALS_LOW * bring
-            high = EXPECTED_LIVE_FOALS_HIGH * bring
-            detail += "; range=crop×bring"
     if low is not None and high is not None:
-        low = min(float(low), point)
-        high = max(float(high), point)
+        detail += f"; range={EXPECTED_LIVE_FOALS:.0f} foals × p25–p75 foal price"
 
     packed = _pack_vp_result(
         kind="filly_bms",
@@ -1440,24 +1159,22 @@ def _mare_vp_summary(mare_name: str, mare_sire: str = "") -> dict:
     detail = f"n_progeny_sales={n}"
     prices = sorted(r["price"] for r in sales) if sales else []
     bring = statistics.mean(prices) if prices else None
-    # Proven broodmares: remaining crop = (5.6–8.4) − foals already produced (floor 0).
-    rem_low = max(EXPECTED_LIVE_FOALS_LOW - n, 0.0)
-    rem_high = max(EXPECTED_LIVE_FOALS_HIGH - n, 0.0)
+    # Proven broodmares: realized sales + remaining expected foals at the p25 / p75 price.
+    remaining = max(EXPECTED_LIVE_FOALS - n, 0.0)
+    rem_low = rem_high = remaining
     if n >= MARE_RANGE_MIN_N and bring is not None:
         total = sum(prices)
-        p25 = _percentile(prices, 0.25)
-        p75 = _percentile(prices, 0.75)
-        low = total + rem_low * p25
-        high = total + rem_high * p75
-        if rem_high <= 0:
-            low = high = total
-        low = min(low, point) if point else low
-        high = max(high, point) if point else high
-        detail += f"; range=realized+remaining crop {rem_low:.1f}–{rem_high:.1f}"
+        low = total + remaining * _percentile(prices, 0.25)
+        high = total + remaining * _percentile(prices, 0.75)
+        detail += f"; range=realized + {remaining:.1f} remaining foals × p25–p75 price"
     elif bring is not None:
-        low = rem_low * bring
-        high = rem_high * bring
-        detail += f"; range=remaining crop×bring {rem_low:.1f}–{rem_high:.1f}"
+        # Few sales: realized + remaining foals (5.6–8.4 expected, less those produced) × mean price
+        total = sum(prices)
+        rem_low = max(EXPECTED_LIVE_FOALS_LOW - n, 0.0)
+        rem_high = max(EXPECTED_LIVE_FOALS_HIGH - n, 0.0)
+        low = total + rem_low * bring
+        high = total + rem_high * bring
+        detail += f"; range=realized + {rem_low:.1f}–{rem_high:.1f} remaining foals × mean price"
     elif mare_sire:
         return _filly_bms_vp_summary(mare_sire)
 
