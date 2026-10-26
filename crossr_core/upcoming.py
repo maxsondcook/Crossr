@@ -223,6 +223,8 @@ def _lot_from_row(row, sale_year=None):
         "foaled": _blank(_col(row, "FOALED", "STATE")),
         "sold_as": _sold_as(row, birth_year=birth_year, sale_year=sale_year),
         "covering_sire": _blank(_col(row, "COVERING SIRE")),
+        "pregnant": _blank(_col(row, "PREGNANT", "PREGNANCY", "IN FOAL")).upper(),
+        "session": _blank(_col(row, "SESSION", "BOOK")),
         "color": color_raw,
         "color_label": _color_word(color_raw),
         "consignor": _blank(_col(row, "CONSIGNOR", "CONSIGNED BY", "PROPERTY LINE")),
