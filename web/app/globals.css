@@ -1019,6 +1019,14 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .sale-identity h2 { margin: 0 0 6px; font-size: 26px; letter-spacing: 0.02em; }
 .sale-sex, .sale-class { color: var(--gold); font-weight: 700; }
 .byline { color: var(--muted); margin: 0 0 12px; line-height: 1.45; }
+/* Sold-as chips: the main way buyers cut a mixed catalog. */
+.filter-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.filter-label { font-size: 13px; color: var(--muted); }
+.filter-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.filter-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; cursor: pointer; background: var(--bg-2); }
+.filter-chip input { display: none; }
+.filter-chip em { color: var(--muted); font-style: normal; }
+.filter-chip.on { border-color: var(--gold); color: var(--gold); background: rgba(212, 175, 55, 0.1); }
 .sale-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .sale-meta div { background: var(--bg-2); border-radius: 10px; padding: 8px 10px; }
 .sale-meta b { display: block; margin-top: 4px; }

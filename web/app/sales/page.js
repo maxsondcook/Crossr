@@ -119,6 +119,22 @@ const PRICE_RANGES = [
   { id: "2000+", min: 2000000, max: null, label: "2M+" },
 ];
 
+const EMPTY_EXTRA = { soldAs: [], session: "", consignor: "", coveringSire: "", foal: "" };
+
+const PREGNANCY_WORDS = { PR: "In foal", NP: "Not pregnant", NM: "Not mated", AB: "Aborted" };
+
+/** Distinct values with counts, most common first. */
+function countOptions(lots, pick) {
+  const counts = new Map();
+  for (const lot of lots) {
+    const value = pick(lot);
+    if (value) counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
 function lotFilterPrice(lot) {
   if (!lot) return 0;
   const direct = Number(lot.filter_price);
@@ -174,6 +190,8 @@ function SalesPage() {
   const [selectedSires, setSelectedSires] = useState([]);
   const [sireQuery, setSireQuery] = useState("");
   const [priceRanges, setPriceRanges] = useState([]);
+  // Catalog filters: sold as, session, consignor, covering sire, in-foal status.
+  const [extra, setExtra] = useState(EMPTY_EXTRA);
   const [height, setHeight] = useState("");
   const [onlyDismissed, setOnlyDismissed] = useState(false);
   const [onlyStarred, setOnlyStarred] = useState(false);
@@ -290,6 +308,7 @@ function SalesPage() {
     setSelectedSires([]);
     setSireQuery("");
     setPriceRanges([]);
+    setExtra(EMPTY_EXTRA);
   }, [catalog?.id, mode]);
 
   useEffect(() => {
@@ -376,6 +395,14 @@ function SalesPage() {
       });
   }, [lots]);
 
+  const extraOptions = useMemo(() => ({
+    soldAs: countOptions(lots, (lot) => blank(lot.sold_as)),
+    session: countOptions(lots, (lot) => blank(lot.session)),
+    consignor: countOptions(lots, (lot) => blank(lot.consignor)),
+    coveringSire: countOptions(lots, (lot) => blank(lot.covering_sire)),
+    hasFoalStatus: lots.some((lot) => blank(lot.pregnant)),
+  }), [lots]);
+
   const priceProxyNote = useMemo(() => {
     if (!lots.length) return "";
     const sources = new Set(lots.map((lot) => lot.filter_price_source).filter(Boolean));
@@ -396,6 +423,7 @@ function SalesPage() {
 
   const filtered = useMemo(() => {
     const sireSet = new Set(selectedSires);
+    const soldAsSet = new Set(extra.soldAs);
     return lots.filter((lot) => {
       const id = navId(mode, lot);
       const dismissed = dismissedSet.has(id);
@@ -422,9 +450,18 @@ function SalesPage() {
         const hands = (lot.height || "").toLowerCase();
         if (!hands || !hands.includes(height.trim().toLowerCase())) return false;
       }
+      if (soldAsSet.size && !soldAsSet.has(blank(lot.sold_as))) return false;
+      if (extra.session && blank(lot.session) !== extra.session) return false;
+      if (extra.consignor && blank(lot.consignor) !== extra.consignor) return false;
+      if (extra.coveringSire && blank(lot.covering_sire) !== extra.coveringSire) return false;
+      if (extra.foal) {
+        const status = blank(lot.pregnant).toUpperCase();
+        if (extra.foal === "in" && status !== "PR") return false;
+        if (extra.foal === "not" && !(status && status !== "PR")) return false;
+      }
       return true;
     });
-  }, [lots, mode, dismissedSet, starredSet, onlyDismissed, onlyStarred, sex, color, maxPrice, height, selectedSires, priceRanges]);
+  }, [lots, mode, dismissedSet, starredSet, onlyDismissed, onlyStarred, sex, color, maxPrice, height, selectedSires, priceRanges, extra]);
 
   useEffect(() => {
     if (!catalog || !filtered.length) return;
@@ -591,6 +628,7 @@ function SalesPage() {
     setHeight("");
     setSelectedSires([]);
     setPriceRanges([]);
+    setExtra(EMPTY_EXTRA);
     setOnlyDismissed(false);
     setOnlyStarred(false);
     setActiveClient("");
@@ -605,6 +643,7 @@ function SalesPage() {
     setHeight("");
     setSelectedSires([]);
     setPriceRanges([]);
+    setExtra(EMPTY_EXTRA);
     setActiveClient("");
     setRailOpen(true);
   }
@@ -618,6 +657,7 @@ function SalesPage() {
     setHeight("");
     setSelectedSires([]);
     setPriceRanges([]);
+    setExtra(EMPTY_EXTRA);
     setActiveClient("");
     setRailOpen(true);
   }
@@ -819,6 +859,15 @@ function SalesPage() {
                     </div>
                     <div><span className="meta-label">Hip</span><b>{current.hip || "—"}</b></div>
                     <div><span className="meta-label">Barn</span><b>{blank(current.barn) || "—"}</b></div>
+                    {blank(current.sold_as) ? (
+                      <div><span className="meta-label">Sold as</span><b className={blank(current.sold_as).length > 14 ? "meta-fit" : undefined}>{blank(current.sold_as)}</b></div>
+                    ) : null}
+                    {blank(current.covering_sire) ? (
+                      <div><span className="meta-label">Covered by</span><b className={blank(current.covering_sire).length > 14 ? "meta-fit" : undefined}>{blank(current.covering_sire)}</b></div>
+                    ) : null}
+                    {blank(current.pregnant) ? (
+                      <div><span className="meta-label">In foal</span><b>{PREGNANCY_WORDS[blank(current.pregnant).toUpperCase()] || blank(current.pregnant)}</b></div>
+                    ) : null}
                     {mode === "past" ? (
                       <div><span className="meta-label">Auction price</span><b className="money">{priceLabel(current)}</b></div>
                     ) : null}
@@ -997,6 +1046,49 @@ function SalesPage() {
 
                 <h4>FILTER</h4>
                 <p className="filter-count">{filtered.length} / {lots.length} hips</p>
+                {extraOptions.soldAs.length > 1 ? (
+                  <div className="filter-group filter-sold-as">
+                    <span className="filter-label">Sold as</span>
+                    <div className="filter-chips" role="group" aria-label="Sold as">
+                      {extraOptions.soldAs.map((opt) => (
+                        <label key={opt.value} className={`filter-chip${extra.soldAs.includes(opt.value) ? " on" : ""}`}>
+                          <input
+                            type="checkbox"
+                            checked={extra.soldAs.includes(opt.value)}
+                            onChange={() => setExtra((cur) => ({
+                              ...cur,
+                              soldAs: cur.soldAs.includes(opt.value)
+                                ? cur.soldAs.filter((v) => v !== opt.value)
+                                : [...cur.soldAs, opt.value],
+                            }))}
+                          />
+                          <span>{opt.value}</span>
+                          <em>{opt.count}</em>
+                        </label>
+                      ))}
+                    </div>
+                    {extra.soldAs.length ? (
+                      <button className="ghost filter-clear" type="button" onClick={() => setExtra((cur) => ({ ...cur, soldAs: [] }))}>
+                        Clear sold as
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {mode === "upcoming" ? (
+                  <label>
+                    Session
+                    <select
+                      value={extra.session}
+                      onChange={(e) => setExtra((cur) => ({ ...cur, session: e.target.value }))}
+                      disabled={!extraOptions.session.length}
+                    >
+                      <option value="">{extraOptions.session.length ? "Any session" : "Sessions not published yet"}</option>
+                      {extraOptions.session.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.value} ({opt.count})</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <label>
                   Stallion
                   <input
@@ -1047,6 +1139,38 @@ function SalesPage() {
                     ))}
                   </select>
                 </label>
+                {extraOptions.hasFoalStatus ? (
+                  <label>
+                    In foal
+                    <select value={extra.foal} onChange={(e) => setExtra((cur) => ({ ...cur, foal: e.target.value }))}>
+                      <option value="">Any</option>
+                      <option value="in">In foal (PR)</option>
+                      <option value="not">Not in foal (NP / NM / AB)</option>
+                    </select>
+                  </label>
+                ) : null}
+                {extraOptions.coveringSire.length ? (
+                  <label>
+                    Covering sire
+                    <select value={extra.coveringSire} onChange={(e) => setExtra((cur) => ({ ...cur, coveringSire: e.target.value }))}>
+                      <option value="">Any</option>
+                      {extraOptions.coveringSire.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.value} ({opt.count})</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {extraOptions.consignor.length ? (
+                  <label>
+                    Consignor
+                    <select value={extra.consignor} onChange={(e) => setExtra((cur) => ({ ...cur, consignor: e.target.value }))}>
+                      <option value="">Any</option>
+                      {extraOptions.consignor.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.value} ({opt.count})</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <label>
                   Price range
                   <div className="filter-price-ranges" role="group" aria-label="Price ranges">
