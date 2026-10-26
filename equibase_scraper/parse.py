@@ -439,7 +439,8 @@ def parse_search_candidates(html: str) -> list[dict]:
 
 
 def _clean_parent(value: str | None) -> str:
-    """Same cleaning as horse names. Empty when the caller did not pass a parent."""
+    """Same cleaning as horse names, spaces dropped ("A. P. Indy" == "A.P. Indy").
+    Empty when the caller did not pass a parent."""
     if value is None:
         return ""
     text = str(value).strip()
@@ -447,7 +448,7 @@ def _clean_parent(value: str | None) -> str:
         return ""
     from equibase_scraper.queue import clean_name
 
-    return clean_name(text)
+    return clean_name(text).replace(" ", "")
 
 
 def _parent_matches(row: dict, sire_key: str, dam_key: str) -> bool:

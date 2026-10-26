@@ -66,6 +66,54 @@ on the next pass.
 - **Table versions** (what makes the API reload) are bumped every 30 minutes
   and at the end of a pass, not after every horse.
 
+### Upcoming catalogs jump the queue
+
+When an upcoming catalog is published (`load_railway.py --only catalogs`, or
+anything that writes `upcoming_catalogs`), the scrape loop notices within 5
+minutes. It pauses its own queue and works through that catalog first, then
+resumes. The site never waits; hips show their status while data fills in.
+
+- **What a hip needs.** The sire, the dam (narrowed by SIRE OF DAM and a
+  foal-year window), the covering sire of an in-foal mare, and the hip itself
+  when it is named. Each needs an Equibase race record and a complete
+  5-generation tree, which gives the hip at least 6 generations.
+- **Missing or stale only.**
+  - A first pass with no page loads marks every hip the database already
+    covers as `complete`.
+  - Only the remaining horses are scraped.
+  - A named racing prospect whose record is more than 30 days old is
+    re-opened.
+- **Order and pacing.** Hips go in book → session → hip order, at the
+  scraper's usual pace: one page every ~3–4 s, no bursts.
+- **Per-hip status** in `crossr_catalog_hips`:
+  - `updating`
+  - `complete`
+  - `partial` (an ancestor isn't on Equibase)
+  - `not_found` (the sire, dam or horse isn't on Equibase)
+
+  plus `pedigree_ok`, `dam_record_ok`, `horse_record_ok` and
+  `dam_known_foals`.
+- **Catalog complete signal.** `crossr_catalog_jobs.status = 'complete'`
+  (with `completed_at`), plus a `crossr_pipeline_runs` row with job
+  `catalog:<id>` and status `ok`.
+- **Re-uploads.** Each hip keeps a hash of its sale-relevant fields. A
+  re-upload re-queues only new or changed hips; removed hips are dropped.
+- **Produce records.** Equibase's free profiles don't list a mare's foals
+  (that's Equineline's paid product). `dam_known_foals` counts the foals we
+  know from race records; it's reported, not required.
+
+```bash
+$E railway $PY -m crossr_pipeline catalog-report "Keeneland November Breeding Stock Sale (2026)"
+$E railway $PY -m crossr_pipeline catalog-enrich "Keeneland November Breeding Stock Sale (2026)" \
+    --url https://www.keeneland.com/sales/2026/14/november-breeding-stock-sale/catalog-table/
+$E crossr_dev $PY -m crossr_pipeline scrape --catalogs-only --limit 15   # test: 15 hips, then exit
+```
+
+`catalog-enrich` exports Keeneland's online catalog with every column switched
+on. It fills blank SESSION, BOOK (a new column), COLOR, SIRE OF DAM,
+YEAR OF BIRTH, FOALED, COVERING SIRE and PREGNANT in Postgres, and in the CSV
+in `Upcoming Sales/` so a later catalog reload keeps them.
+
 ### Racing Post fees
 
 `python -m crossr_pipeline racing-post [--limit N]` uses its own Chrome window

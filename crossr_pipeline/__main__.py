@@ -51,6 +51,7 @@ def cmd_scrape(args) -> int:
         skip_refresh=args.skip_refresh,
         refresh_only=args.refresh_only,
         role=args.role,
+        catalogs_only=args.catalogs_only,
     )
 
 
@@ -126,6 +127,44 @@ def cmd_racing_post(args) -> int:
         if done == 0:
             print("racing-post: nothing due. Sleeping 6 h.", flush=True)
             time.sleep(6 * 3600)
+
+
+def cmd_catalog_report(args) -> int:
+    from crossr_pipeline import catalog_priority as cp
+
+    conn = _conn()
+    try:
+        cp.ensure(conn)
+        result = cp.report(conn, args.catalog)
+        job = conn.execute("SELECT * FROM crossr_catalog_jobs WHERE catalog_id = %s", (args.catalog,)).fetchone()
+    finally:
+        conn.close()
+    for key, value in sorted(result["counts"].items()):
+        print(f"  {key:<24} {value}")
+    if job:
+        print(f"  job: {job['status']}  {job['detail'] or ''}")
+    print(f"  incomplete hips: {len(result['incomplete'])}")
+    for hip, label, needs in result["incomplete"][: args.show]:
+        print(f"    {hip:>5}  {label[:45]:<45}  needs {needs}")
+    return 0
+
+
+def cmd_catalog_enrich(args) -> int:
+    from pathlib import Path
+
+    from crossr_pipeline import keeneland
+
+    export = Path(args.export) if args.export else REPO / "logs" / "pipeline" / f"{args.catalog}.keeneland.csv"
+    if args.url:
+        keeneland.export_catalog(args.url, export, REPO / "crossr_pipeline" / "chrome_profile_keeneland")
+    csv_path = REPO / "Upcoming Sales" / f"{args.catalog}.csv"
+    conn = _conn()
+    try:
+        filled = keeneland.enrich_catalog(conn, args.catalog, export, csv_path if csv_path.exists() else None)
+    finally:
+        conn.close()
+    print(filled)
+    return 0
 
 
 def _age(ts) -> str:
@@ -204,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--skip-refresh", action="store_true", help="Do not run the weekly race refresh")
     p.add_argument("--refresh-only", action="store_true", help="Run only the race refresh, then exit")
     p.add_argument("--role", choices=["sire", "dam"], help="Only sale sires or only sale dams")
+    p.add_argument("--catalogs-only", action="store_true",
+                   help="Only run queued upcoming catalogs (with --limit: that many hips each), then exit")
     p.set_defaults(func=cmd_scrape)
 
     p = sub.add_parser("sales-import", help="Load new/changed sales_data/*.csv into sales_lots")
@@ -224,6 +265,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, help="Stop after this many sires (testing)")
     p.add_argument("--loop", action="store_true", help="Keep going: rerun when done, sleep 6 h when nothing is due")
     p.set_defaults(func=cmd_racing_post)
+
+    p = sub.add_parser("catalog-report", help="Completeness of an upcoming catalog's hips")
+    p.add_argument("catalog", help="upcoming_catalogs id, e.g. 'Keeneland November Breeding Stock Sale (2026)'")
+    p.add_argument("--show", type=int, default=25, help="How many incomplete hips to list")
+    p.set_defaults(func=cmd_catalog_report)
+
+    p = sub.add_parser("catalog-enrich", help="Fill SESSION/BOOK/COLOR/SIRE OF DAM/YEAR OF BIRTH from Keeneland's catalog")
+    p.add_argument("catalog", help="upcoming_catalogs id")
+    p.add_argument("--url", help="Keeneland catalog-table URL to export from")
+    p.add_argument("--export", help="An already exported Keeneland CSV")
+    p.set_defaults(func=cmd_catalog_enrich)
 
     p = sub.add_parser("status", help="Recent runs, queue state, table counts")
     p.add_argument("--limit", type=int, default=15)

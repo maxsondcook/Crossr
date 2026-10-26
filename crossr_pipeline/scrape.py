@@ -232,7 +232,7 @@ def process_item(eb, page, conn, book, item: dict, delay: float) -> tuple[str, s
 
 
 def run_pedigrees(eb, page, conn, book, delay: float, limit: int | None, flusher: Flusher,
-                  role: str | None = None) -> int:
+                  role: str | None = None, hook=None) -> int:
     states = state.queue_states(conn, sales_parents.JOB)
     todo, skipped = sales_parents.build_queue(conn, book.index, states, time.time(), limit, role)
     run = state.Run(conn, sales_parents.JOB)
@@ -267,6 +267,8 @@ def run_pedigrees(eb, page, conn, book, delay: float, limit: int | None, flusher
             if index % HEARTBEAT_EVERY == 0:
                 run.heartbeat("running")
                 flusher.maybe()
+            if hook is not None:
+                hook()  # a newly published catalog runs here, ahead of this queue
     except BaseException as exc:
         status = "failed" if isinstance(exc, RuntimeError) else "partial"
         run.finish(status, f"stopped: {exc}")
@@ -281,7 +283,7 @@ def run_pedigrees(eb, page, conn, book, delay: float, limit: int | None, flusher
 
 def scrape(delay: float = 3.0, limit: int | None = None, refresh_cap: int | None = None,
            once: bool = False, skip_refresh: bool = False, refresh_only: bool = False,
-           role: str | None = None) -> int:
+           role: str | None = None, catalogs_only: bool = False) -> int:
     from playwright.sync_api import sync_playwright
 
     eb = _run_module()
@@ -298,19 +300,32 @@ def scrape(delay: float = 3.0, limit: int | None = None, refresh_cap: int | None
                     boot = state.Run(conn, "warmup")
                     wait_out_block(eb, page, None, boot)
                     boot.finish("ok")
+                hook = None
+                if book is not None:
+                    from crossr_pipeline.catalog_priority import Hook
+
+                    hook = Hook(eb, page, conn, book, delay, limit=limit if catalogs_only else None)
+                    hook(force=True)
+                    flusher.dirty = True
+                    flusher.maybe(force=True)
+                    if catalogs_only:
+                        return 0
                 while True:
                     if not skip_refresh and (refresh_only or refresh_due(conn)):
                         run_refresh(eb, page, conn, delay, refresh_cap, flusher)
                         flusher.maybe(force=True)
                     if refresh_only:
                         break
-                    done = run_pedigrees(eb, page, conn, book, delay, limit, flusher, role)
+                    done = run_pedigrees(eb, page, conn, book, delay, limit, flusher, role, hook)
                     flusher.maybe(force=True)
                     if once or limit:
                         break
                     if done == 0:
                         print(f"Queue empty. Sleeping {IDLE_SLEEP_S // 3600} h.", flush=True)
-                        page.wait_for_timeout(IDLE_SLEEP_S * 1000)
+                        until = time.monotonic() + IDLE_SLEEP_S
+                        while time.monotonic() < until:
+                            page.wait_for_timeout(60 * 1000)
+                            hook()
             finally:
                 context.close()
     except KeyboardInterrupt:

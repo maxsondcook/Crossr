@@ -22,9 +22,15 @@ def load_clean_horse_name():
     if _clean_horse_name is not None:
         return _clean_horse_name
     tree = ast.parse((REPO / "main.py").read_text(encoding="utf-8"))
+    # Module-level private constants (e.g. a compiled regex) the function uses.
+    constants = [
+        node for node in tree.body
+        if isinstance(node, ast.Assign)
+        and all(isinstance(t, ast.Name) and t.id.startswith("_") for t in node.targets)
+    ]
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == "clean_horse_name":
-            module = ast.Module(body=[node], type_ignores=[])
+            module = ast.Module(body=[*constants, node], type_ignores=[])
             ast.fix_missing_locations(module)
             namespace = {"re": re}
             exec(compile(module, str(REPO / "main.py"), "exec"), namespace)
