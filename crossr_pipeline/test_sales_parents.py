@@ -90,3 +90,47 @@ def test_backfill_maps_equibase_values():
     assert map_place("KY") == "KENTUCKY" and map_place("IRE") == "IRE"
     assert is_named("Adventurous Lady")
     assert not is_named("Hip 0002") and not is_named("TAPIT x ZAGORA '24") and not is_named("2025-QUARIA DREAM")
+
+
+def test_catalog_hip_horses_and_order():
+    from crossr_pipeline import catalog_priority as cp
+
+    broodmare = {"HIP": "0004", "NAME": "American Caviar", "SEX": "M", "SIRE": "Curlin", "DAM": "Caviar",
+                 "SIRE OF DAM": "Tapit", "YEAR OF BIRTH": "01/16/2019", "COVERING SIRE": "Nyquist",
+                 "SESSION": "1", "BOOK": "1"}
+    parts = {i["part"]: i for i in cp.hip_horses(broodmare)}
+    assert set(parts) == {"sire", "dam", "cover", "horse"}
+    assert parts["dam"]["yob_range"] == (1994, 2016) and parts["dam"]["sire"] == "Tapit"
+    assert parts["horse"]["role"] == "dam" and parts["horse"]["yob_range"] == (2019, 2019)
+    weanling = {"HIP": "0001", "NAME": "", "SEX": "C", "SIRE": "Life Is Good", "DAM": "Alexa Lou",
+                "SESSION": "2", "BOOK": "1", "YEAR OF BIRTH": "02/13/2026"}
+    assert {i["part"] for i in cp.hip_horses(weanling)} == {"sire", "dam"}
+    assert cp.sort_key(broodmare) < cp.sort_key(weanling)
+    assert cp.row_hash(weanling) != cp.row_hash({**weanling, "DAM": "Other"})
+    assert cp.row_hash(weanling) == cp.row_hash({**weanling, "BARN": "9"})
+
+
+def test_keeneland_merge_fills_blanks_only():
+    from crossr_pipeline import keeneland
+
+    export = {"1": {"Hip Number": "0001", "Session": "2", "Book": "1", "Color": "Dark Bay/Brown",
+                    "Dam Sire": "Speightstown", "DOB": "02/13/2026", "State Foaled": "KY  ",
+                    "Cover": "", "Pregnant": "", "Sold As": "Weanling"}}
+    cols, rows, filled = keeneland.merge_rows(["SESSION", "HIP", "COLOR"], [{"HIP": "0001", "COLOR": "B"}], export)
+    assert cols[:2] == ["SESSION", "BOOK"]
+    assert rows[0]["COLOR"] == "B" and rows[0]["SESSION"] == "2" and rows[0]["FOALED"] == "KY"
+    assert rows[0]["SIRE OF DAM"] == "Speightstown" and filled["COLOR"] == 0
+
+
+def test_pick_row_prefers_rows_that_name_the_sire():
+    item = {"role": "dam", "sire": "A.P. Indy", "yob_range": None}
+    rows = [{"id": "1", "sire": None, "status": "pending"}, {"id": "2", "sire": "A. P. Indy", "status": "pending"}]
+    assert sp.pick_row(rows, item)[0]["id"] == "2"
+
+
+def test_catalog_skips_young_named_horses():
+    from crossr_pipeline import catalog_priority as cp
+
+    yearling = {"SALE TITLE": "Eastern Fall Yearlings (2026)", "HIP": "3", "NAME": "Prince Leone", "SEX": "C",
+                "SIRE": "Tacitus", "DAM": "Leona", "YEAR OF BIRTH": "04/01/2025"}
+    assert {i["part"] for i in cp.hip_horses(yearling)} == {"sire", "dam"}

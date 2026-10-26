@@ -144,11 +144,12 @@ def pick_row(rows: list[dict], item: dict) -> tuple[dict | None, str]:
     row knows them. Several plausible rows: prefer a single ok one, otherwise
     it is ambiguous. Returns (row, reason) and row None when nothing fits.
     """
-    sire_key = clean_name(item.get("sire") or "")
+    # Spaces ignored: Equibase writes "A. P. Indy", sales write "A.P. Indy".
+    sire_key = clean_name(item.get("sire") or "").replace(" ", "")
     window = item.get("yob_range")
 
     def fits(row) -> bool:
-        if sire_key and row.get("sire") and clean_name(row["sire"]) != sire_key:
+        if sire_key and row.get("sire") and clean_name(row["sire"]).replace(" ", "") != sire_key:
             return False
         year = _int(row.get("foal_year"))
         if window and year and not (window[0] <= year <= window[1]):
@@ -156,6 +157,11 @@ def pick_row(rows: list[dict], item: dict) -> tuple[dict | None, str]:
         return True
 
     plausible = [row for row in rows if fits(row)]
+    if sire_key:
+        # Rows that name the right sire beat rows that name none.
+        named = [row for row in plausible if row.get("sire")]
+        if named:
+            plausible = named
     if len(plausible) == 1:
         return plausible[0], ""
     if not plausible:
