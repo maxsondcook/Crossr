@@ -603,10 +603,12 @@ function HorsePage() {
                 <span>Stud Fee</span>
                 <b>{s.stud_fee || "—"}</b>
               </div>
-              <div className="kpi">
-                <span>Sire Rank</span>
-                <b className="muted">{s.rank ? `#${s.rank}` : "NA"}</b>
-              </div>
+              {s.rank && String(s.rank).toUpperCase() !== "N/A" ? (
+                <div className="kpi">
+                  <span>Sire Rank</span>
+                  <b className="muted">#{s.rank}</b>
+                </div>
+              ) : null}
             </div>
           </div>
           {s.career_highlight ? (

@@ -17,6 +17,16 @@ import FemaleFamily from "../../components/FemaleFamily";
 import HorseText from "../../components/HorseText";
 import HypofoalDetail from "../../components/HypofoalDetail";
 
+function hasRank(rank) {
+  const text = String(rank ?? "").trim().toUpperCase();
+  return Boolean(text) && text !== "N/A" && text !== "NA" && text !== "9999";
+}
+
+// "RANK #7 · $75,000", or just the fee when the stallion is unranked.
+function rankAndFee(rank, fee) {
+  return [hasRank(rank) ? `RANK #${rank}` : null, horseCaps(fee) || null].filter(Boolean).join(" · ");
+}
+
 const STATUS_ORDER = ["MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW"];
 const GRADE_ORDER = { G1: 0, G2: 1, G3: 2 };
 
@@ -360,7 +370,7 @@ function HypomatingInner() {
                         <strong>
                           <Link href={horseHref(s.name)}>{horseCaps(s.name)}</Link>
                         </strong>
-                        <div className="parents">RANK #{s.rank} · {horseCaps(s.stud_fee)}</div>
+                        <div className="parents">{rankAndFee(s.rank, s.stud_fee)}</div>
                       </div>
                       <div className="suggest-actions">
                         <Link
@@ -433,7 +443,7 @@ function HypomatingInner() {
                               <div key={o.name} className="suggest-card">
                                 <div>
                                   <Link href={horseHref(o.name)}>{horseCaps(o.name)}</Link>
-                                  <div className="parents">RANK #{o.rank} · {horseCaps(o.stud_fee)}</div>
+                                  <div className="parents">{rankAndFee(o.rank, o.stud_fee)}</div>
                                 </div>
                                 <div className="suggest-actions">
                                   <Link className="ghost" href={horseHref(o.name)}>SEE PROFILE</Link>
@@ -476,7 +486,7 @@ function HypomatingInner() {
                             <div key={o.name} className="suggest-card">
                               <div>
                                 <Link href={horseHref(o.name)}>{horseCaps(o.name)}</Link>
-                                <div className="parents">RANK #{o.rank} · {horseCaps(o.stud_fee)}</div>
+                                <div className="parents">{rankAndFee(o.rank, o.stud_fee)}</div>
                               </div>
                               <div className="suggest-actions">
                                 <Link className="ghost" href={horseHref(o.name)}>SEE PROFILE</Link>

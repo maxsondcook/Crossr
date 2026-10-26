@@ -525,7 +525,7 @@ button, input, select { font: inherit; color: inherit; }
 .hero .farm { color: var(--gold); letter-spacing: 0.16em; font-size: 12px; font-weight: 800; }
 .hero h1 { margin: 8px 0 6px; font-size: 34px; letter-spacing: 0.04em; }
 .hero .sub { color: var(--muted); }
-.kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 14px; }
 .kpi { background: var(--bg-2); border-radius: 10px; padding: 10px; }
 .kpi b { display: block; color: var(--green); font-size: 20px; }
 .kpi .muted { color: var(--gold); }
