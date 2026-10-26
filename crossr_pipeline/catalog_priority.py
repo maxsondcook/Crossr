@@ -32,9 +32,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
+import sys
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from crossr_pipeline import notify, sales_parents, state
 from equibase_scraper.pedigree_fill import covers_remaining, lookup_ancestor
@@ -71,6 +74,50 @@ CREATE TABLE IF NOT EXISTS crossr_catalog_hips (
 );
 CREATE INDEX IF NOT EXISTS idx_crossr_catalog_hips_status ON crossr_catalog_hips (catalog_id, status);
 """
+
+# The names the sales-model hip pages read. Views, so there is one source of
+# truth; 'partial' (scraped, but an ancestor is not on Equibase) reads as
+# 'not_found'. Skipped if someone created real tables with these names.
+VIEWS = """
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'upcoming_hip_status') THEN
+        EXECUTE 'CREATE OR REPLACE VIEW upcoming_hip_status AS
+                 SELECT catalog_id, hip,
+                        CASE status WHEN ''partial'' THEN ''not_found'' ELSE status END AS status,
+                        updated_at
+                 FROM crossr_catalog_hips';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'upcoming_catalog_status') THEN
+        EXECUTE 'CREATE OR REPLACE VIEW upcoming_catalog_status AS
+                 SELECT catalog_id, status = ''complete'' AS complete,
+                        COALESCE(completed_at, started_at, queued_at) AS updated_at
+                 FROM crossr_catalog_jobs';
+    END IF;
+END $$;
+"""
+
+PRECOMPUTE = Path(__file__).resolve().parents[1] / "scripts" / "precompute_catalogs.py"
+PRECOMPUTE_EVERY = 50
+_precompute_proc = None
+
+
+def precompute(*args: str) -> None:
+    """Start the sales-model hip precompute in the background (one at a time).
+
+    The scraper never waits for it; skipped while one is still running or
+    before scripts/precompute_catalogs.py exists.
+    """
+    global _precompute_proc
+    if not PRECOMPUTE.exists():
+        return
+    if _precompute_proc is not None and _precompute_proc.poll() is None:
+        return
+    log = (PRECOMPUTE.parents[1] / "logs" / "pipeline" / "precompute.log").open("a")
+    _precompute_proc = subprocess.Popen(
+        [sys.executable, str(PRECOMPUTE), *args], cwd=str(PRECOMPUTE.parents[1]), stdout=log, stderr=log,
+    )
+    print(f"precompute started: {' '.join(args)}", flush=True)
 
 HASH_FIELDS = ("HIP", "NAME", "SEX", "SIRE", "DAM", "SIRE OF DAM", "YEAR OF BIRTH", "COVERING SIRE",
                "SOLD AS DESCRIPTION")
@@ -198,6 +245,7 @@ def assess_hip(assessor: Assessor, row: dict) -> dict:
 def ensure(conn) -> None:
     state.ensure(conn)
     conn.execute(SCHEMA)
+    conn.execute(VIEWS)
 
 
 def catalog_rows(conn, catalog_id: str) -> list[dict]:
@@ -249,6 +297,7 @@ def sync(conn) -> list[str]:
             )
         print(f"catalog {cid}: {len(changed)} new/changed hips queued, {len(gone)} removed", flush=True)
         queued.append(cid)
+        precompute(cid)  # stale hips of the new or changed catalog
     for row in conn.execute("SELECT catalog_id FROM crossr_catalog_jobs WHERE status IN ('queued', 'running')"):
         if row["catalog_id"] not in queued:
             queued.append(row["catalog_id"])
@@ -360,6 +409,8 @@ def run_catalog(eb, page, conn, book, delay: float, cid: str, limit: int | None 
             run.bump("page loads", loads["n"] - loads_before)
             print(f"[catalog {n}/{len(todo)}] hip {hip}: {before['status']} -> {after['status']} "
                   f"({loads['n'] - loads_before} pages)", flush=True)
+            if hips_scraped and hips_scraped % PRECOMPUTE_EVERY == 0:
+                precompute("--rescraped", cid)
             if n % 10 == 0:
                 run.heartbeat("running")
                 conn.execute("UPDATE crossr_catalog_jobs SET hips_done = %s, page_loads = %s "
@@ -384,6 +435,9 @@ def run_catalog(eb, page, conn, book, delay: float, cid: str, limit: int | None 
     run.finish("ok" if status == "complete" else "partial", f"{hips_scraped} hips scraped in {minutes:.0f} min")
     if status == "complete":
         notify.send("Catalog complete", f"{cid}: data filled for every hip")
+        precompute("--full", cid)
+    elif hips_scraped:
+        precompute("--rescraped", cid)
     return {"checked": len(todo), "scraped": hips_scraped, "page_loads": loads["n"], "minutes": round(minutes, 1),
             "left": left}
 

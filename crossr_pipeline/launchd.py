@@ -3,8 +3,9 @@
     com.crossr.pipeline.scrape        always running; restarted 5 min after it exits
     com.crossr.pipeline.sales-import  daily at 07:00 (run at wake if the Mac slept)
     com.crossr.pipeline.racing-post   always running; works through sires due a lookup
+    com.crossr.pipeline.precompute    nightly 02:30: sales-model hip pages for upcoming catalogs
 
-All three run through scripts/pipeline/railway_env.sh, so DATABASE_URL is built
+All of them run through scripts/pipeline/railway_env.sh, so DATABASE_URL is built
 from the Railway CLI at start and no password is written to disk. The scrapers
 run under ``caffeinate -i`` so the Mac does not idle-sleep mid-run.
 """
@@ -20,6 +21,7 @@ LOG_DIR = REPO / "logs" / "pipeline"
 SCRAPE = "com.crossr.pipeline.scrape"
 SALES = "com.crossr.pipeline.sales-import"
 RACING_POST = "com.crossr.pipeline.racing-post"
+PRECOMPUTE = "com.crossr.pipeline.precompute"
 
 
 def plists(db: str, python: str) -> dict[str, dict]:
@@ -59,6 +61,15 @@ def plists(db: str, python: str) -> dict[str, dict]:
             "ThrottleInterval": 300,
             "StandardOutPath": str(LOG_DIR / "racing-post.log"),
             "StandardErrorPath": str(LOG_DIR / "racing-post.log"),
+            **common,
+        },
+        # Sales-model hip pages: every upcoming catalog, stale hips only.
+        PRECOMPUTE: {
+            "Label": PRECOMPUTE,
+            "ProgramArguments": [env, db, python, str(REPO / "scripts" / "precompute_catalogs.py")],
+            "StartCalendarInterval": {"Hour": 2, "Minute": 30},
+            "StandardOutPath": str(LOG_DIR / "precompute.log"),
+            "StandardErrorPath": str(LOG_DIR / "precompute.log"),
             **common,
         },
     }
