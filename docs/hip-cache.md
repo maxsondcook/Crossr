@@ -42,10 +42,13 @@ batch (`--rescraped`), once the catalog is complete (`--full`), and nightly.
 
 ## Speed (crossr_dev, from the Mac)
 
-- Compute: ~0.85 s per hip once warm (with the lot-page speed fixes), so a
-  3,400-hip catalog takes about 48 minutes.
-- Stored read: ~175 ms end to end from the Mac, most of it the network round trip
-  to Railway (one connection per read).
+Keeneland November Breeding Stock Sale (2026), 3,405 hips:
+
+- Full precompute: 25.4 minutes, 0 failures (~0.45 s per hip once warm; needs the
+  lot-page speed fixes, 7.4 s per hip without them).
+- Stored read, 40 random hips: median 214 ms, p90 224 ms end to end from the Mac,
+  most of it the network round trip to Railway (one connection per read).
+- A hip with no stored page: computed live (first open ~1 s once the API is warm).
 
 ## Tables
 
