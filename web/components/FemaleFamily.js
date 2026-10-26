@@ -44,7 +44,7 @@ function FoalLine({ p, hrefFor }) {
         .filter((g, i, all) => all.findIndex((o) => String(o.name).toUpperCase() === String(g.name).toUpperCase()) === i)
         .map((g) => (
         <div className="ff-grand" key={`${g.name}-${g.sire}`}>
-          DAM OF <Link href={link(g.name)}>{horseCaps(g.name)}</Link>
+          <Link href={link(g.name)}>{horseCaps(g.name)}</Link>
           {g.sire ? <> ({g.sex ? `${horseCaps(g.sex)}. ` : ""}BY <Link href={link(g.sire)}>{horseCaps(g.sire)}</Link>)</> : null}
           {g.status ? `. ${horseCaps(g.status)}.` : "."}
           {(g.races || []).length ? ` ${horseCaps(g.races.join(", "))}.` : null}
