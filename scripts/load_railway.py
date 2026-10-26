@@ -72,8 +72,11 @@ def load_catalogs(source: Path, railway_db) -> None:
             found.append(path.stem)
             print(f"  catalog {path.stem:<52} {len(rows):>6,} rows  ({source_kind})")
     stored = {row["id"] for row in railway_db.list_upcoming_catalogs()}
+    from crossr_core import hip_cache
+
     for stale in sorted(stored - set(found)):
         railway_db.delete_upcoming_catalog(stale)
+        hip_cache.delete_catalog(stale)
         print(f"  catalog {stale:<52} removed (no longer in the folders)")
 
 
@@ -125,6 +128,10 @@ def main() -> int:
     parser.add_argument("--only", nargs="*", help=f"load just these parts: table names or {', '.join(EXTRA_PARTS)}")
     parser.add_argument("--skip-pedigrees", action="store_true")
     parser.add_argument("--schema-only", action="store_true")
+    parser.add_argument(
+        "--precompute", action="store_true",
+        help="after loading catalogs/models, precompute stale upcoming hip pages (scripts/precompute_catalogs.py)",
+    )
     parser.add_argument("--source", default=str(ROOT), help="folder holding data/, the catalogs, hypofoals.py ...")
     args = parser.parse_args()
     source = Path(args.source).expanduser().resolve()
@@ -182,6 +189,11 @@ def main() -> int:
         load_hypofoals(source, railway_db)
     if want("app_state"):
         load_app_state(source, railway_db, sample_db)
+    if args.precompute:
+        import subprocess
+
+        print("\nPrecomputing upcoming hip pages (stale hips only)...")
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "precompute_catalogs.py")], check=False)
 
     print("\nRow counts:")
     for name, count in railway_db.row_counts().items():

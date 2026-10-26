@@ -665,10 +665,20 @@ def sales_upcoming_lots(
 
 @app.get("/api/sales/upcoming/{catalog_id}/lots/{hip}")
 def sales_upcoming_lot(catalog_id: str, hip: str):
-    lot = upcoming_svc.get_lot(catalog_id, hip)
-    if not lot:
+    """Precomputed hip page (crossr_core/hip_cache.py); computed live and stored when missing."""
+    from crossr_core import hip_cache
+
+    # Stars / notes and the pedigree-scrape status are read live on top of the stored page.
+    payload = hip_cache.get(catalog_id, hip, _compute_upcoming_lot)
+    if payload is None:
         raise HTTPException(status_code=404, detail="Hip not found")
-    book = profiles()
+    return payload
+
+
+def build_upcoming_lot_payload(catalog_id: str, lot: dict, book=None) -> dict:
+    """Everything the hip page shows for one catalog lot (what hip_cache stores)."""
+    book = profiles() if book is None else book
+    lot = dict(lot)
     lot["height"] = horse_svc.sire_height(lot.get("sire"), horse_svc.profile_lookup(book))
     return {
         "lot": lot,
@@ -679,6 +689,11 @@ def sales_upcoming_lot(catalog_id: str, hip: str):
             catalog={"year": _sale_year_from(catalog_title=catalog_id)},
         ),
     }
+
+
+def _compute_upcoming_lot(catalog_id: str, hip: str):
+    lot = upcoming_svc.get_lot(catalog_id, hip)
+    return build_upcoming_lot_payload(catalog_id, lot) if lot else None
 
 
 @app.post("/api/sales/upcoming/{catalog_id}/lots/{hip}")
