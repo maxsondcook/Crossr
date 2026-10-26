@@ -1016,6 +1016,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   font-size: 12px;
   color: var(--muted);
 }
+.data-status { margin: -2px 0 10px; color: var(--gold); font-size: 12px; letter-spacing: 0.04em; }
 .sale-identity h2 { margin: 0 0 6px; font-size: 26px; letter-spacing: 0.02em; }
 .sale-sex, .sale-class { color: var(--gold); font-weight: 700; }
 .byline { color: var(--muted); margin: 0 0 12px; line-height: 1.45; }

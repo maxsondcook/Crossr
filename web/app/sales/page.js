@@ -847,6 +847,11 @@ function SalesPage() {
                   <h2>
                     <Link href={hrefFor(current.name)}>{current.name || current.raw_name || "Unnamed"}</Link>
                   </h2>
+                  {ready && detail?.data_status?.status === "updating" ? (
+                    <p className="data-status">Pedigree still updating — figures may change</p>
+                  ) : ready && detail?.data_status?.status === "not_found" ? (
+                    <p className="data-status">Pedigree not found</p>
+                  ) : null}
                   <div className="sale-meta">
                     <div><span className="meta-label">Color</span><b>{colorWord(current) || "—"}</b></div>
                     <div><span className="meta-label">Sex</span><b>{sexWord(current) || "—"}</b></div>

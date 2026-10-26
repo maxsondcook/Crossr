@@ -3,17 +3,18 @@
 function money(n) {
   if (n == null || n === "") return "";
   const num = Number(n);
-  if (!Number.isFinite(num) || !num) return "";
+  // $0 is a real figure (e.g. a colt's breeding range low), not "no value".
+  if (!Number.isFinite(num) || num < 0) return "";
   return `$${Math.round(num).toLocaleString()}`;
 }
 
 function parseMoney(raw) {
   if (raw == null || raw === "") return null;
-  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) return raw;
   const digits = String(raw).replace(/[^0-9.]/g, "");
   if (!digits) return null;
   const num = Number(digits);
-  return Number.isFinite(num) && num > 0 ? num : null;
+  return Number.isFinite(num) && num >= 0 ? num : null;
 }
 
 function isGelding(vp, lot) {
@@ -30,7 +31,7 @@ function breedingLabel(vp, lot) {
   if (vp.low != null && vp.high != null && vp.low !== vp.high) {
     return `${money(vp.low)}–${money(vp.high)}`;
   }
-  return money(vp.point) || "";
+  return Number(vp.point) > 0 ? money(vp.point) : "";
 }
 
 function raceLabel(vp) {
@@ -72,7 +73,7 @@ function totalLabel(vp, lot, breedingShown, raceShown) {
   if (!allowBreeding) {
     return raceN != null ? money(raceN) : "";
   }
-  if (Number.isFinite(low) && Number.isFinite(high) && low > 0 && high > 0) {
+  if (Number.isFinite(low) && Number.isFinite(high) && low >= 0 && high > 0) {
     const r = raceN || 0;
     const tLow = low + r;
     const tHigh = high + r;
