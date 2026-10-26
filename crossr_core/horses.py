@@ -79,7 +79,7 @@ def _parent_lookup():
     out = {}
     from crossr_core import sample_db
     for row in sample_db.load_table("race_horses"):
-        key = main.clean_horse_name(row.get("display_name") or row.get("name_key") or "")
+        key = main.clean_horse_name(row.get("name_key") or row.get("display_name") or "")
         if not key or key in out:
             continue
         sire = (row.get("sire") or "").strip() or None
@@ -410,8 +410,12 @@ def race_results_for(name, foal_year=None, aliases=()):
     return rows, wins
 
 
-def top_progeny_for_sire(sire_name, limit=12):
-    payload = hypomating_engine.top_crosses_payload(main.PEDIGREE_DATABASE, sire_name, limit=40)
+_CLASS_ORDER = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "SW": 6}
+
+
+def top_progeny_for_sire(sire_name, limit=None):
+    """Every black-type winner by this sire, best class first, then earnings (no cap by default)."""
+    payload = hypomating_engine.top_crosses_payload(main.PEDIGREE_DATABASE, sire_name, limit=None)
     earn_lookup = _progeny_earnings_lookup()
     rows = []
     for cross in payload.get("crosses", []):
@@ -427,8 +431,67 @@ def top_progeny_for_sire(sire_name, limit=12):
                 "earnings": earnings or None,
                 "earnings_display": f"${earnings:,}" if earnings else None,
             })
-    rows.sort(key=lambda row: (row.get("earnings") or 0), reverse=True)
-    return rows[:limit]
+    # Winners without a full pedigree record: race_horses also names each horse's sire.
+    seen = {main.clean_horse_name(row["name"]) for row in rows}
+    target = main.clean_horse_name(sire_name)
+    summaries = hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
+    for clean_h, (h_name, dam, damsire) in _race_horse_progeny().get(target, {}).items():
+        h = summaries.get(h_name)
+        if clean_h in seen or not h or not h.get("status"):
+            continue
+        seen.add(clean_h)
+        earnings = earn_lookup.get(clean_h) or 0
+        rows.append({
+            "name": h_name,
+            "sex": "",
+            "broodmare_sire": re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip().title() or None,
+            "class": h["status"],
+            "dam": re.sub(r"\s*\(\d{4}\)", "", dam or "").strip() or None,
+            "earnings": earnings or None,
+            "earnings_display": f"${earnings:,}" if earnings else None,
+        })
+    rows.sort(key=lambda row: (_CLASS_ORDER.get(row["class"], 9), -(row.get("earnings") or 0), row["name"]))
+    return rows[:limit] if limit else rows
+
+
+_RACE_HORSE_PROGENY = None
+
+
+def _race_horse_progeny():
+    """sire -> {winner: (stakes-table name, dam, damsire)} for black-type winners, via race_horses.sire.
+
+    Matches a winner to its race_horses row by name and foaling year (any year when
+    either side lacks one and the name is unique), so namesakes don't swap sires.
+    """
+    global _RACE_HORSE_PROGENY
+    from crossr_core import sample_db
+
+    summaries = hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
+    version = (sample_db.table_version("race_horses"), id(summaries))
+    if _RACE_HORSE_PROGENY is not None and _RACE_HORSE_PROGENY[0] == version:
+        return _RACE_HORSE_PROGENY[1]
+    wanted = {}
+    for h_name, h in summaries.items():
+        wanted.setdefault(main.clean_horse_name(h_name), []).append((h_name, str(h.get("foaling_year") or "")))
+    out = {}
+    for row in sample_db.load_table("race_horses"):
+        # Only fetched Equibase profiles: queued / failed rows hold catalog fragments, not parents.
+        if (row.get("status") or "") != "ok":
+            continue
+        sire = (row.get("sire") or "").strip()
+        clean_h = main.clean_horse_name(row.get("name_key") or row.get("display_name") or "")
+        if not sire or clean_h not in wanted or clean_h == main.clean_horse_name(sire):
+            continue
+        foal_year = str(row.get("foal_year") or "")
+        candidates = wanted[clean_h]
+        match = next((n for n, y in candidates if y and foal_year and y == foal_year), None)
+        if match is None and len(candidates) == 1 and not (candidates[0][1] and foal_year):
+            match = candidates[0][0]
+        if match is None:
+            continue
+        out.setdefault(main.clean_horse_name(sire), {})[clean_h] = (match, row.get("dam"), row.get("damsire"))
+    _RACE_HORSE_PROGENY = (version, out)
+    return out
 
 
 def parent_names(search_name):
@@ -842,6 +905,47 @@ def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, 
     return rows[:limit]
 
 
+def _add_nick_reasons(crosses, sire, dam):
+    """Tag each similar cross with why it resembles this mating (row["nick"]).
+
+    The nick is the sire over the mare's sire (the foal's broodmare sire): a winner
+    out of a mare by that same horse, or by a horse from his sire line, repeats it.
+    """
+    dam_tree = main.pedigree_tree(dam) or {}
+    damsire = hypomating_engine.get_mare_sire_from_pedigree(dam_tree)
+    line = hypomating_engine.get_sire_line_ancestry(damsire, node=dam_tree.get("Sire")) if damsire else []
+    ds_display = re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip().title()
+    sire_display = re.sub(r"\s*\(\d{4}\)", "", sire or "").strip().title()
+    for row in crosses:
+        row_ds = main.clean_horse_name(row.get("broodmare_sire") or "")
+        label = row.get("similarity_label")
+        if label and label != "Same sire":  # siblings / same dam say more than the nick
+            row["nick"] = label
+        elif line and row_ds == line[0]:
+            row["nick"] = f"Same nick: {sire_display} over a {ds_display} mare"
+        elif row_ds and row_ds in line:
+            row["nick"] = f"Out of a {row.get('broodmare_sire')} mare, from {ds_display}'s sire line"
+        elif (row.get("similarity") or 0) > 50:
+            row["nick"] = "Shares ancestors on the dam's side"
+    return crosses
+
+
+def _nick_auctions(crosses):
+    """Similar Auction Results: only crosses above 50% similar.
+
+    Exactly 50% means nothing in common but the sire, which would list every foal
+    of his ever sold; above it, the dam's side (the nick) matches too.
+    """
+    import crossr_core.sales as sales_svc
+
+    picked = [row for row in crosses if (row.get("similarity") or 0) > 50]
+    sales = sales_svc.auctions_for_horses(picked)
+    reasons = {main.clean_horse_name(row.get("name") or ""): row.get("nick") for row in picked}
+    for sale in sales:
+        sale["nick"] = reasons.get(main.clean_horse_name(sale.get("name") or ""))
+    return sales
+
+
 def enrich_hypofoal_report(result, sire, dam, profiles=None):
     """Attach the five hypofoal panels from sample CSVs + pedigree DB.
 
@@ -875,9 +979,10 @@ def enrich_hypofoal_report(result, sire, dam, profiles=None):
         limit=20,
         include_same_dam=True,
     )
+    _add_nick_reasons(crosses, sire, dam)
     result["similar_crosses"] = crosses
     sire_crosses = [row for row in crosses if (row.get("source") or "sire_cross") == "sire_cross"]
-    result["auction_history"] = sales_svc.auctions_for_horses(sire_crosses or crosses)
+    result["auction_history"] = _nick_auctions(sire_crosses or crosses)
     result["similar_stallions"] = similar_active_stallions(
         raw_ped,
         profiles=profiles,
@@ -1608,7 +1713,8 @@ def _decimal(val):
 def progeny_stats_from_rankings(stallion_name):
     """Progeny Statistics from stallion_rankings (BloodHorse leading-sire tables).
 
-    career: latest Lifetime AEI row (crops, foals, stakes / graded / G1 winners, AEI, CI).
+    career: the yearly rows added up (runners, winners, stakes / graded / G1 winners, earnings,
+    and % of runners); crops, foals, AEI and CI from the latest Lifetime AEI row.
     season: latest General row (runners, winners, stakes winners, earnings that year); a sire not
     yet on the General list falls back to his First-Crop, then Two-Year-Old, row.
     by_year: one row per General year, newest first, with that year's lifetime AEI.
@@ -1623,20 +1729,33 @@ def progeny_stats_from_rankings(stallion_name):
     )
     gen_years = sorted((y for (lst, y) in rows if lst == season_list), reverse=True)
     career, season, earnings = {}, {}, {}
-    if life_years:
-        life = rows[("Lifetime AEI", life_years[0])]
-        foals = life.get("foals") or life.get("cumulative_foals")
+    if gen_years:
+        # Career = the yearly leading-sire rows added up (user's spec); a horse that won
+        # Grade 1s in two seasons counts in both. Cumulative fields take the latest value.
+        yearly = [rows[(season_list, y)] for y in gen_years]
+        total = lambda col: sum(_intish(r.get(col)) or 0 for r in yearly)
+        runners_sum = total("runners")
+        life = rows[("Lifetime AEI", life_years[0])] if life_years else {}
+        latest = yearly[0]
+        foals = life.get("foals") or life.get("cumulative_foals") or latest.get("cumulative_foals")
         career = {
-            "As of": str(life_years[0]),
-            "Crops": _count(life.get("crops")),
+            "As of": f"{gen_years[-1]}-{gen_years[0]}" if len(gen_years) > 1 else str(gen_years[0]),
+            "Crops": _count(life.get("crops") or latest.get("crops")),
             "Foals": _count(foals),
-            "Stakes Winners": _count(life.get("stakes_winners")),
-            "Stakes Winners %": (f"{life['stakes_winners_percent']}%" if life.get("stakes_winners_percent") else _pct(life.get("stakes_winners"), foals)),
-            "Graded Stakes Winners": _count(life.get("graded_stakes_winners")),
-            "Graded Stakes Winners %": _pct(life.get("graded_stakes_winners"), foals),
-            "Grade 1 Winners": _count(life.get("grade1_stakes_winners")),
+            "Runners (season totals)": _count(runners_sum),
+            "Winners": _count(total("winners")),
+            "Winners %": _pct(total("winners"), runners_sum),
+            "Stakes Winners": _count(total("stakes_winners")),
+            "Stakes Winners %": _pct(total("stakes_winners"), runners_sum),
+            "Graded Stakes Winners": _count(total("graded_stakes_winners")),
+            "Graded Stakes Winners %": _pct(total("graded_stakes_winners"), runners_sum),
+            "Grade 1 Winners": _count(total("grade1_stakes_winners")),
+            "Grade 1 Winners %": _pct(total("grade1_stakes_winners"), runners_sum),
         }
-        earnings.update({"AEI": _decimal(life.get("aei")), "Comparable Index": _decimal(life.get("comparable_index"))})
+        if total("year_earnings"):
+            earnings["Career Earnings"] = f"${total('year_earnings'):,}"
+        if life:
+            earnings.update({"AEI": _decimal(life.get("aei")), "Comparable Index": _decimal(life.get("comparable_index"))})
     if gen_years:
         gen = rows[(season_list, gen_years[0])]
         runners, winners = gen.get("runners"), gen.get("winners")

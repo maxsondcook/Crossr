@@ -123,6 +123,8 @@ function ProgenyByYear({ rows, listName }) {
   );
 }
 
+const TOP_PROGENY_PREVIEW = 25;
+
 function ProgenyStatSection({ title, cards }) {
   if (!cards.length) return null;
   return (
@@ -498,6 +500,7 @@ function HorsePage() {
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
   const [rankList, setRankList] = useState("leading_sire");
+  const [showAllProgeny, setShowAllProgeny] = useState(false);
   const returnTarget = useMemo(() => resolveReturnTarget(searchParams), [searchParams]);
   const salesReturn = returnTarget.sales;
   const hrefFor = useMemo(
@@ -745,7 +748,7 @@ function HorsePage() {
           <h4>PROGENY STATISTICS</h4>
           {hasProgenyStats ? (
             <div className="progeny-stats-scroll">
-              <ProgenyStatSection title={`Career${ps.career?.["As of"] ? ` (through ${ps.career["As of"]})` : ""}`} cards={careerCards} />
+              <ProgenyStatSection title={`Career${ps.career?.["As of"] ? ` (${ps.career["As of"]})` : ""}`} cards={careerCards} />
               <ProgenyStatSection title={ps.season?.Season ? `${ps.season.Season} season` : "Season"} cards={seasonCards} />
               <ProgenyStatSection title="Earnings & indexes" cards={rankEarningsCards} />
               <ProgenyByYear rows={ps.by_year} listName={ps.by_year_list} />
@@ -759,15 +762,16 @@ function HorsePage() {
         </div>
 
         <div className="panel">
-          <h4>TOP PROGENY</h4>
+          <h4>TOP PROGENY{(data.top_progeny || []).length ? ` · ${data.top_progeny.length}` : ""}</h4>
           {(data.top_progeny || []).length ? (
+            <>
             <table>
               <thead>
                 <tr><th>Horse</th><th>Broodmare Sire</th><th>Class</th><th>Earnings</th></tr>
               </thead>
               <tbody>
-                {[...data.top_progeny]
-                  .sort((a, b) => (Number(b.earnings) || 0) - (Number(a.earnings) || 0))
+                {/* Best class first, then earnings (API order). */}
+                {(showAllProgeny ? data.top_progeny : data.top_progeny.slice(0, TOP_PROGENY_PREVIEW))
                   .map((p) => (
                   <tr key={p.name}>
                     <td><Link href={hrefFor(p.name)}>{p.name}</Link></td>
@@ -778,6 +782,12 @@ function HorsePage() {
                 ))}
               </tbody>
             </table>
+            {data.top_progeny.length > TOP_PROGENY_PREVIEW ? (
+              <button className="ghost" type="button" onClick={() => setShowAllProgeny((v) => !v)} style={{ marginTop: 8 }}>
+                {showAllProgeny ? "Show fewer" : `Show all ${data.top_progeny.length}`}
+              </button>
+            ) : null}
+            </>
           ) : (
             <p className="catalog-empty">No top progeny recorded for this stallion yet.</p>
           )}

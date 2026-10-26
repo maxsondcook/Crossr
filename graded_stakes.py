@@ -146,6 +146,14 @@ _STARTS_SQL = """
 """
 
 
+# Equibase chart names sometimes keep the state-bred tag and weight: "Cara's Time (NY) 57".
+_CHART_SUFFIX = re.compile(r"\s*\([A-Z]{2,3}\)\s*\d+\s*$")
+
+
+def clean_display_name(name: str) -> str:
+    return _CHART_SUFFIX.sub("", str(name or "")).strip()
+
+
 def _iter_starts():
     """(display_name, foal_year, sex, foaled_in, race_date, place, grade, race_name, country, track)."""
     with sample_db._pg().connect() as conn:
@@ -153,7 +161,8 @@ def _iter_starts():
             cur.itersize = 10000
             cur.execute(_STARTS_SQL)
             for rec in cur:
-                yield tuple("" if v is None else str(v) for v in rec)
+                row = tuple("" if v is None else str(v) for v in rec)
+                yield (clean_display_name(row[0]),) + row[1:]
 
 
 def _start_record(name, foal_year, sex, race_date, grade_class, race_name, country, track) -> dict:
