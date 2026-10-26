@@ -726,6 +726,15 @@ def _has_lineage_options(st_clean, all_profiles, budget_filter=None):
         
     return False
 
+def _is_this_mare(dam_label, clean_mare, mare_year):
+    """Dam label names this mare: same name and, when both carry one, the same foaling year
+    (Stage Magic (2007) and Stage Magic (2015) are different mares)."""
+    if main.clean_horse_name(dam_label) != clean_mare:
+        return False
+    dam_year = main.foaling_year(dam_label)
+    return not (mare_year and dam_year and dam_year != mare_year)
+
+
 def lookup_mare_pedigree(pedigree_db, mare_name):
     """Find a broodmare pedigree by cleaned or uppercase name. Returns (tree, matched_key) or (None, None)."""
     hit = main.lookup_pedigree(mare_name, pedigree_db)
@@ -745,6 +754,7 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
 
     mare_display = mare_pedigree.get("Horse", mare_name)
     clean_mare = main.clean_horse_name(matched_key or mare_name)
+    mare_year = main.foaling_year(matched_key or "") or main.foaling_year(mare_pedigree.get("Horse", ""))
     mating_damsire = get_mare_sire_from_pedigree(mare_pedigree)
     clean_display_damsire = main._COLOR_SUFFIX.sub('', re.sub(r'\s*\(\d{4}\)', '', mating_damsire)).strip()
     clean_display_mare = re.sub(r'\s*\(\d{4}\)', '', mare_display).strip()
@@ -768,7 +778,7 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
         clean_h = main.clean_horse_name(h_name)
         if clean_h in parents:
             sire_name, dam_name, _ = parents[clean_h]
-            if main.clean_horse_name(dam_name) == clean_mare:
+            if _is_this_mare(dam_name, clean_mare, mare_year):
                 direct_progeny_clean_names.add(clean_h)
                 sire_name = sire_name or "Unknown Stallion"
                 clean_sire = main.clean_horse_name(sire_name)
@@ -1016,6 +1026,7 @@ def broodmare_context(pedigree_db, mare_name):
     if not mare_pedigree:
         return None
     clean_mare = main.clean_horse_name(matched or mare_name)
+    mare_year = main.foaling_year(matched or "") or main.foaling_year(mare_pedigree.get("Horse", ""))
     summaries = build_horse_summaries(load_stakes_data())
     own = None
     for h_name, h in summaries.items():
@@ -1029,7 +1040,7 @@ def broodmare_context(pedigree_db, mare_name):
         if clean_h not in parents:
             continue
         sire_name, dam_name, _ = parents[clean_h]
-        if main.clean_horse_name(dam_name) != clean_mare:
+        if not _is_this_mare(dam_name, clean_mare, mare_year):
             continue
         progeny.append({
             "name": h_name,
