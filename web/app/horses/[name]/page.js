@@ -86,6 +86,43 @@ const LEGACY_STAT_FIELDS = [
   { label: "GSW / G1W Ratio", keys: ["GSW / G1W Ratio"] },
 ];
 
+// stallion.progeny_stats (from stallion_rankings): label -> display value, shown in order.
+function statCards(section, skip = []) {
+  return Object.entries(section || {})
+    .filter(([label, value]) => value != null && value !== "" && !skip.includes(label))
+    .map(([label, value]) => ({ label, value: String(value) }));
+}
+
+function ProgenyByYear({ rows, listName }) {
+  if (!rows?.length) return null;
+  return (
+    <div className="progeny-stat-section">
+      <h5>By year{listName && listName !== "General" ? ` (${listName} list)` : ""}</h5>
+      <div className="history-wrap">
+        <table>
+          <thead>
+            <tr><th>Year</th><th>Rank</th><th>Runners</th><th>Winners</th><th>SW</th><th>GSW</th><th>Earnings</th><th>AEI</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.year}>
+                <td>{r.year}</td>
+                <td>{r.rank ? `#${r.rank}` : "—"}</td>
+                <td>{r.runners ?? "—"}</td>
+                <td>{r.winners ?? "—"}</td>
+                <td>{r.stakes_winners ?? "—"}</td>
+                <td>{r.graded_stakes_winners ?? "—"}</td>
+                <td className="money">{r.earnings != null ? money(r.earnings) : "—"}</td>
+                <td>{r.aei ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ProgenyStatSection({ title, cards }) {
   if (!cards.length) return null;
   return (
@@ -551,7 +588,12 @@ function HorsePage() {
   const racingCards = collectStatCards(racing, RACING_STAT_FIELDS);
   const earningsCards = collectStatCards(earn, EARNINGS_STAT_FIELDS);
   const legacyCards = collectStatCards(legacy, LEGACY_STAT_FIELDS);
-  const hasProgenyStats = racingCards.length || earningsCards.length || legacyCards.length;
+  const ps = s.progeny_stats || {};
+  const careerCards = statCards(ps.career, ["As of"]);
+  const seasonCards = statCards(ps.season, ["Season"]);
+  const rankEarningsCards = statCards(ps.earnings);
+  const hasProgenyStats = racingCards.length || earningsCards.length || legacyCards.length
+    || careerCards.length || seasonCards.length || rankEarningsCards.length;
   const totals = data.race_totals || {};
   const family = data.female_family || [];
   const bmsCountLabel = (data.broodmare_sire || []).find((row) => row.count_label)?.count_label || "Runners";
@@ -703,6 +745,10 @@ function HorsePage() {
           <h4>PROGENY STATISTICS</h4>
           {hasProgenyStats ? (
             <div className="progeny-stats-scroll">
+              <ProgenyStatSection title={`Career${ps.career?.["As of"] ? ` (through ${ps.career["As of"]})` : ""}`} cards={careerCards} />
+              <ProgenyStatSection title={ps.season?.Season ? `${ps.season.Season} season` : "Season"} cards={seasonCards} />
+              <ProgenyStatSection title="Earnings & indexes" cards={rankEarningsCards} />
+              <ProgenyByYear rows={ps.by_year} listName={ps.by_year_list} />
               <ProgenyStatSection title="Racing" cards={racingCards} />
               <ProgenyStatSection title="Earnings" cards={earningsCards} />
               <ProgenyStatSection title="Legacy" cards={legacyCards} />

@@ -234,38 +234,33 @@ def _fee_num(raw):
         return 0
 
 
+_EARNINGS = None
+
+
 def _progeny_earnings_lookup():
-    """Map cleaned horse name -> career earnings from placeholder stallion race records + GSW purses."""
+    """Map cleaned horse name -> summed stakes purses (graded_stakes_winners), cached per table version.
+
+    Stud cards no longer carry race records, so the old stallion_stats pass only
+    rebuilt every card on each call (seconds) and added nothing.
+    """
+    global _EARNINGS
+    import graded_stakes
+
+    version = graded_stakes._versions()
+    if _EARNINGS is not None and _EARNINGS[0] == version:
+        return _EARNINGS[1]
     earn = {}
     try:
         import placeholder_store
 
-        for row in placeholder_store.load_table("stallion_stats"):
-            name = main.clean_horse_name(row.get("stallion_name") or "")
-            if not name:
-                continue
-            total = 0
-            record = row.get("race_record") or ""
-            try:
-                parsed = json.loads(record) if isinstance(record, str) and record.strip().startswith("{") else record
-            except Exception:
-                parsed = {}
-            if isinstance(parsed, dict):
-                for stats in parsed.values():
-                    if not isinstance(stats, dict):
-                        continue
-                    amount = _intish(stats.get("Earnings"))
-                    if amount:
-                        total += amount
-            if total:
-                earn[name] = max(earn.get(name, 0), total)
         for row in placeholder_store.load_table("graded_stakes_winners"):
             name = main.clean_horse_name(row.get("horse_name") or "")
             purse = _intish(row.get("purse"))
             if name and purse:
                 earn[name] = earn.get(name, 0) + purse
     except Exception:
-        pass
+        return earn
+    _EARNINGS = (version, earn)
     return earn
 
 
@@ -728,25 +723,14 @@ def _same_dam_stakes_rows(dam_name, reference_tree=None, exclude_names=None):
     except Exception:
         return []
     rows = []
+    parents = hypomating_engine.winner_parents(main.PEDIGREE_DATABASE, summaries)
     for h_name, h in summaries.items():
         clean_h = main.clean_horse_name(h_name)
-        if not clean_h or clean_h in exclude:
+        if not clean_h or clean_h in exclude or clean_h not in parents:
             continue
-        ped = main.PEDIGREE_DATABASE.get(clean_h)
-        if not ped:
-            continue
-        dam_node = ped.get("Dam") or {}
-        dam = dam_node.get("Horse", "") if isinstance(dam_node, dict) else str(dam_node or "")
+        sire, dam, damsire = parents[clean_h]
         if main.clean_horse_name(dam) != dam_key:
             continue
-        sire_node = ped.get("Sire") or {}
-        sire = sire_node.get("Horse", "") if isinstance(sire_node, dict) else str(sire_node or "")
-        damsire_node = dam_node.get("Sire") if isinstance(dam_node, dict) else None
-        damsire = (
-            damsire_node.get("Horse", "")
-            if isinstance(damsire_node, dict)
-            else str(damsire_node or "")
-        )
         sim = pedigree_similarity(a_tree=reference_tree, b=h_name) if reference_tree else None
         rows.append({
             "name": h_name,
@@ -1580,6 +1564,120 @@ def load_stallion_ranking_tables():
     return _STALLION_RANK_TABLES
 
 
+_RANKING_ROWS = None
+
+
+def _ranking_rows_by_stallion():
+    """name_key -> {(list, year): row} for the lists Progeny Statistics uses (cached per table version)."""
+    global _RANKING_ROWS
+    from crossr_core import sample_db
+
+    version = sample_db.table_version("stallion_rankings")
+    if _RANKING_ROWS is not None and _RANKING_ROWS[0] == version:
+        return _RANKING_ROWS[1]
+    out = {}
+    for row in sample_db.load_table("stallion_rankings"):
+        list_name = (row.get("list") or "").strip()
+        if list_name not in ("General", "Lifetime AEI", "First-Crop", "Two-Year-Old"):
+            continue
+        year = _intish(row.get("year"))
+        key = sample_db.name_key(row.get("stallion") or "")
+        if key and year:
+            out.setdefault(key, {}).setdefault((list_name, year), row)
+    _RANKING_ROWS = (version, out)
+    return out
+
+
+def _count(val):
+    n = _intish(val)
+    return f"{n:,}" if n is not None else None
+
+
+def _pct(part, whole):
+    p, w = _intish(part), _intish(whole)
+    return f"{100.0 * p / w:.1f}%" if p is not None and w else None
+
+
+def _decimal(val):
+    try:
+        return f"{float(str(val).replace(',', '')):.2f}"
+    except (TypeError, ValueError):
+        return None
+
+
+def progeny_stats_from_rankings(stallion_name):
+    """Progeny Statistics from stallion_rankings (BloodHorse leading-sire tables).
+
+    career: latest Lifetime AEI row (crops, foals, stakes / graded / G1 winners, AEI, CI).
+    season: latest General row (runners, winners, stakes winners, earnings that year); a sire not
+    yet on the General list falls back to his First-Crop, then Two-Year-Old, row.
+    by_year: one row per General year, newest first, with that year's lifetime AEI.
+    Empty dicts when the stallion is not in the rankings (e.g. no runners yet).
+    """
+    from crossr_core import sample_db
+
+    rows = _ranking_rows_by_stallion().get(sample_db.name_key(stallion_name or ""), {})
+    life_years = sorted((y for (lst, y) in rows if lst == "Lifetime AEI"), reverse=True)
+    season_list = next(
+        (lst for lst in ("General", "First-Crop", "Two-Year-Old") if any(l == lst for (l, _) in rows)), "General"
+    )
+    gen_years = sorted((y for (lst, y) in rows if lst == season_list), reverse=True)
+    career, season, earnings = {}, {}, {}
+    if life_years:
+        life = rows[("Lifetime AEI", life_years[0])]
+        foals = life.get("foals") or life.get("cumulative_foals")
+        career = {
+            "As of": str(life_years[0]),
+            "Crops": _count(life.get("crops")),
+            "Foals": _count(foals),
+            "Stakes Winners": _count(life.get("stakes_winners")),
+            "Stakes Winners %": (f"{life['stakes_winners_percent']}%" if life.get("stakes_winners_percent") else _pct(life.get("stakes_winners"), foals)),
+            "Graded Stakes Winners": _count(life.get("graded_stakes_winners")),
+            "Graded Stakes Winners %": _pct(life.get("graded_stakes_winners"), foals),
+            "Grade 1 Winners": _count(life.get("grade1_stakes_winners")),
+        }
+        earnings.update({"AEI": _decimal(life.get("aei")), "Comparable Index": _decimal(life.get("comparable_index"))})
+    if gen_years:
+        gen = rows[(season_list, gen_years[0])]
+        runners, winners = gen.get("runners"), gen.get("winners")
+        season = {
+            "Season": str(gen_years[0]) if season_list == "General" else f"{gen_years[0]} ({season_list} list)",
+            "Runners": _count(runners),
+            "Winners": _count(winners),
+            "Winners %": _pct(winners, runners),
+            "Stakes Winners": _count(gen.get("stakes_winners")),
+            "Graded Stakes Winners": _count(gen.get("graded_stakes_winners")),
+            f"{'Leading Sire' if season_list == 'General' else season_list} Rank": f"#{gen['rank']}" if gen.get("rank") else None,
+        }
+        year_earn = _intish(gen.get("year_earnings"))
+        if year_earn:
+            earnings[f"{gen_years[0]} Earnings"] = f"${year_earn:,}"
+            if _intish(runners):
+                earnings["Avg Earnings / runner"] = f"${year_earn // _intish(runners):,}"
+    by_year = []
+    for y in gen_years:
+        gen = rows[(season_list, y)]
+        life = rows.get(("Lifetime AEI", y)) or {}
+        by_year.append({
+            "year": y,
+            "rank": _intish(gen.get("rank")),
+            "runners": _intish(gen.get("runners")),
+            "winners": _intish(gen.get("winners")),
+            "stakes_winners": _intish(gen.get("stakes_winners")),
+            "graded_stakes_winners": _intish(gen.get("graded_stakes_winners")),
+            "earnings": _intish(gen.get("year_earnings")),
+            "aei": _decimal(life.get("aei")) if life else None,
+        })
+    drop = lambda d: {k: v for k, v in d.items() if v not in (None, "")}
+    return {
+        "career": drop(career),
+        "season": drop(season),
+        "earnings": drop(earnings),
+        "by_year": by_year,
+        "by_year_list": season_list,
+    }
+
+
 def stallion_ranking_history(stallion_name, entered_stud=None):
     """Yearly ranks + full BloodHorse metrics (AEI, CI, earnings, runners, …)."""
     key = main.clean_horse_name(stallion_name)
@@ -2011,6 +2109,7 @@ def get_horse_profile(search_name, profiles=None):
             "broodmare_rank": None,
             "progeny_racing": data.get("Progeny Racing Statistics"),
             "progeny_earnings": data.get("Progeny Earnings Statistics"),
+            "progeny_stats": progeny_stats_from_rankings(matched_key or search_name),
             "legacy_progeny": data.get("Legacy Progeny Stats"),
             "mares_bred_2025": mares_bred_val,
             "live_foal_2025": lf_2025_val,
