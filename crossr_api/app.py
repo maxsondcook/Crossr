@@ -113,6 +113,13 @@ def startup():
     threading.Thread(target=_warm_caches, name="warm-caches", daemon=True).start()
 
 
+def _warm_stallion_ancestors():
+    """3-generation ancestor sets for every stud card (hypomating's inbreeding check)."""
+    for name in list(profiles()):
+        clean = main.clean_horse_name(name)
+        hypomating_engine.ancestor_set(main.PEDIGREE_DATABASE.get(clean, {"Horse": name}))
+
+
 def _warm_caches():
     steps = (
         lambda: hypomating_engine.winner_parents(
@@ -122,6 +129,7 @@ def _warm_caches():
         horse_svc._progeny_earnings_lookup,
         lambda: horse_svc.build_stallion_roster(profiles()),
         lambda: __import__("ValueProjector").sales_by_dam(""),  # sale-price index for lot pages
+        _warm_stallion_ancestors,
     )
     for step in steps:
         try:

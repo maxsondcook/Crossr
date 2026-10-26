@@ -143,7 +143,10 @@ _STARTS_SQL = """
            s.race_date, s.place, s.grade, s.race_name, s.country, s.track
     FROM race_starts s
     JOIN race_horses h ON h.id = s.horse_id
+    ORDER BY s.race_date, s.id
 """
+# The ORDER BY keeps results identical run to run: without it Postgres returns rows in
+# any order, and which of two same-named horses' records wins changed hypomating output.
 
 
 # Equibase chart names sometimes keep the state-bred tag and weight: "Cara's Time (NY) 57".
