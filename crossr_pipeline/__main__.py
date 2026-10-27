@@ -172,12 +172,15 @@ def cmd_fees_redate(args) -> int:
 
     conn = _conn()
     try:
-        rows, rankings, rp = fr.load(conn)
-        new_rows, stats = fr.rebuild(rows, rankings, rp)
-        print(f"Database: {_db_name()}  stud_fees {len(rows)} -> {len(new_rows)} rows; "
+        ranking_rows, rows, rp = fr.load(conn)
+        new_rows, stats, conflicts = fr.rebuild(ranking_rows, rows, rp, early=args.early)
+        print(f"Database: {_db_name()}  early lists: {args.early}  stud_fees {len(rows)} -> {len(new_rows)} rows; "
               f"gap years {fr.gaps(rows)} -> {fr.gaps(new_rows)}")
         for key, value in sorted(stats.items()):
             print(f"  {key:<42} {value}")
+        print("  conflict examples (stallion, season, CSV kept, Racing Post):")
+        for c in sorted(conflicts, key=lambda c: -c[1])[:8]:
+            print(f"    {c}")
         for key in fr.EXAMPLES:
             before, after = fr.fee_table(rows, key), fr.fee_table(new_rows, key)
             print(f"\n{key}")
@@ -307,6 +310,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("fees-redate", help="Re-date stud_fees by breeding season (dry run unless --apply)")
     p.add_argument("--apply", action="store_true", help="Back up stud_fees, then replace it")
+    p.add_argument("--early", choices=["header", "list-year"], default="header",
+                   help="2001-2007 lists: season from the file header (default) or the list year")
     p.set_defaults(func=cmd_fees_redate)
 
     p = sub.add_parser("status", help="Recent runs, queue state, table counts")

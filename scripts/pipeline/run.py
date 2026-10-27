@@ -66,7 +66,16 @@ def clean_horse_name(name: str) -> str:
 
 
 def ingest_stud_fees() -> dict:
-    """Upsert from stallion_rankings_data/stud_fee_database.csv and optional JSON."""
+    """Disabled: it filed ranking fees under the ranking year, not the season.
+
+    stud_fees is built by `python -m crossr_pipeline fees-redate` (ranking CSVs
+    by breeding season, then Racing Post). The old body is kept below for
+    reference only.
+    """
+    raise SystemExit(
+        "scripts/pipeline/run.py stud_fees is disabled: it files fees under the wrong year. "
+        "Use `python -m crossr_pipeline fees-redate` instead."
+    )
     fieldnames = sample_db.TABLES["stud_fees"]
     incoming: list[dict] = []
     csv_path = ROOT / "stallion_rankings_data" / "stud_fee_database.csv"
@@ -277,8 +286,8 @@ def ingest_sales_lots() -> dict:
     return sample_db.upsert_rows("sales_lots", incoming)
 
 
+# stud_fees is not loaded here any more; see crossr_pipeline fees-redate.
 COMMANDS = {
-    "stud_fees": ingest_stud_fees,
     "race": ingest_race_from_equibase_db,
     "breeding_seasons": ingest_breeding_seasons,
     "stallion_rankings": ingest_stallion_rankings,
