@@ -86,61 +86,50 @@ const LEGACY_STAT_FIELDS = [
   { label: "GSW / G1W Ratio", keys: ["GSW / G1W Ratio"] },
 ];
 
-// stallion.progeny_stats (from stallion_rankings): label -> display value, shown in order.
-function statCards(section, skip = []) {
-  return Object.entries(section || {})
-    .filter(([label, value]) => value != null && value !== "" && !skip.includes(label))
-    .map(([label, value]) => ({ label, value: String(value) }));
+const CAREER_VIEW = "__career";
+const SEASON_VIEW = "__season";
+
+/** Stat cards with "X" and "X %" folded into one box: "698 (52.6%)". */
+function pairedCards(section, skip = []) {
+  const entries = Object.entries(section || {}).filter(
+    ([label, value]) => value != null && value !== "" && !skip.includes(label),
+  );
+  const pct = new Map(entries.filter(([label]) => label.endsWith(" %")).map(([label, v]) => [label.slice(0, -2), v]));
+  return entries
+    .filter(([label]) => !label.endsWith(" %"))
+    .map(([label, value]) => ({ label, value: pct.has(label) ? `${value} (${pct.get(label)})` : String(value) }));
 }
 
-function ProgenyByYear({ rows, listName }) {
-  if (!rows?.length) return null;
-  return (
-    <div className="progeny-stat-section">
-      <h5>By year{listName && listName !== "General" ? ` (${listName} list)` : ""}</h5>
-      <div className="history-wrap">
-        <table>
-          <thead>
-            <tr><th>Year</th><th>Rank</th><th>Runners</th><th>Winners</th><th>SW</th><th>GSW</th><th>Earnings</th><th>AEI</th></tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.year}>
-                <td>{r.year}</td>
-                <td>{r.rank ? `#${r.rank}` : "—"}</td>
-                <td>{r.runners ?? "—"}</td>
-                <td>{r.winners ?? "—"}</td>
-                <td>{r.stakes_winners ?? "—"}</td>
-                <td>{r.graded_stakes_winners ?? "—"}</td>
-                <td className="money">{r.earnings != null ? money(r.earnings) : "—"}</td>
-                <td>{r.aei ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+/** Career and current-season summaries for the Stallion Statistics dropdown (empty ones dropped). */
+function progenySummaries(ps, extraCareer = []) {
+  const earnings = ps?.earnings || {};
+  const seasonYear = String(ps?.season?.Season || "").match(/\d{4}/)?.[0] || "";
+  const seasonEarnKeys = Object.keys(earnings).filter((k) => /^\d{4} Earnings$/.test(k) || k === "Avg Earnings / runner");
+  const careerEarn = Object.fromEntries(Object.entries(earnings).filter(([k]) => !seasonEarnKeys.includes(k)));
+  const seasonEarn = Object.fromEntries(Object.entries(earnings).filter(([k]) => seasonEarnKeys.includes(k)));
+  const career = [...pairedCards(ps?.career, ["As of"]), ...pairedCards(careerEarn), ...extraCareer];
+  const season = [...pairedCards(ps?.season, ["Season"]), ...pairedCards(seasonEarn)];
+  const out = [];
+  if (career.length) {
+    out.push({
+      id: CAREER_VIEW,
+      label: "Career progeny statistics",
+      note: ps?.career?.["As of"] ? `As of ${ps.career["As of"]}` : "",
+      cards: career,
+    });
+  }
+  if (season.length) {
+    out.push({
+      id: SEASON_VIEW,
+      label: `Current season${seasonYear ? ` (${seasonYear})` : ""}`,
+      note: ps?.season?.Season && !/^\d{4}$/.test(ps.season.Season) ? ps.season.Season : "",
+      cards: season,
+    });
+  }
+  return out;
 }
 
 const TOP_PROGENY_PREVIEW = 25;
-
-function ProgenyStatSection({ title, cards }) {
-  if (!cards.length) return null;
-  return (
-    <div className="progeny-stat-section">
-      <h5>{title}</h5>
-      <div className="stats-grid">
-        {cards.map((card) => (
-          <div className="stat-box" key={`${title}-${card.label}`}>
-            <span>{card.label}</span>
-            <strong>{card.value}</strong>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 function parseMetricNumber(val) {
   if (val == null || val === "") return null;
@@ -356,7 +345,7 @@ function combineCropLists(meta) {
   return { lists, columns, rows };
 }
 
-function StallionRankingsPanel({ rankingMeta: rawRankingMeta, rankList: rawRankList, setRankList }) {
+function StallionRankingsPanel({ rankingMeta: rawRankingMeta, rankList: rawRankList, setRankList, summaries = [] }) {
   const rankingMeta = useMemo(() => mergeRegionalLists(rawRankingMeta), [rawRankingMeta]);
   const parentList = regionalParent(rawRankList) && rankingMeta.lists.some((l) => l.id === regionalParent(rawRankList))
     ? regionalParent(rawRankList)
@@ -419,17 +408,22 @@ function StallionRankingsPanel({ rankingMeta: rawRankingMeta, rankList: rawRankL
     setSortDir(key === "year" || key === "rank" ? "desc" : "desc");
   }
 
-  if (!lists.length) return null;
+  const summary = summaries.find((item) => item.id === rawRankList) || null;
+  if (!lists.length && !summaries.length) return null;
+  const selected = summary ? summary.id : rankList;
 
   return (
     <div className="stallion-rankings-panel">
-      <h4>STALLION RANKINGS</h4>
+      <h4>STALLION STATISTICS</h4>
       <div className="rankings-toolbar">
         <select
-          value={rankList}
+          value={selected}
           onChange={(e) => setRankList(e.target.value)}
-          aria-label="Ranking list"
+          aria-label="Statistics view"
         >
+          {summaries.map((item) => (
+            <option key={item.id} value={item.id}>{item.label}</option>
+          ))}
           {bloodhorseLists.map((list) => (
             <option key={list.id} value={list.id}>{list.label}</option>
           ))}
@@ -442,6 +436,20 @@ function StallionRankingsPanel({ rankingMeta: rawRankingMeta, rankList: rawRankL
           ) : null}
         </select>
       </div>
+      {summary ? (
+        <div className="stats-summary">
+          {summary.note ? <p className="rankings-meta">{summary.note}</p> : null}
+          <div className="stats-grid">
+            {summary.cards.map((card) => (
+              <div className="stat-box" key={`${summary.id}-${card.label}`}>
+                <span>{card.label}</span>
+                <strong>{card.value}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+      <>
       <p className="rankings-meta">
         {rows.length} {rows.length === 1 ? "year" : "years"}
         {sortKey ? ` · sorted by ${columns.find((c) => c.key === sortKey)?.label || sortKey} (${sortDir})` : ""}
@@ -487,6 +495,8 @@ function StallionRankingsPanel({ rankingMeta: rawRankingMeta, rankList: rawRankL
           </tbody>
         </table>
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -519,8 +529,9 @@ function HorsePage() {
       .then((payload) => {
         setData(payload);
         const lists = (payload && payload.sire_rankings && payload.sire_rankings.lists) || [];
+        const career = payload?.stallion?.progeny_stats?.career;
         const preferred = lists.find((list) => list.id === "leading_sire") || lists[0];
-        setRankList(preferred ? preferred.id : "leading_sire");
+        setRankList(career && Object.keys(career).length ? CAREER_VIEW : (preferred ? preferred.id : "leading_sire"));
       })
       .catch((e) => setError(e.message));
   }, [decoded]);
@@ -592,11 +603,8 @@ function HorsePage() {
   const earningsCards = collectStatCards(earn, EARNINGS_STAT_FIELDS);
   const legacyCards = collectStatCards(legacy, LEGACY_STAT_FIELDS);
   const ps = s.progeny_stats || {};
-  const careerCards = statCards(ps.career, ["As of"]);
-  const seasonCards = statCards(ps.season, ["Season"]);
-  const rankEarningsCards = statCards(ps.earnings);
-  const hasProgenyStats = racingCards.length || earningsCards.length || legacyCards.length
-    || careerCards.length || seasonCards.length || rankEarningsCards.length;
+  // Older stallion-stats fields join the career summary when present.
+  const statSummaries = progenySummaries(ps, [...racingCards, ...earningsCards, ...legacyCards]);
   const totals = data.race_totals || {};
   const family = data.female_family || [];
   const bmsCountLabel = (data.broodmare_sire || []).find((row) => row.count_label)?.count_label || "Runners";
@@ -734,32 +742,16 @@ function HorsePage() {
           </div>
         ) : null}
 
-        {data.stallion && RANK_LISTS.length ? (
+        {data.stallion && (RANK_LISTS.length || statSummaries.length) ? (
           <div className="panel panel-wide">
             <StallionRankingsPanel
               rankingMeta={rankingMeta}
               rankList={rankList}
               setRankList={setRankList}
+              summaries={statSummaries}
             />
           </div>
         ) : null}
-
-        <div className="panel progeny-stats-panel">
-          <h4>PROGENY STATISTICS</h4>
-          {hasProgenyStats ? (
-            <div className="progeny-stats-scroll">
-              <ProgenyStatSection title={`Career${ps.career?.["As of"] ? ` (${ps.career["As of"]})` : ""}`} cards={careerCards} />
-              <ProgenyStatSection title={ps.season?.Season ? `${ps.season.Season} season` : "Season"} cards={seasonCards} />
-              <ProgenyStatSection title="Earnings & indexes" cards={rankEarningsCards} />
-              <ProgenyByYear rows={ps.by_year} listName={ps.by_year_list} />
-              <ProgenyStatSection title="Racing" cards={racingCards} />
-              <ProgenyStatSection title="Earnings" cards={earningsCards} />
-              <ProgenyStatSection title="Legacy" cards={legacyCards} />
-            </div>
-          ) : (
-            <p className="catalog-empty">No progeny statistics on file yet.</p>
-          )}
-        </div>
 
         <div className="panel">
           <h4>TOP PROGENY{(data.top_progeny || []).length ? ` · ${data.top_progeny.length}` : ""}</h4>

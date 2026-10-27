@@ -531,6 +531,10 @@ button, input, select { font: inherit; color: inherit; }
 .kpi .muted { color: var(--gold); }
 
 .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+/* Summary views keep the panel from jumping when switching to a ranking table. */
+.stats-summary { min-height: 260px; }
+.stats-summary .stats-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+.stats-summary .stat-box { min-height: 64px; }
 .stat-box { background: var(--bg-2); border-radius: 10px; padding: 12px; min-height: 84px; }
 .stat-box span { color: var(--muted); font-size: 12px; display: block; }
 .stat-box strong { font-size: 22px; display: block; margin-top: 6px; word-break: break-word; }
