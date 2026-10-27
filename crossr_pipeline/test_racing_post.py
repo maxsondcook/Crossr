@@ -53,3 +53,41 @@ def test_yob_window():
 def test_fee_gaps_only_active_and_internal():
     have = {"NOT THIS TIME": {2017, 2018, 2020, 2021}, "OLD": {2000, 2002}, "FULL": {2020, 2021}}
     assert rp.fee_gaps(have, {"NOT THIS TIME", "FULL"}, 2026) == {"NOT THIS TIME": [2019]}
+
+
+def test_fee_redate_priorities():
+    from crossr_pipeline import fee_redate as fr
+
+    rows = [
+        {"Year": "2020", "Stallion": "Not This Time", "Stud Fee": "$40,000", "Farm": "TM", "Source List": "Leading First Crop Sires", "Notes": None},
+        {"Year": "2021", "Stallion": "Not This Time", "Stud Fee": "$45,000", "Farm": "TM", "Source List": "Leading Sire Rankings", "Notes": None},
+        {"Year": "2019", "Stallion": "Not This Time", "Stud Fee": "$15,000", "Farm": "TM", "Source List": "user", "Notes": None},
+        {"Year": "2018", "Stallion": "Not This Time", "Stud Fee": "$9,999", "Farm": "TM", "Source List": "Leading Sires by AEI", "Notes": None},
+        {"Year": "2017", "Stallion": "Not This Time", "Stud Fee": "N/A", "Farm": "TM", "Source List": "Leading Sire Rankings", "Notes": None},
+    ]
+    rankings = {("NOT THIS TIME", 2020): [("$40,000", 2021)], ("NOT THIS TIME", 2021): [("$45,000", 2022)]}
+    rp = {"NOT THIS TIME": [
+        {"stallion": "Not This Time", "rp_horse_id": "1", "year": 2020, "stud_fee": 12500, "currency": "USD",
+         "is_private": False, "country": "U.S.A", "standing": "Taylor Made"},
+        {"stallion": "Not This Time", "rp_horse_id": "1", "year": 2021, "stud_fee": 40000, "currency": "USD",
+         "is_private": False, "country": "U.S.A", "standing": "Taylor Made"},
+    ]}
+    out, stats = fr.rebuild(rows, rankings, rp)
+    fees = {r["Year"]: (r["Stud Fee"], r["Source List"]) for r in out}
+    assert fees["2019"] == ("$15,000", "user")
+    assert fees["2020"][0] == "$12,500" and fees["2021"][0] == "$40,000"          # Racing Post first
+    assert fees["2022"] == ("$45,000", "Leading Sire Rankings")                   # ranking keyed by season
+    assert "2018" not in fees                                                      # undatable ranking fee dropped
+    assert fees["2017"][0] == "N/A"                                                # placeholder kept
+    assert stats["dropped: ranking fee with no season"] == 1
+
+
+def test_fee_redate_is_idempotent():
+    from crossr_pipeline import fee_redate as fr
+
+    rows = [{"Year": "2020", "Stallion": "X", "Stud Fee": "$40,000", "Farm": "F", "Source List": "Leading First Crop Sires", "Notes": None}]
+    rankings = {("X", 2020): [("$40,000", 2021)]}
+    once, _ = fr.rebuild(rows, rankings, {})
+    twice, stats = fr.rebuild(once, rankings, {})
+    assert [(r["Year"], r["Stud Fee"]) for r in once] == [("2021", "$40,000")] == [(r["Year"], r["Stud Fee"]) for r in twice]
+    assert stats["dropped: ranking fee with no season"] == 0
