@@ -53,17 +53,18 @@ function sexWord(lot) {
 
 function colorWord(lot) {
   if (!lot) return "";
-  if (lot.color_label) return lot.color_label;
-  const key = blank(lot.color).toUpperCase().replace(/\./g, "").replace(/\s+/g, " ");
+  const key = blank(lot.color_label || lot.color).toUpperCase().replace(/\./g, "").replace(/\s+/g, " ");
   return ({
     B: "Bay",
     CH: "Chestnut",
     "DK B/BR": "Dark Bay or Brown",
+    "DK B/": "Dark Bay or Brown",
+    "DK B": "Dark Bay or Brown",
     "GR/RO": "Gray/Roan",
     GR: "Gray",
     RO: "Roan",
     BLK: "Black",
-  })[key] || blank(lot.color);
+  })[key] || blank(lot.color_label) || blank(lot.color);
 }
 
 function projectedPriceLabel(detail) {
@@ -119,7 +120,7 @@ const PRICE_RANGES = [
   { id: "2000+", min: 2000000, max: null, label: "2M+" },
 ];
 
-const EMPTY_EXTRA = { soldAs: [], session: "", consignor: "", coveringSire: "", foal: "" };
+const EMPTY_EXTRA = { soldAs: [], book: "", session: "", consignor: "", coveringSire: "", foal: "" };
 
 const PREGNANCY_WORDS = { PR: "In foal", NP: "Not pregnant", NM: "Not mated", AB: "Aborted" };
 
@@ -133,6 +134,11 @@ function countOptions(lots, pick) {
   return [...counts.entries()]
     .map(([value, count]) => ({ value, count }))
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+/** Books and sessions read 1, 2, 3… rather than by size. */
+function numericOrder(options) {
+  return [...options].sort((a, b) => (Number(a.value) || 0) - (Number(b.value) || 0) || a.value.localeCompare(b.value));
 }
 
 function lotFilterPrice(lot) {
@@ -397,7 +403,8 @@ function SalesPage() {
 
   const extraOptions = useMemo(() => ({
     soldAs: countOptions(lots, (lot) => blank(lot.sold_as)),
-    session: countOptions(lots, (lot) => blank(lot.session)),
+    book: numericOrder(countOptions(lots, (lot) => blank(lot.book))),
+    session: numericOrder(countOptions(lots, (lot) => blank(lot.session))),
     consignor: countOptions(lots, (lot) => blank(lot.consignor)),
     coveringSire: countOptions(lots, (lot) => blank(lot.covering_sire)),
     hasFoalStatus: lots.some((lot) => blank(lot.pregnant)),
@@ -451,6 +458,7 @@ function SalesPage() {
         if (!hands || !hands.includes(height.trim().toLowerCase())) return false;
       }
       if (soldAsSet.size && !soldAsSet.has(blank(lot.sold_as))) return false;
+      if (extra.book && blank(lot.book) !== extra.book) return false;
       if (extra.session && blank(lot.session) !== extra.session) return false;
       if (extra.consignor && blank(lot.consignor) !== extra.consignor) return false;
       if (extra.coveringSire && blank(lot.covering_sire) !== extra.coveringSire) return false;
@@ -847,6 +855,14 @@ function SalesPage() {
                   <h2>
                     <Link href={hrefFor(current.name)}>{current.name || current.raw_name || "Unnamed"}</Link>
                   </h2>
+                  {current.supplement || blank(current.pedigree_pdf) ? (
+                    <p className="sale-links">
+                      {current.supplement ? <span className="pv-badge">Supplemental</span> : null}
+                      {blank(current.pedigree_pdf) ? (
+                        <a href={blank(current.pedigree_pdf)} target="_blank" rel="noopener noreferrer">Catalog page ↗</a>
+                      ) : null}
+                    </p>
+                  ) : null}
                   {ready && detail?.data_status?.status === "updating" ? (
                     <p className="data-status">Pedigree still updating — figures may change</p>
                   ) : ready && detail?.data_status?.status === "not_found" ? (
@@ -869,6 +885,12 @@ function SalesPage() {
                     ) : null}
                     {blank(current.covering_sire) ? (
                       <div><span className="meta-label">Covered by</span><b className={blank(current.covering_sire).length > 14 ? "meta-fit" : undefined}>{blank(current.covering_sire)}</b></div>
+                    ) : null}
+                    {blank(current.book) || blank(current.session) ? (
+                      <div>
+                        <span className="meta-label">Book · Session</span>
+                        <b>{blank(current.book) || "—"} · {blank(current.session) || "—"}</b>
+                      </div>
                     ) : null}
                     {blank(current.pregnant) ? (
                       <div><span className="meta-label">In foal</span><b>{PREGNANCY_WORDS[blank(current.pregnant).toUpperCase()] || blank(current.pregnant)}</b></div>
@@ -1079,6 +1101,17 @@ function SalesPage() {
                     ) : null}
                   </div>
                 ) : null}
+                {mode === "upcoming" && extraOptions.book.length ? (
+                  <label>
+                    Book
+                    <select value={extra.book} onChange={(e) => setExtra((cur) => ({ ...cur, book: e.target.value }))}>
+                      <option value="">Any book</option>
+                      {extraOptions.book.map((opt) => (
+                        <option key={opt.value} value={opt.value}>Book {opt.value} ({opt.count})</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 {mode === "upcoming" ? (
                   <label>
                     Session
@@ -1089,7 +1122,7 @@ function SalesPage() {
                     >
                       <option value="">{extraOptions.session.length ? "Any session" : "Sessions not published yet"}</option>
                       {extraOptions.session.map((opt) => (
-                        <option key={opt.value} value={opt.value}>{opt.value} ({opt.count})</option>
+                        <option key={opt.value} value={opt.value}>Session {opt.value} ({opt.count})</option>
                       ))}
                     </select>
                   </label>

@@ -1020,6 +1020,9 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   font-size: 12px;
   color: var(--muted);
 }
+.sale-links { display: flex; align-items: center; gap: 10px; margin: -2px 0 10px; font-size: 13px; }
+.sale-links .pv-badge { margin-left: 0; }
+.sale-links a { color: var(--teal); font-weight: 700; }
 .data-status { margin: -2px 0 10px; color: var(--gold); font-size: 12px; letter-spacing: 0.04em; }
 .sale-identity h2 { margin: 0 0 6px; font-size: 26px; letter-spacing: 0.02em; }
 .sale-sex, .sale-class { color: var(--gold); font-weight: 700; }
