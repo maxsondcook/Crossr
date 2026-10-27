@@ -164,6 +164,18 @@ def test_top_progeny(api, name):
         assert any(row.get("earnings") for row in top), f"{name}: no earnings on any top progeny"
 
 
+@pytest.mark.parametrize("name", PROGENY)
+def test_progeny_statistics(api, name):
+    ps = (profile(api, name).get("stallion") or {}).get("progeny_stats") or {}
+    career, season = ps.get("career") or {}, ps.get("season") or {}
+    for field in ("Crops", "Foals", "Stakes Winners", "Graded Stakes Winners"):
+        assert career.get(field), f"{name}: Progeny Statistics career has no {field} ({career})"
+    for field in ("Runners", "Winners"):
+        assert season.get(field), f"{name}: Progeny Statistics season has no {field} ({season})"
+    assert (ps.get("earnings") or {}).get("AEI"), f"{name}: Progeny Statistics has no AEI"
+    assert ps.get("by_year"), f"{name}: Progeny Statistics has no per-year rows"
+
+
 @pytest.mark.parametrize("name", FULL_PROGENY)
 def test_proven_crosses(api, name):
     data = api.ok(f"/api/hypomating/crosses/{q(name)}")

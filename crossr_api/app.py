@@ -1,5 +1,6 @@
 """Crossr FastAPI — JSON only. Never serves sales_data/ or stakes CSVs."""
 import os
+import threading
 import time
 from collections import defaultdict, deque
 from threading import Lock
@@ -107,6 +108,34 @@ def startup():
         proj_svc.warm_price_model()
     except Exception:
         pass
+    # Build the big per-table caches in the background: startup must stay fast for
+    # Railway's health check, and otherwise the first visitor waits 10-25s.
+    threading.Thread(target=_warm_caches, name="warm-caches", daemon=True).start()
+
+
+def _warm_stallion_ancestors():
+    """3-generation ancestor sets for every stud card (hypomating's inbreeding check)."""
+    for name in list(profiles()):
+        clean = main.clean_horse_name(name)
+        hypomating_engine.ancestor_set(main.PEDIGREE_DATABASE.get(clean, {"Horse": name}))
+
+
+def _warm_caches():
+    steps = (
+        lambda: hypomating_engine.winner_parents(
+            main.PEDIGREE_DATABASE, hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
+        ),
+        horse_svc.load_stakes_index,
+        horse_svc._progeny_earnings_lookup,
+        lambda: horse_svc.build_stallion_roster(profiles()),
+        lambda: __import__("ValueProjector").sales_by_dam(""),  # sale-price index for lot pages
+        _warm_stallion_ancestors,
+    )
+    for step in steps:
+        try:
+            step()
+        except Exception:
+            pass
 
 
 def profiles():

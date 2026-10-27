@@ -463,7 +463,68 @@ def _surface_from_distance(dist_str):
     return "track"
 
 
+# (records list, summaries) pairs, newest last. load_stakes_data returns the same
+# list until the race tables change, so identity is a safe cache key.
+_SUMMARY_CACHE = []
+
+
 def build_horse_summaries(records):
+    """Cached _build_horse_summaries: several panels per request ask for the same summaries."""
+    for cached_records, summaries in _SUMMARY_CACHE:
+        if cached_records is records:
+            return summaries
+    summaries = _build_horse_summaries(records)
+    _SUMMARY_CACHE.append((records, summaries))
+    del _SUMMARY_CACHE[:-4]
+    return summaries
+
+
+_SURFACE_CACHE = {}
+_PARENTS_CACHE = (None, None, 0, {})
+
+
+def winner_parents(pedigree_db, summaries):
+    """Cleaned winner name -> (sire, dam, damsire) labels from the pedigree DB.
+
+    Pedigrees are stored compressed; decoding every stakes winner's tree in
+    several loops per request was seconds of each suggestion and report.
+    """
+    global _PARENTS_CACHE
+    cached_summaries, cached_db, size, parents = _PARENTS_CACHE
+    if cached_summaries is summaries and cached_db is pedigree_db and size == len(pedigree_db):
+        return parents
+    parents = {}
+    for h_name in summaries:
+        clean_h = main.clean_horse_name(h_name)
+        if not clean_h or clean_h not in pedigree_db:
+            continue
+        ped = pedigree_db[clean_h] or {}
+        sire_node = ped.get("Sire") or {}
+        sire = sire_node.get("Horse", "") if isinstance(sire_node, dict) else str(sire_node or "")
+        dam_node = ped.get("Dam") or {}
+        dam = dam_node.get("Horse", "") if isinstance(dam_node, dict) else str(dam_node or "")
+        damsire = get_mare_sire_from_pedigree(dam_node) if isinstance(dam_node, dict) else ""
+        parents[clean_h] = (sire, dam, damsire)
+    _PARENTS_CACHE = (summaries, pedigree_db, len(pedigree_db), parents)
+    return parents
+
+
+def _records_on_surface(records, surface):
+    """Stakes records run on dirt or turf (same list object per source list, so summaries cache)."""
+    hit = _SURFACE_CACHE.get(surface)
+    if hit and hit[0] is records:
+        return hit[1]
+    picked = []
+    for r in records:
+        dist_str = str(r.get("Distance", "")).upper()
+        r_surf = "dirt" if "(D)" in dist_str else "turf" if "(T)" in dist_str else "track"
+        if r_surf == surface:
+            picked.append(r)
+    _SURFACE_CACHE[surface] = (records, picked)
+    return picked
+
+
+def _build_horse_summaries(records):
     """Per-horse summaries of black-type winners. Only Place==1 rows are wins.
 
     The race table also holds non-stakes wins (allowance, maiden, ...). Those
@@ -529,35 +590,72 @@ def build_horse_summaries(records):
         
     return horses
 
-def check_inbreeding_failsafe(stallion_ped, mare_ped, max_generation=3):
-    def collect_ancestors(node, depth, gathered):
-        if not node or not isinstance(node, dict) or depth > max_generation:
-            return
-        name = main.clean_horse_name(node.get("Horse", ""))
-        if name and "unknown" not in name:
-            gathered.add(name)
-        collect_ancestors(node.get("Sire"), depth + 1, gathered)
-        collect_ancestors(node.get("Dam"), depth + 1, gathered)
+def _collect_ancestors(node, depth, gathered, max_generation):
+    if not node or not isinstance(node, dict) or depth > max_generation:
+        return
+    name = main.clean_horse_name(node.get("Horse", ""))
+    if name and "unknown" not in name:
+        gathered.add(name)
+    _collect_ancestors(node.get("Sire"), depth + 1, gathered, max_generation)
+    _collect_ancestors(node.get("Dam"), depth + 1, gathered, max_generation)
 
-    stallion_anc = set()
+
+# (stallion label, generations) -> ancestor names. A label names one tree, so a
+# stallion's set is built once instead of on every suggestion.
+_ANCESTOR_SETS = {}
+
+
+def ancestor_set(ped, max_generation=3):
+    label = ped.get("Horse") if isinstance(ped, dict) else None
+    key = (label, max_generation)
+    if label and key in _ANCESTOR_SETS:
+        return _ANCESTOR_SETS[key]
+    gathered = set()
+    _collect_ancestors(ped, 1, gathered, max_generation)
+    gathered = frozenset(gathered)
+    if label and (ped.get("Sire") or ped.get("Dam")):
+        _ANCESTOR_SETS[key] = gathered
+    return gathered
+
+
+def check_inbreeding_failsafe(stallion_ped, mare_ped, max_generation=3):
     mare_anc = set()
-    collect_ancestors(stallion_ped, 1, stallion_anc)
-    collect_ancestors(mare_ped, 1, mare_anc)
-    return len(stallion_anc.intersection(mare_anc)) > 0
+    _collect_ancestors(mare_ped, 1, mare_anc, max_generation)
+    return not ancestor_set(stallion_ped, max_generation).isdisjoint(mare_anc)
+
+_RANK_BY_NAME = None
+_PROFILE_INDEX = (None, 0, {})
+
+
+def _rank_by_name():
+    global _RANK_BY_NAME
+    if _RANK_BY_NAME is None:
+        _RANK_BY_NAME = {}
+        for idx, r_name in enumerate(RAW_RANKING_ORDER, 1):
+            _RANK_BY_NAME.setdefault(main.clean_horse_name(r_name), str(idx))
+    return _RANK_BY_NAME
+
+
+def _profiles_by_name(all_profiles):
+    """Cleaned name -> first matching stud card. Rebuilt when a different book is passed in.
+
+    get_profile_meta runs thousands of times per suggestion / report; scanning
+    every card each time was most of a 60s request.
+    """
+    global _PROFILE_INDEX
+    book_id, size, index = _PROFILE_INDEX
+    if book_id != id(all_profiles) or size != len(all_profiles):
+        index = {}
+        for k, v in all_profiles.items():
+            index.setdefault(main.clean_horse_name(k), v)
+        _PROFILE_INDEX = (id(all_profiles), len(all_profiles), index)
+    return index
+
 
 def get_profile_meta(name, all_profiles):
     clean_name = main.clean_horse_name(name)
-    rank_val = "N/A"
-    for idx, r_name in enumerate(RAW_RANKING_ORDER, 1):
-        if main.clean_horse_name(r_name) == clean_name:
-            rank_val = str(idx)
-            break
-
-    profile = {}
-    for k, v in all_profiles.items():
-        if main.clean_horse_name(k) == clean_name:
-            profile = v
-            break
+    rank_val = _rank_by_name().get(clean_name, "N/A")
+    profile = _profiles_by_name(all_profiles).get(clean_name, {})
 
     raw_fee = profile.get("Stud Fee", 0)
     try:
@@ -603,15 +701,39 @@ def sort_ancestor_list(ancestor_names, all_profiles, budget_filter=None):
     meta_list.sort(key=sorting_key)
     return [item[0] for item in meta_list]
 
+_LINEAGE_CACHE = {}
+
+
 def has_lineage_options(stallion_name, all_profiles, budget_filter=None):
-    """Checks if a stallion actually has ancestors, sibling sires, or descendants available."""
+    """Checks if a stallion actually has ancestors, sibling sires, or descendants available.
+
+    Cached per (stallion, budget) for the stud book in use.
+    """
     st_clean = main.clean_horse_name(stallion_name)
+    key = (st_clean, budget_filter, id(all_profiles), len(all_profiles))
+    if key not in _LINEAGE_CACHE:
+        if len(_LINEAGE_CACHE) > 20000:
+            _LINEAGE_CACHE.clear()
+        _LINEAGE_CACHE[key] = _has_lineage_options(st_clean, all_profiles, budget_filter)
+    return _LINEAGE_CACHE[key]
+
+
+def _has_lineage_options(st_clean, all_profiles, budget_filter=None):
     lineage_options = find_lineage_relatives(st_clean)
     
     if sort_ancestor_list(lineage_options, all_profiles, budget_filter):
         return True
         
     return False
+
+def _is_this_mare(dam_label, clean_mare, mare_year):
+    """Dam label names this mare: same name and, when both carry one, the same foaling year
+    (Stage Magic (2007) and Stage Magic (2015) are different mares)."""
+    if main.clean_horse_name(dam_label) != clean_mare:
+        return False
+    dam_year = main.foaling_year(dam_label)
+    return not (mare_year and dam_year and dam_year != mare_year)
+
 
 def lookup_mare_pedigree(pedigree_db, mare_name):
     """Find a broodmare pedigree by cleaned or uppercase name. Returns (tree, matched_key) or (None, None)."""
@@ -632,8 +754,9 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
 
     mare_display = mare_pedigree.get("Horse", mare_name)
     clean_mare = main.clean_horse_name(matched_key or mare_name)
+    mare_year = main.foaling_year(matched_key or "") or main.foaling_year(mare_pedigree.get("Horse", ""))
     mating_damsire = get_mare_sire_from_pedigree(mare_pedigree)
-    clean_display_damsire = re.sub(r'\s*\(\d{4}\)', '', mating_damsire).strip()
+    clean_display_damsire = main._COLOR_SUFFIX.sub('', re.sub(r'\s*\(\d{4}\)', '', mating_damsire)).strip()
     clean_display_mare = re.sub(r'\s*\(\d{4}\)', '', mare_display).strip()
 
     surface = (surface_pref or "neither").strip().lower()
@@ -641,12 +764,7 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
 
     raw_records = load_stakes_data()
     if surface in ["dirt", "turf"]:
-        filtered_records = []
-        for r in raw_records:
-            dist_str = str(r.get("Distance", ""))
-            r_surf = "dirt" if "(D)" in dist_str.upper() else "turf" if "(T)" in dist_str.upper() else "track"
-            if r_surf == surface:
-                filtered_records.append(r)
+        filtered_records = _records_on_surface(raw_records, surface)
     else:
         filtered_records = raw_records
 
@@ -655,16 +773,14 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
     direct_progeny_clean_names = set()
     mare_sire_ancestry = get_sire_line_ancestry(mating_damsire, node=mare_pedigree.get("Sire"))
 
+    parents = winner_parents(pedigree_db, horse_summaries)
     for h_name, h in horse_summaries.items():
         clean_h = main.clean_horse_name(h_name)
-        if clean_h in pedigree_db:
-            h_ped = pedigree_db[clean_h]
-            dam_node = h_ped.get("Dam", {})
-            dam_name = dam_node.get("Horse", "") if isinstance(dam_node, dict) else str(dam_node)
-            if main.clean_horse_name(dam_name) == clean_mare:
+        if clean_h in parents:
+            sire_name, dam_name, _ = parents[clean_h]
+            if _is_this_mare(dam_name, clean_mare, mare_year):
                 direct_progeny_clean_names.add(clean_h)
-                sire_node = h_ped.get("Sire", {})
-                sire_name = sire_node.get("Horse", "Unknown Stallion") if isinstance(sire_node, dict) else str(sire_node)
+                sire_name = sire_name or "Unknown Stallion"
                 clean_sire = main.clean_horse_name(sire_name)
                 clean_display_sire = re.sub(r'\s*\(\d{4}\)', '', sire_name).strip()
                 proven_cross_sires[clean_sire] = {
@@ -718,15 +834,7 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
         clean_h = main.clean_horse_name(h_name)
         if clean_h in direct_progeny_clean_names:
             continue
-        h_damsire, h_sire, h_dam = "", "", ""
-        if clean_h in pedigree_db:
-            h_ped = pedigree_db[clean_h]
-            sire_node = h_ped.get("Sire", {})
-            h_sire = sire_node.get("Horse", "") if isinstance(sire_node, dict) else str(sire_node)
-            dam_node = h_ped.get("Dam", {})
-            if isinstance(dam_node, dict):
-                h_damsire = get_mare_sire_from_pedigree(dam_node)
-                h_dam = dam_node.get("Horse", "")
+        h_sire, h_dam, h_damsire = parents.get(clean_h, ("", "", ""))
         if h_damsire and main.clean_horse_name(h_damsire) in mare_sire_ancestry:
             clean_hsire = main.clean_horse_name(h_sire)
             base_points = status_weights.get(h["status"], 100)
@@ -767,15 +875,7 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
     # Sires of graded winners whose damsire is in the mare's sire line. Computed
     # once instead of re-reading every winner's pedigree for each stallion.
     cross_hit_sires = set()
-    for h_name in horse_summaries:
-        clean_h = main.clean_horse_name(h_name)
-        if clean_h not in pedigree_db:
-            continue
-        hp = pedigree_db[clean_h]
-        s_node = hp.get("Sire", {})
-        h_sire = s_node.get("Horse", "") if isinstance(s_node, dict) else str(s_node)
-        d_node = hp.get("Dam", {})
-        h_damsire = get_mare_sire_from_pedigree(d_node) if isinstance(d_node, dict) else ""
+    for h_sire, _, h_damsire in parents.values():
         if h_damsire and main.clean_horse_name(h_damsire) in mare_sire_ancestry:
             cross_hit_sires.add(main.clean_horse_name(h_sire))
 
@@ -886,27 +986,23 @@ def build_hypo_report(pedigree_db, all_profiles, sire_name, dam_name, persist=Fa
 def top_crosses_payload(pedigree_db, stallion_name, limit=20):
     clean_target = main.clean_horse_name(stallion_name)
     horse_summaries = build_horse_summaries(load_stakes_data())
+    parents = winner_parents(pedigree_db, horse_summaries)
     crosses = {}
     status_weights = {"MG1W": 500, "G1W": 400, "MGSW": 300, "G2W": 250, "G3W": 200, "MSW": 150, "SW": 100}
     tier_order = ["MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW"]
     for h_name, h in horse_summaries.items():
         clean_h = main.clean_horse_name(h_name)
-        if clean_h not in pedigree_db:
+        if clean_h not in parents:
             continue
-        h_ped = pedigree_db[clean_h]
-        sire_node = h_ped.get("Sire", {})
-        h_sire = sire_node.get("Horse", "") if isinstance(sire_node, dict) else str(sire_node)
+        h_sire, dam_name, h_damsire = parents[clean_h]
         if main.clean_horse_name(h_sire) != clean_target:
             continue
-        dam_node = h_ped.get("Dam", {})
-        h_damsire = get_mare_sire_from_pedigree(dam_node)
         if not h_damsire:
             continue
         clean_ds = re.sub(r"\s*\(\d{4}\)", "", h_damsire).strip().title()
         if clean_ds not in crosses:
             crosses[clean_ds] = {"score": 0, "winners": []}
         crosses[clean_ds]["score"] += status_weights.get(h["status"], 100)
-        dam_name = dam_node.get("Horse", "") if isinstance(dam_node, dict) else str(dam_node)
         crosses[clean_ds]["winners"].append({
             "name": h_name,
             "status": h["status"],
@@ -922,7 +1018,7 @@ def top_crosses_payload(pedigree_db, stallion_name, limit=20):
             "score": data["score"],
             "winners": sorted(data["winners"], key=lambda w: tier_order.index(w["status"]) if w["status"] in tier_order else 99),
         })
-    return {"stallion": stallion_name, "crosses": ranked[:limit]}
+    return {"stallion": stallion_name, "crosses": ranked[:limit] if limit else ranked}
 
 
 def broodmare_context(pedigree_db, mare_name):
@@ -930,6 +1026,7 @@ def broodmare_context(pedigree_db, mare_name):
     if not mare_pedigree:
         return None
     clean_mare = main.clean_horse_name(matched or mare_name)
+    mare_year = main.foaling_year(matched or "") or main.foaling_year(mare_pedigree.get("Horse", ""))
     summaries = build_horse_summaries(load_stakes_data())
     own = None
     for h_name, h in summaries.items():
@@ -937,16 +1034,14 @@ def broodmare_context(pedigree_db, mare_name):
             own = h
             break
     progeny = []
+    parents = winner_parents(pedigree_db, summaries)
     for h_name, h in summaries.items():
         clean_h = main.clean_horse_name(h_name)
-        if clean_h not in pedigree_db:
+        if clean_h not in parents:
             continue
-        dam_node = pedigree_db[clean_h].get("Dam", {})
-        dam_name = dam_node.get("Horse", "") if isinstance(dam_node, dict) else str(dam_node)
-        if main.clean_horse_name(dam_name) != clean_mare:
+        sire_name, dam_name, _ = parents[clean_h]
+        if not _is_this_mare(dam_name, clean_mare, mare_year):
             continue
-        sire_node = pedigree_db[clean_h].get("Sire", {})
-        sire_name = sire_node.get("Horse", "") if isinstance(sire_node, dict) else str(sire_node)
         progeny.append({
             "name": h_name,
             "status": h["status"],

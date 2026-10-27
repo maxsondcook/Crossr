@@ -143,7 +143,18 @@ _STARTS_SQL = """
            s.race_date, s.place, s.grade, s.race_name, s.country, s.track
     FROM race_starts s
     JOIN race_horses h ON h.id = s.horse_id
+    ORDER BY s.race_date, s.id
 """
+# The ORDER BY keeps results identical run to run: without it Postgres returns rows in
+# any order, and which of two same-named horses' records wins changed hypomating output.
+
+
+# Equibase chart names sometimes keep the state-bred tag and weight: "Cara's Time (NY) 57".
+_CHART_SUFFIX = re.compile(r"\s*\([A-Z]{2,3}\)\s*\d+\s*$")
+
+
+def clean_display_name(name: str) -> str:
+    return _CHART_SUFFIX.sub("", str(name or "")).strip()
 
 
 def _iter_starts():
@@ -153,7 +164,8 @@ def _iter_starts():
             cur.itersize = 10000
             cur.execute(_STARTS_SQL)
             for rec in cur:
-                yield tuple("" if v is None else str(v) for v in rec)
+                row = tuple("" if v is None else str(v) for v in rec)
+                yield (clean_display_name(row[0]),) + row[1:]
 
 
 def _start_record(name, foal_year, sex, race_date, grade_class, race_name, country, track) -> dict:

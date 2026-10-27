@@ -379,12 +379,20 @@ def stud_fee_history() -> dict[str, dict[int, int]]:
     return out
 
 
+_BREEDING_INDEX: tuple[object, dict[str, list[dict]]] | None = None
+
+
 def breeding_for_stallion(stallion: str, year: int | None = None) -> list[dict]:
-    key = name_key(stallion)
+    global _BREEDING_INDEX
+    rows_all = load_table("breeding_seasons")
+    version = _MTIME.get("breeding_seasons")
+    if _BREEDING_INDEX is None or _BREEDING_INDEX[0] != version:
+        index: dict[str, list[dict]] = {}
+        for row in rows_all:
+            index.setdefault(name_key(row.get("stallion") or ""), []).append(row)
+        _BREEDING_INDEX = (version, index)
     rows = []
-    for row in load_table("breeding_seasons"):
-        if name_key(row.get("stallion") or "") != key:
-            continue
+    for row in _BREEDING_INDEX[1].get(name_key(stallion), []):
         if year is not None and str(row.get("breeding_year")) != str(year):
             continue
         rows.append(row)
@@ -484,7 +492,24 @@ def stallion_foal_year(name: str, first_season: int) -> int:
     return _foal_year_for_stud(_foal_years_for([name]).get(name_key(name), []), first_season)
 
 
+_ROSTER_CACHE: dict = {}
+_ROSTER_TABLES = ("stud_fees", "breeding_seasons", "stallion_rankings", "race_horses")
+
+
 def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
+    """Cached _stallion_roster_from_fees (rebuilt when a source table changes).
+
+    Callers get their own copy of each card, so edits never leak into the cache.
+    """
+    key = (year, datetime.date.today().year, tuple(table_version(t) for t in _ROSTER_TABLES))
+    hit = _ROSTER_CACHE.get(year)
+    if hit is None or hit[0] != key:
+        hit = (key, _stallion_roster_from_fees(year))
+        _ROSTER_CACHE[year] = hit
+    return {name: dict(card) for name, card in hit[1].items()}
+
+
+def _stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
     """Active stud cards derived from stud_fees (+ latest breeding_seasons).
 
     "Stud Duty Year" is the FIRST season in stud_fees or breeding_seasons (entered stud). The fee is
