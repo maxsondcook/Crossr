@@ -808,63 +808,191 @@ def _same_dam_stakes_rows(dam_name, reference_tree=None, exclude_names=None):
     return rows
 
 
+_CROSS_INDEX = None
+_SONS_INDEX = (None, 0, {})
+
+
+def _cross_index():
+    """(sire, damsire) cleaned -> {winner key: (winner, dam, damsire label)} for every stakes winner.
+
+    Parents come from the pedigree DB, else the winner's fetched race_horses row.
+    """
+    global _CROSS_INDEX
+    summaries = hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
+    progeny = _race_horse_progeny()
+    version = (id(summaries), id(progeny))
+    if _CROSS_INDEX is not None and _CROSS_INDEX[0] == version:
+        return _CROSS_INDEX[1]
+    index = {}
+    names = {main.clean_horse_name(h): h for h in summaries}
+    for clean_h, (sire, dam, damsire) in hypomating_engine.winner_parents(main.PEDIGREE_DATABASE, summaries).items():
+        if sire and damsire and clean_h in names:
+            key = (main.clean_horse_name(sire), main.clean_horse_name(damsire))
+            index.setdefault(key, {})[clean_h] = (names[clean_h], dam, damsire)
+    for sire_key, winners in progeny.items():
+        for clean_h, (h_name, dam, damsire) in winners.items():
+            if damsire:
+                index.setdefault((sire_key, main.clean_horse_name(damsire)), {}).setdefault(clean_h, (h_name, dam, damsire))
+    _CROSS_INDEX = (version, index)
+    return index
+
+
+def _standing_sons(sire_key, profiles):
+    """Stud cards standing now whose sire is sire_key (race_horses parents)."""
+    global _SONS_INDEX
+    book_id, size, index = _SONS_INDEX
+    if book_id != id(profiles) or size != len(profiles):
+        parents = _parent_lookup()
+        index = {}
+        for name in profiles:
+            clean = main.clean_horse_name(name)
+            sire = (parents.get(clean) or (None, None))[0]
+            if sire and hypomating_engine.get_profile_meta(name, profiles)["is_active"]:
+                index.setdefault(main.clean_horse_name(sire), []).append(name)
+        _SONS_INDEX = (id(profiles), len(profiles), index)
+    return index.get(sire_key, [])
+
+
+def _sire_of(name):
+    sire, _ = parent_names(name)
+    if not sire:
+        sire = (_parent_lookup().get(main.clean_horse_name(name or "")) or (None, None))[0]
+    return sire
+
+
 def similar_cross_rows(
     sire_name,
     reference_tree=None,
     reference_name=None,
     reference_sire=None,
     reference_dam=None,
-    limit=20,
+    limit=30,
     *,
     include_same_dam=True,
+    reference_damsire=None,
+    profiles=None,
 ):
-    """Proven GSWs by this sire (+ same-dam SWs), ranked by pedigree similarity to the hip.
+    """Successful similar crosses for a hip / hypothetical foal, closest relationship first.
 
-    Same-dam stakes winners (any sire) are merged in so a Keesha yearling surfaces
-    Tiztastic. Rows carry ``source``: ``sire_cross`` or ``same_dam``. Auction history
-    should keep using sire_cross-only rows.
+    1. Sire x mares by the damsire (the exact cross)
+    2. Stakes winners out of the same dam (any sire)
+    3. Sire's sire x mares by the damsire
+    4. Other standing sons of the sire's sire x mares by the damsire
+    5. The sire's other stakes winners, by pedigree similarity
+    Within a tier: class (MG1W ... SW), then earnings. Each row's ``relation`` says
+    why it is listed. ``source`` is ``sire_cross`` (auction history uses these) or ``same_dam``.
     """
-    payload = hypomating_engine.top_crosses_payload(main.PEDIGREE_DATABASE, sire_name, limit=40)
+    class_rank = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "SW": 6}
     ref = resolve_pedigree_tree(name=reference_name, tree=reference_tree, sire=reference_sire, dam=reference_dam)
-    rows = []
-    seen = set()
-    for cross in payload.get("crosses") or []:
-        for winner in cross.get("winners") or []:
-            name = winner.get("name")
-            key = main.clean_horse_name(name or "")
-            if not key or key in seen:
+    has_ref = bool(ref and _horse_id(ref))
+    earn_lookup = _progeny_earnings_lookup()
+    summaries = hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
+    sire_display = re.sub(r"\s*\(\d{4}\)", "", sire_name or "").strip()
+    sire_key = main.clean_horse_name(sire_name)
+
+    damsire = reference_damsire
+    if not damsire and reference_dam:
+        damsire = hypomating_engine.get_mare_sire_from_pedigree(main.pedigree_tree(reference_dam) or {})
+    if not damsire and isinstance(ref, dict):
+        damsire = hypomating_engine.get_mare_sire_from_pedigree(ref.get("Dam") or {})
+    damsire_key = main.clean_horse_name(damsire or "")
+    damsire_display = re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip().title()
+
+    rows, seen = [], {main.clean_horse_name(reference_name or "")} - {""}
+
+    def add(h_name, dam, row_damsire, relation, tier, source="sire_cross"):
+        # source: sire_cross (same sire; feeds Auction History), sire_line, same_dam.
+        key = main.clean_horse_name(h_name or "")
+        h = summaries.get(h_name) or {}
+        if not key or key in seen or not h.get("status"):
+            return
+        seen.add(key)
+        sim = pedigree_similarity(a_tree=ref, b=h_name) if has_ref else None
+        earnings = earn_lookup.get(key) or 0
+        rows.append({
+            "name": h_name,
+            "broodmare_sire": re.sub(r"\s*\(\d{4}\)", "", row_damsire or "").strip().title() or None,
+            "class": h["status"],
+            "dam": re.sub(r"\s*\(\d{4}\)", "", dam or "").strip() or None,
+            "similarity": (sim or {}).get("percent"),
+            "similarity_label": (sim or {}).get("label"),
+            "relation": relation,
+            "source": source,
+            "earnings": earnings or None,
+            "_tier": tier,
+        })
+
+    index = _cross_index() if damsire_key else {}
+
+    def cross_tier(stallion_key, relation, tier, source="sire_cross"):
+        winners = index.get((stallion_key, damsire_key), {})
+        for h_name, dam, row_ds in sorted(
+            winners.values(),
+            key=lambda w: (class_rank.get((summaries.get(w[0]) or {}).get("status"), 9),
+                           -(earn_lookup.get(main.clean_horse_name(w[0])) or 0)),
+        ):
+            add(h_name, dam, row_ds, relation, tier, source)
+
+    if damsire_key and sire_key:
+        cross_tier(sire_key, f"Sire: {sire_display} x {damsire_display} mare", 0)
+        # The same cross at auction (unraced / not yet black-type): listed, not ranked as winners.
+        import crossr_core.sales as sales_svc
+
+        for sale in sales_svc.cross_sales(sire_name, damsire, limit=5, exclude_name=reference_name or ""):
+            price = "RNA" if sale.get("is_rna") else (sale.get("price_raw") or "")
+            price = "" if price.strip().upper() in ("N/A", "NA", "-") else price
+            where = " ".join(x for x in (sale.get("sale_title"), str(sale.get("sale_year") or "")) if x)
+            name = sale.get("name") or ""
+            if main.clean_horse_name(name) in seen:
                 continue
-            seen.add(key)
-            sim = None
-            if ref and _horse_id(ref):
-                sim = pedigree_similarity(a_tree=ref, b=name)
+            seen.add(main.clean_horse_name(name))
             rows.append({
                 "name": name,
-                "broodmare_sire": cross.get("broodmare_sire"),
-                "class": winner.get("status"),
-                "dam": winner.get("dam"),
-                "similarity": (sim or {}).get("percent"),
-                "similarity_label": (sim or {}).get("label"),
-                "source": "sire_cross",
+                "broodmare_sire": damsire_display or None,
+                "class": None,
+                "dam": sale.get("dam"),
+                "similarity": None,
+                "similarity_label": None,
+                "relation": f"Sold: {sire_display} x {damsire_display} mare · {where}{f' · {price}' if price else ''}",
+                "source": "cross_sale",
+                "earnings": None,
+                "_tier": 0.5,
             })
+
     if include_same_dam and reference_dam:
         for row in _same_dam_stakes_rows(reference_dam, reference_tree=ref, exclude_names=seen):
-            key = main.clean_horse_name(row.get("name") or "")
-            if not key or key in seen:
-                continue
-            # Drop the hip itself if it somehow appears in stakes data.
-            if key == main.clean_horse_name(reference_name or ""):
-                continue
-            seen.add(key)
-            rows.append(row)
-    tier = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "SW": 6}
-    rows.sort(key=lambda row: (-(row["similarity"] if row["similarity"] is not None else -1), tier.get(row["class"], 9)))
-    rows = rows[:limit]
-    earn_lookup = _progeny_earnings_lookup()
+            add(row["name"], row.get("dam"), row.get("broodmare_sire"), "Same dam", 1, source="same_dam")
+
+    if damsire_key and sire_key:
+        grandsire = _sire_of(sire_name)
+        grandsire_key = main.clean_horse_name(grandsire or "")
+        grandsire_display = re.sub(r"\s*\(\d{4}\)", "", grandsire or "").strip()
+        if grandsire_key:
+            cross_tier(grandsire_key, f"Sire's sire: {grandsire_display} x {damsire_display} mare", 2, "sire_line")
+            book = profiles if profiles is not None else main.load_master_profiles()
+            for son in _standing_sons(grandsire_key, book):
+                son_key = main.clean_horse_name(son)
+                if son_key != sire_key:
+                    cross_tier(son_key, f"Son of {grandsire_display}: {son} x {damsire_display} mare", 3, "sire_line")
+
+    # The sire's other stakes winners, most similar to this foal first.
+    payload = hypomating_engine.top_crosses_payload(main.PEDIGREE_DATABASE, sire_name, limit=None)
+    others = []
+    for cross in payload.get("crosses") or []:
+        for winner in cross.get("winners") or []:
+            others.append((winner.get("name"), winner.get("dam"), cross.get("broodmare_sire")))
+    start = len(rows)
+    for h_name, dam, row_ds in others:
+        add(h_name, dam, row_ds, f"Sire: {sire_display}, other cross", 4)
+    rows[start:] = sorted(
+        rows[start:],
+        key=lambda r: (-(r["similarity"] if r["similarity"] is not None else -1), class_rank.get(r["class"], 9)),
+    )
+
+    rows.sort(key=lambda r: r["_tier"])  # stable: keeps each tier's own order
     for row in rows:
-        earnings = earn_lookup.get(main.clean_horse_name(row.get("name") or "")) or 0
-        row["earnings"] = earnings or None
-    return rows
+        row.pop("_tier", None)
+    return rows[:limit]
 
 
 def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, limit=25):
@@ -976,8 +1104,8 @@ def enrich_hypofoal_report(result, sire, dam, profiles=None):
         reference_name=result.get("foal_name"),
         reference_sire=sire,
         reference_dam=dam,
-        limit=20,
         include_same_dam=True,
+        profiles=profiles,
     )
     _add_nick_reasons(crosses, sire, dam)
     result["similar_crosses"] = crosses
@@ -1139,7 +1267,8 @@ def sale_workspace(
         reference_name=name,
         reference_sire=sire,
         reference_dam=dam,
-        limit=20,
+        reference_damsire=damsire,
+        profiles=profiles or None,
     ) if sire else []
     sire_profile = _profile_for(sire, profiles)
     market = proj_svc.project_lot_market(

@@ -110,7 +110,7 @@ export default function HypofoalDetail({ report, onBack = null, loading = false,
                     <tr key={`${row.name}-${row.class}-${index}`}>
                       <td>
                         <Link href={horseHref(row.name)}>{horseCaps(row.name)}</Link>
-                        {row.nick ? <div className="parents">{row.nick}</div> : null}
+                        {row.relation || row.nick ? <div className="parents">{row.relation || row.nick}</div> : null}
                       </td>
                       <td>{horseCaps(row.class) || "—"}</td>
                       <td>{row.similarity != null ? `${row.similarity}%` : "—"}</td>

@@ -881,7 +881,10 @@ function SalesPage() {
                       <tbody>
                         {detail.similar_crosses.map((row, index) => (
                           <tr key={`${row.name}-${row.class}-${index}`}>
-                            <td><Link href={hrefFor(row.name)}>{row.name}</Link></td>
+                            <td>
+                              <Link href={hrefFor(row.name)}>{row.name}</Link>
+                              {row.relation ? <div className="parents">{row.relation}</div> : null}
+                            </td>
                             <td>{row.class || "—"}</td>
                             <td>{row.similarity != null ? `${row.similarity}%` : "—"}</td>
                           </tr>
