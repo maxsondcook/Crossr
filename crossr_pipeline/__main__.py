@@ -167,6 +167,32 @@ def cmd_catalog_enrich(args) -> int:
     return 0
 
 
+def cmd_fees_redate(args) -> int:
+    from crossr_pipeline import fee_redate as fr
+
+    conn = _conn()
+    try:
+        rows, rankings, rp = fr.load(conn)
+        new_rows, stats = fr.rebuild(rows, rankings, rp)
+        print(f"Database: {_db_name()}  stud_fees {len(rows)} -> {len(new_rows)} rows; "
+              f"gap years {fr.gaps(rows)} -> {fr.gaps(new_rows)}")
+        for key, value in sorted(stats.items()):
+            print(f"  {key:<42} {value}")
+        for key in fr.EXAMPLES:
+            before, after = fr.fee_table(rows, key), fr.fee_table(new_rows, key)
+            print(f"\n{key}")
+            for i in range(max(len(before), len(after))):
+                b = before[i] if i < len(before) else ""
+                a = after[i] if i < len(after) else ""
+                print(f"  {b:<52} | {a}")
+        if args.apply:
+            backup = fr.apply(conn, new_rows)
+            print(f"\nApplied. Previous table saved as {backup}.")
+    finally:
+        conn.close()
+    return 0
+
+
 def _age(ts) -> str:
     if ts is None:
         return "-"
@@ -278,6 +304,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--url", help="Keeneland catalog-table URL to export from")
     p.add_argument("--export", help="An already exported Keeneland CSV")
     p.set_defaults(func=cmd_catalog_enrich)
+
+    p = sub.add_parser("fees-redate", help="Re-date stud_fees by breeding season (dry run unless --apply)")
+    p.add_argument("--apply", action="store_true", help="Back up stud_fees, then replace it")
+    p.set_defaults(func=cmd_fees_redate)
 
     p = sub.add_parser("status", help="Recent runs, queue state, table counts")
     p.add_argument("--limit", type=int, default=15)
