@@ -119,10 +119,10 @@ def cmd_racing_post(args) -> int:
     while True:
         conn = _conn()
         try:
-            done = run_racing_post(conn, delay=args.delay, limit=args.limit)
+            done = run_racing_post(conn, delay=args.delay, limit=args.limit, gaps=args.gaps)
         finally:
             conn.close()
-        if not args.loop:
+        if not args.loop or args.gaps:
             return 0
         if done == 0:
             print("racing-post: nothing due. Sleeping 6 h.", flush=True)
@@ -264,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--delay", type=float, default=3.0, help="Seconds between page loads (plus jitter)")
     p.add_argument("--limit", type=int, help="Stop after this many sires (testing)")
     p.add_argument("--loop", action="store_true", help="Keep going: rerun when done, sleep 6 h when nothing is due")
+    p.add_argument("--gaps", action="store_true",
+                   help="Re-scrape active stallions with missing fee years (Not This Time first), then exit")
     p.set_defaults(func=cmd_racing_post)
 
     p = sub.add_parser("catalog-report", help="Completeness of an upcoming catalog's hips")

@@ -358,7 +358,45 @@ def process(page, conn, sire: dict, have_years: set[int], delay: float, run: sta
     return "found", f"{rp['label']}: {len(rows)} rows, {len(additions)} new years"
 
 
-def run_racing_post(conn, delay: float = 3.0, limit: int | None = None) -> int:
+def fee_gaps(have: dict[str, set[int]], active: set[str], last_year: int) -> dict[str, list[int]]:
+    """Missing years between each active stallion's first and latest fee (capped at last_year)."""
+    out = {}
+    for key in active:
+        years = have.get(key)
+        if not years:
+            continue
+        missing = [y for y in range(min(years), min(max(years), last_year) + 1) if y not in years]
+        if missing:
+            out[key] = missing
+    return out
+
+
+GAP_FIRST = ("NOT THIS TIME",)
+
+
+def gap_sires(conn, have: dict[str, set[int]]) -> list[dict]:
+    """Active stallions (fee or mares bred in the last two seasons) with missing fee years.
+
+    Not This Time first, then most missing years first. Re-scraped whatever
+    their earlier Racing Post state was.
+    """
+    this_year = time.localtime().tm_year
+    active = {clean_name(r["stallion"] or "") for r in conn.execute(
+        "SELECT stallion FROM breeding_seasons WHERE breeding_year IN (%s, %s)",
+        (str(this_year - 1), str(this_year)))}
+    active |= {k for k, ys in have.items() if ys and max(ys) >= this_year - 1}
+    gaps = fee_gaps(have, active, this_year)
+    by_key = {s["key"]: s for s in load_sires(conn)}
+    sires = []
+    for key, missing in gaps.items():
+        sire = by_key.get(key) or {"key": key, "name": key.title(), "suffix": "", "yob_range": None,
+                                   "latest": max(have[key]), "first": None, "rows": 0}
+        sires.append({**sire, "missing": missing})
+    sires.sort(key=lambda s: (s["key"] not in GAP_FIRST, -len(s["missing"]), s["key"]))
+    return sires
+
+
+def run_racing_post(conn, delay: float = 3.0, limit: int | None = None, gaps: bool = False) -> int:
     from playwright.sync_api import sync_playwright
 
     from equibase_scraper import pgdb
@@ -373,13 +411,20 @@ def run_racing_post(conn, delay: float = 3.0, limit: int | None = None) -> int:
     states = state.queue_states(conn, JOB)
     have = existing_fee_years(conn)
     now = time.time()
-    todo = [s for s in load_sires(conn) if due(s, states, now)]
+    if gaps:
+        todo = gap_sires(conn, have)
+        print(f"racing-post --gaps: {len(todo)} active stallion(s), "
+              f"{sum(len(s['missing']) for s in todo)} missing fee years", flush=True)
+    else:
+        todo = [s for s in load_sires(conn) if due(s, states, now)]
     if limit:
         todo = todo[:limit]
     if not todo:
         lock.close()
         return 0
-    run = state.Run(conn, JOB)
+    run = state.Run(conn, JOB + ("-gaps" if gaps else ""))
+    if gaps:
+        run.counts["missing years before"] = sum(len(s["missing"]) for s in todo)
     print(f"racing-post: {len(todo)} sire(s) to look up", flush=True)
     status = "ok"
     last_flush = time.monotonic()
