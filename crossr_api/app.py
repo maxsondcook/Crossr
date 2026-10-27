@@ -130,6 +130,8 @@ def _warm_caches():
         lambda: horse_svc.build_stallion_roster(profiles()),
         lambda: __import__("ValueProjector").sales_by_dam(""),  # sale-price index for lot pages
         _warm_stallion_ancestors,
+        horse_svc._cross_index,  # similar crosses: (sire, damsire) -> stakes winners
+        lambda: horse_svc._standing_sons("", profiles()),
     )
     for step in steps:
         try:

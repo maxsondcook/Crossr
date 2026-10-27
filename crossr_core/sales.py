@@ -334,6 +334,33 @@ def _auction_candidates(name_keys, pairs):
         conn.close()
 
 
+def cross_sales(sire, damsire, limit=10, exclude_name=""):
+    """Lots sold by this sire out of mares by this damsire (the hip's exact cross), newest first."""
+    sire_key = str(sire or "").strip().lower()
+    damsire_key = re.sub(r"\s*\(.*?\)", "", str(damsire or "")).strip().lower()
+    conn = connect()
+    if not conn or not sire_key or not damsire_key:
+        return []
+    try:
+        rows = conn.execute(
+            """
+            SELECT l.name, l.dam, l.hip, l.birth_year, l.price_num, l.price_raw, l.is_rna,
+                   c.title AS sale_title, CASE WHEN c.year > 0 THEN c.year::text ELSE '' END AS sale_year
+            FROM sales_lot_index l
+            JOIN sales_catalogs c ON c.id = l.catalog_id
+            WHERE l.sire_key = ? AND l.damsire_key = ? AND COALESCE(l.is_out, 0) = 0
+            ORDER BY c.year DESC, l.price_num DESC NULLS LAST, l.id
+            LIMIT ?
+            """,
+            (sire_key, damsire_key, int(limit) + 5),
+        ).fetchall()
+    finally:
+        conn.close()
+    exclude = str(exclude_name or "").strip().lower()
+    out = [dict(r) for r in rows if str(r.get("name") or "").strip().lower() != exclude]
+    return out[:limit]
+
+
 def auctions_for_horses(crosses, limit=40):
     """Sale rows (sales index) for similar-cross horses.
 
