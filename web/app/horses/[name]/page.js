@@ -86,6 +86,27 @@ const LEGACY_STAT_FIELDS = [
   { label: "GSW / G1W Ratio", keys: ["GSW / G1W Ratio"] },
 ];
 
+/** Broodmare-sire years as a ranking list, unless "Leading Broodmare Sires" already has them. */
+function withBroodmareSireList(meta, rows, countLabel) {
+  const lists = meta.lists || [];
+  if (!rows.length || lists.some((l) => /broodmare/i.test(l.id))) return meta;
+  const id = "broodmare_sire";
+  return {
+    ...meta,
+    lists: [...lists, { id, label: "Broodmare Sire", group: "bloodhorse" }],
+    columns: {
+      ...(meta.columns || {}),
+      [id]: [
+        { key: "year", label: "Year", type: "number" },
+        { key: "rank", label: "Rank", type: "number" },
+        { key: "earnings", label: "Earnings", type: "money" },
+        { key: "count", label: countLabel || "Runners", type: "number" },
+      ],
+    },
+    rows: { ...(meta.rows || {}), [id]: rows.map((r) => ({ ...r, earnings_num: r.earnings, count_num: r.count })) },
+  };
+}
+
 const CAREER_VIEW = "__career";
 const SEASON_VIEW = "__season";
 
@@ -178,7 +199,8 @@ function shapeRankingTable(rawColumns, rawRows, rankList) {
   for (const col of rawColumns) {
     // The Stud Fee list ranks by fee, so it keeps that column.
     if (RANKING_HIDDEN_KEYS.has(col.key) && !(rankList === "stud_fee" && col.key === "stud_fee")) continue;
-    if (RUNNER_KEYS.has(col.key)) continue;
+    // Broodmare-sire tables keep Runners (it was the old Broodmare Sire panel's count column).
+    if (RUNNER_KEYS.has(col.key) && !(rankList === "leading_broodmare_sires" && col.key === "runners")) continue;
     if (col.key === "stakes_wins" && replacesStakesWins) {
       columns.push(SW_PCT);
       continue;
@@ -608,7 +630,7 @@ function HorsePage() {
   const totals = data.race_totals || {};
   const family = data.female_family || [];
   const bmsCountLabel = (data.broodmare_sire || []).find((row) => row.count_label)?.count_label || "Runners";
-  const rankingMeta = data.sire_rankings || {};
+  const rankingMeta = withBroodmareSireList(data.sire_rankings || {}, data.broodmare_sire || [], bmsCountLabel);
   const RANK_LISTS = rankingMeta.lists || [];
   // Stud fee / mares bred ranks show beside the book figures, not in the rankings list.
   const bookRank = { stud_fee: {}, mares_bred: {} };
@@ -776,7 +798,7 @@ function HorsePage() {
             </table>
             {data.top_progeny.length > TOP_PROGENY_PREVIEW ? (
               <button className="ghost" type="button" onClick={() => setShowAllProgeny((v) => !v)} style={{ marginTop: 8 }}>
-                {showAllProgeny ? "Show fewer" : `Show all ${data.top_progeny.length}`}
+                {showAllProgeny ? "SHOW FEWER" : "SHOW ALL"}
               </button>
             ) : null}
             </>
@@ -785,33 +807,6 @@ function HorsePage() {
           )}
         </div>
 
-        {(data.broodmare_sire || []).length ? (
-          <div className="panel">
-            <h4>BROODMARE SIRE</h4>
-          <div className="history-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Year</th>
-                  <th>Rank</th>
-                  <th>Earnings $</th>
-                  <th>{bmsCountLabel}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.broodmare_sire.map((row) => (
-                  <tr key={row.year}>
-                    <td>{row.year}</td>
-                    <td>{row.rank ? `#${row.rank}` : "—"}</td>
-                    <td className="money">{row.earnings != null ? money(row.earnings) : "—"}</td>
-                    <td>{row.count ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          </div>
-        ) : null}
       </div>
     </div>
   );
