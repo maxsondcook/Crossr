@@ -48,3 +48,8 @@ def test_additions_keep_existing_years_and_prefer_usa():
 def test_yob_window():
     assert rp.yob_window(2005, 2020) == (1990, 2002)
     assert rp.yob_window(None, 2020) is None
+
+
+def test_fee_gaps_only_active_and_internal():
+    have = {"NOT THIS TIME": {2017, 2018, 2020, 2021}, "OLD": {2000, 2002}, "FULL": {2020, 2021}}
+    assert rp.fee_gaps(have, {"NOT THIS TIME", "FULL"}, 2026) == {"NOT THIS TIME": [2019]}
