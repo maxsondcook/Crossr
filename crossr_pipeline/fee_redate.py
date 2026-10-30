@@ -4,7 +4,8 @@ Each ranking file's "<year> Stud Fee / Farm" header says which season its fees
 are for (stallion_rankings.stud_fee_season): next season for 2008–2022 and
 2024–25 lists, the same season for 2007/2023/2026, and 2–4 seasons back for
 2001–2005 ("1998 Stud Fee" on the 2001 lists). The 2006 files state no year;
-Racing Post matches their fees to the list year, so 2006 uses the list year.
+they are dated file by file against Racing Post (UNDATED_FILES), and a file
+with no clear match is left out.
 
 Racing Post, though, matches the 2001–2005 fees to the list year too (≈80%),
 not the header's season (≈20%). ``early`` picks which to trust for lists up
@@ -58,12 +59,26 @@ def fee_number(text) -> int | None:
     return int(match.group(1).replace(",", "")) if match else None
 
 
-def season_for(year: int, stated, early: str = "header") -> int:
+# Files whose fee header has no year ("Stud Fee / Farm"), dated by matching
+# their fees against Racing Post at each offset (2026-10-27). None = no clear
+# winner: those fees stay out rather than be guessed.
+UNDATED_FILES = {
+    "2006/2006StallionRankings - Leading Sire Rankings.csv": 0,          # 89/101 at +0, next 42/95
+    "2006/2006StallionRankings - Leading Second-Crop Sires.csv": 0,      # 26/29, next 12/29
+    "2006/2006StallionRankings - Leading Third-Crop Sires.csv": 0,       # 27/33, next 13/32
+    "2006/2006StallionRankings - Leading Two-Year-Old Sires.csv": 0,     # 95/105, next 50/104
+    "2006/2006StallionRankings - Leading First Crop Sires.csv": None,    # 26/29 vs 22/28 at -1
+}
+
+
+def season_for(year: int, stated, early: str = "header", source_file: str | None = None) -> int | None:
+    """The breeding season a ranking row's fee is for, from its file header."""
     if early == "list-year" and year <= EARLY_LAST:
         return year
     if str(stated or "").isdigit():
         return int(stated)
-    return year  # 2006: no year in the header; Racing Post matches the list year
+    offset = UNDATED_FILES.get(source_file or "")
+    return None if offset is None else year + offset
 
 
 def rebuild(ranking_rows: list[dict], fee_rows: list[dict], rp: dict, early: str = "header"):
@@ -91,7 +106,10 @@ def rebuild(ranking_rows: list[dict], fee_rows: list[dict], rp: dict, early: str
                 "Source List": source, "Notes": None,
             })
             continue
-        season = season_for(year, r.get("stud_fee_season"), early)
+        season = season_for(year, r.get("stud_fee_season"), early, r.get("source_file"))
+        if season is None:
+            stats["CSV fees dropped: file header has no season"] += 1
+            continue
         stats["CSV fee rows"] += 1
         csv_fees[(key, season)].append({
             "Year": str(season), "Stallion": r["stallion"], "Stud Fee": fee, "Farm": farm,
@@ -173,7 +191,7 @@ def rebuild(ranking_rows: list[dict], fee_rows: list[dict], rp: dict, early: str
 
 def load(conn) -> tuple[list[dict], list[dict], dict]:
     ranking_rows = [dict(r) for r in conn.execute(
-        "SELECT stallion, year, list, stud_fee, stud_fee_season, stud_fee_raw, farm FROM stallion_rankings")]
+        "SELECT stallion, year, list, stud_fee, stud_fee_season, stud_fee_raw, farm, source_file FROM stallion_rankings")]
     cols = ", ".join(f'"{c}"' for c in COLUMNS)
     fee_rows = [dict(r) for r in conn.execute(f"SELECT {cols} FROM stud_fees")]
     rp: dict = defaultdict(list)
