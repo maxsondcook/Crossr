@@ -10,6 +10,15 @@ import hypomating_engine
 _SEARCH_INDEX = None
 _FEE_HISTORY = None
 _MARES_HISTORY = None
+_BOOK_STATS_VERSION = None
+_RANK_TABLES_VERSION = None
+
+
+def _book_tables_version():
+    """stud_fees + breeding_seasons versions: the fee/mares caches rebuild when either moves."""
+    from crossr_core import sample_db
+
+    return (sample_db.table_version("stud_fees"), sample_db.table_version("breeding_seasons"))
 _BMS_RANKS = None
 _STALLION_RANK_TABLES = None
 _RANK_BY_CLEAN = None
@@ -1472,8 +1481,9 @@ def _csv_earnings(row):
 
 def load_book_stats():
     """Load historical stud fees and mares-bred rows, keyed by cleaned stallion name."""
-    global _FEE_HISTORY, _MARES_HISTORY
-    if _FEE_HISTORY is not None and _MARES_HISTORY is not None:
+    global _FEE_HISTORY, _MARES_HISTORY, _BOOK_STATS_VERSION
+    version = _book_tables_version()
+    if _FEE_HISTORY is not None and _MARES_HISTORY is not None and version == _BOOK_STATS_VERSION:
         return _FEE_HISTORY, _MARES_HISTORY
 
     from crossr_core import sample_db
@@ -1506,6 +1516,7 @@ def load_book_stats():
 
     _FEE_HISTORY = fees
     _MARES_HISTORY = mares
+    _BOOK_STATS_VERSION = version
     return fees, mares
 
 
@@ -1697,8 +1708,11 @@ def _years_for_view(years, entered_stud=None, max_year=None):
 
 def load_stallion_ranking_tables():
     """BloodHorse ranks from data/stallion_rankings.csv plus mares-bred / stud-fee ranks."""
-    global _STALLION_RANK_TABLES
-    if _STALLION_RANK_TABLES is not None:
+    global _STALLION_RANK_TABLES, _RANK_TABLES_VERSION
+    from crossr_core import sample_db as _sdb
+
+    version = (_book_tables_version(), _sdb.table_version("stallion_rankings"))
+    if _STALLION_RANK_TABLES is not None and version == _RANK_TABLES_VERSION:
         return _STALLION_RANK_TABLES
 
     from crossr_core import sample_db
@@ -1795,6 +1809,7 @@ def load_stallion_ranking_tables():
     tables["stud_fee"] = {"ranks": fee_ranks, "years": fee_years, "extras": fee_extras}
 
     _STALLION_RANK_TABLES = {"lists": lists, "tables": tables}
+    _RANK_TABLES_VERSION = version
     return _STALLION_RANK_TABLES
 
 
