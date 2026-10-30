@@ -188,10 +188,13 @@ def ensure(conn) -> None:
 
 
 def load_sires(conn) -> list[dict]:
-    """Every sire in breeding_seasons or sales_lots, newest activity first."""
+    """Every sire in breeding_seasons or sales_lots, newest activity first.
+
+    Grouped by name in Postgres, so a few thousand rows come back, not every lot.
+    """
     agg: dict[str, dict] = {}
 
-    def add(name: str, year, first_crop_year):
+    def add(name: str, year, first_crop_year, rows: int):
         name = (name or "").strip()
         key = clean_name(name)
         if not key or not str(year or "").isdigit():
@@ -199,22 +202,26 @@ def load_sires(conn) -> list[dict]:
         year = int(year)
         entry = agg.setdefault(key, {"key": key, "name": name, "latest": year, "first": None, "rows": 0, "suffix": ""})
         entry["latest"] = max(entry["latest"], year)
-        entry["rows"] += 1
+        entry["rows"] += rows
         if first_crop_year:
             entry["first"] = min(entry["first"] or first_crop_year, first_crop_year)
         if not entry["suffix"] and name_suffix(name):
             entry["suffix"] = name_suffix(name)
             entry["name"] = name
 
-    for row in conn.execute("SELECT stallion, breeding_year FROM breeding_seasons"):
-        year = row["breeding_year"]
-        add(row["stallion"], year, int(year) if str(year or "").isdigit() else None)
     for row in conn.execute(
-        "SELECT sire, catalog_year, birth_year FROM sales_lots WHERE COALESCE(sire, '') <> ''"
+        "SELECT stallion, MAX(breeding_year::int) AS latest, MIN(breeding_year::int) AS first, COUNT(*) AS n "
+        "FROM breeding_seasons WHERE breeding_year ~ '^[0-9]+$' GROUP BY stallion"
     ):
-        birth = row["birth_year"]
+        add(row["stallion"], row["latest"], row["first"], row["n"])
+    for row in conn.execute(
+        "SELECT sire, MAX(catalog_year::int) AS latest, "
+        "MIN(CASE WHEN birth_year ~ '^[0-9]+$' THEN birth_year::int END) AS first_foal, COUNT(*) AS n "
+        "FROM sales_lots WHERE COALESCE(sire, '') <> '' AND catalog_year ~ '^[0-9]+$' GROUP BY sire"
+    ):
         # A foal born in Y was conceived in Y-1.
-        add(row["sire"], row["catalog_year"], int(birth) - 1 if str(birth or "").isdigit() else None)
+        first = row["first_foal"]
+        add(row["sire"], row["latest"], first - 1 if first else None, row["n"])
     sires = list(agg.values())
     for sire in sires:
         sire["yob_range"] = yob_window(sire["first"], sire["latest"])
@@ -240,26 +247,16 @@ def due(sire: dict, states: dict, now_ts: float) -> bool:
     return now_ts - found["last_attempt"].timestamp() >= days * 86400
 
 
-def store(conn, sire: dict, rp: dict, rows: list[dict], additions: list[dict]) -> None:
-    with conn.transaction():
-        conn.execute("DELETE FROM racing_post_fees WHERE rp_horse_id = %s", (rp["id"],))
-        with conn.cursor() as cur:
-            cur.executemany(
-                "INSERT INTO racing_post_fees (stallion_key, stallion, rp_horse_id, rp_name, year, stud_fee, "
-                "currency, is_private, country, standing) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                [
-                    (sire["key"], sire["name"], rp["id"], rp["label"], r["year"], r["stud_fee"], r["currency"],
-                     r["is_private"], r["country"], r["standing"])
-                    for r in rows
-                ],
-            )
-            if additions:
-                cur.executemany(
-                    'INSERT INTO stud_fees ("Year", "Stallion", "Stud Fee", "Farm", "Source List", "Notes") '
-                    "VALUES (%s, %s, %s, %s, %s, %s)",
-                    [(a["Year"], a["Stallion"], a["Stud Fee"], a["Farm"] or None, a["Source List"], a["Notes"])
-                     for a in additions],
-                )
+def store(local, sire: dict, rp: dict, rows: list[dict], additions: list[dict]) -> None:
+    """Stage this horse's rows on the Mac; the push at the end of the run sends them."""
+    from crossr_pipeline import stage
+
+    stage.stage_racing_post(local, rp["id"], [
+        {"stallion_key": sire["key"], "stallion": sire["name"], "rp_horse_id": rp["id"], "rp_name": rp["label"],
+         "year": r["year"], "stud_fee": r["stud_fee"], "currency": r["currency"], "is_private": r["is_private"],
+         "country": r["country"], "standing": r["standing"]}
+        for r in rows
+    ], additions)
 
 
 # ---------------------------------------------------------------------------
@@ -397,9 +394,13 @@ def gap_sires(conn, have: dict[str, set[int]]) -> list[dict]:
 
 
 def run_racing_post(conn, delay: float = 3.0, limit: int | None = None, gaps: bool = False) -> int:
+    """One pass over the sires due a lookup. Results are staged on the Mac and
+    pushed once at the end (one stud_fees version bump, one API reload)."""
     from playwright.sync_api import sync_playwright
 
-    from equibase_scraper import pgdb
+    from crossr_pipeline import stage
+
+    from crossr_pipeline.scrape import take_lock
 
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     lock = LOCK_PATH.open("a+")
@@ -407,68 +408,69 @@ def run_racing_post(conn, delay: float = 3.0, limit: int | None = None, gaps: bo
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         raise SystemExit("Another racing-post run is going (logs/pipeline/racing-post.lock).")
+    print("Waiting for the Chrome lock (an Equibase batch may be running)...", flush=True)
+    chrome = take_lock(wait=True)
     ensure(conn)
-    states = state.queue_states(conn, JOB)
-    have = existing_fee_years(conn)
-    now = time.time()
-    if gaps:
-        todo = gap_sires(conn, have)
-        print(f"racing-post --gaps: {len(todo)} active stallion(s), "
-              f"{sum(len(s['missing']) for s in todo)} missing fee years", flush=True)
-    else:
-        todo = [s for s in load_sires(conn) if due(s, states, now)]
-    if limit:
-        todo = todo[:limit]
-    if not todo:
-        lock.close()
-        return 0
-    run = state.Run(conn, JOB + ("-gaps" if gaps else ""))
-    if gaps:
-        run.counts["missing years before"] = sum(len(s["missing"]) for s in todo)
-    print(f"racing-post: {len(todo)} sire(s) to look up", flush=True)
-    status = "ok"
-    last_flush = time.monotonic()
-    dirty = False
+    local = stage.connect()
     try:
-        with sync_playwright() as playwright:
-            PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-            context = playwright.chromium.launch_persistent_context(
-                user_data_dir=str(PROFILE_DIR), channel="chrome", headless=False,
-                locale="en-US", viewport={"width": 1280, "height": 900},
-            )
-            page = context.pages[0] if context.pages else context.new_page()
-            page.set_default_timeout(60000)
-            try:
-                errors_in_a_row = 0
-                for index, sire in enumerate(todo, start=1):
-                    try:
-                        result, detail = process(page, conn, sire, have.get(sire["key"], set()), delay, run)
-                        errors_in_a_row = 0
-                    except Exception as exc:
-                        result, detail = "error", f"{exc.__class__.__name__}: {exc}"[:300]
-                        errors_in_a_row += 1
-                    state.mark_item(conn, JOB, sire["key"], result, detail)
-                    run.bump(result)
-                    dirty = dirty or result == "found"
-                    print(f"[{index}/{len(todo)}] {sire['name']}: {result} {detail}", flush=True)
-                    if errors_in_a_row >= 8:
-                        raise RuntimeError("8 errors in a row; stopping (Chrome closed?)")
-                    if index % 25 == 0:
-                        run.heartbeat("running")
-                    if dirty and time.monotonic() - last_flush > 1800:
-                        pgdb.flush_versions(conn, ("stud_fees",))
-                        last_flush, dirty = time.monotonic(), False
-            finally:
-                context.close()
-    except BaseException as exc:
-        status = "failed" if isinstance(exc, RuntimeError) else "partial"
-        run.finish(status, f"stopped: {exc}")
-        if status == "failed":
-            notify.send("Racing Post scrape stopped", str(exc)[:200])
-        raise
+        stage.prepare(local, conn, log=lambda m: print(m, flush=True), race_data=False)
+        states = stage.queue_states(local, JOB)
+        have = existing_fee_years(conn)
+        now = time.time()
+        if gaps:
+            todo = gap_sires(conn, have)
+            print(f"racing-post --gaps: {len(todo)} active stallion(s), "
+                  f"{sum(len(s['missing']) for s in todo)} missing fee years", flush=True)
+        else:
+            todo = [s for s in load_sires(conn) if due(s, states, now)]
+        if limit:
+            todo = todo[:limit]
+        if not todo:
+            return 0
+        run = state.Run(conn, JOB + ("-gaps" if gaps else ""))
+        if gaps:
+            run.counts["missing years before"] = sum(len(s["missing"]) for s in todo)
+        print(f"racing-post: {len(todo)} sire(s) to look up", flush=True)
+        status = "ok"
+        try:
+            with sync_playwright() as playwright:
+                PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+                context = playwright.chromium.launch_persistent_context(
+                    user_data_dir=str(PROFILE_DIR), channel="chrome", headless=False,
+                    locale="en-US", viewport={"width": 1280, "height": 900},
+                )
+                page = context.pages[0] if context.pages else context.new_page()
+                page.set_default_timeout(60000)
+                try:
+                    errors_in_a_row = 0
+                    for index, sire in enumerate(todo, start=1):
+                        try:
+                            result, detail = process(page, local, sire, have.get(sire["key"], set()), delay, run)
+                            errors_in_a_row = 0
+                        except Exception as exc:
+                            result, detail = "error", f"{exc.__class__.__name__}: {exc}"[:300]
+                            errors_in_a_row += 1
+                        stage.mark_item(local, JOB, sire["key"], result, detail)
+                        run.bump(result)
+                        print(f"[{index}/{len(todo)}] {sire['name']}: {result} {detail}", flush=True)
+                        if errors_in_a_row >= 8:
+                            raise RuntimeError("8 errors in a row; stopping (Chrome closed?)")
+                        if index % 25 == 0:
+                            run.heartbeat("running")
+                finally:
+                    context.close()
+        except BaseException as exc:
+            status = "failed" if isinstance(exc, RuntimeError) else "partial"
+            run.finish(status, f"stopped: {exc}")
+            if status == "failed":
+                notify.send("Racing Post scrape stopped", str(exc)[:200])
+            raise
+        run.finish(status, f"{len(todo)} sires")
+        return len(todo)
     finally:
-        if dirty:
-            pgdb.flush_versions(conn, ("stud_fees",))
-        lock.close()
-    run.finish(status, f"{len(todo)} sires")
-    return len(todo)
+        try:
+            stage.push(local, conn, log=lambda m: print(m, flush=True))
+        finally:
+            local.close()
+            chrome.close()
+            lock.close()

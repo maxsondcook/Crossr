@@ -137,7 +137,7 @@ def ingest_race_from_equibase_db() -> dict:
             for record in connection.execute(f"SELECT * FROM {sqlite_table}"):
                 raw = {column: record[column] for column in columns}
                 rows.append({col: raw.get(col, "") for col in wanted})
-            out[sample_table] = sample_db.upsert_rows(sample_table, rows)
+            out[sample_table] = sample_db.merge_rows(sample_table, rows)
     finally:
         connection.close()
     return out
@@ -170,7 +170,7 @@ def ingest_breeding_seasons() -> dict:
                     "state": (record.get("State") or "").strip(),
                     "source": path.name,
                 }
-    return sample_db.upsert_rows("breeding_seasons", list(rows_by_key.values()))
+    return sample_db.merge_rows("breeding_seasons", list(rows_by_key.values()))
 
 
 def ingest_stallion_rankings() -> dict:
@@ -192,8 +192,8 @@ def ingest_stallion_rankings() -> dict:
                 records.extend(builder.load_file(path, year))
             except Exception as exc:
                 print(f"  ranking skip {path.name}: {exc}")
-    # Full replace is correct: ranking dumps are complete year/list snapshots
-    return {"total": sample_db.atomic_write_table("stallion_rankings", records), "rows": len(records)}
+    # Ranking dumps are complete per file: replace each loaded file's rows
+    return {**sample_db.replace_by_file("stallion_rankings", records), "rows": len(records)}
 
 
 def ingest_graded_stakes() -> dict:
@@ -229,7 +229,7 @@ def ingest_graded_stakes() -> dict:
                     row.get("Track", ""),
                 ])
             incoming.append(row)
-    return sample_db.upsert_rows("graded_stakes", incoming)
+    return sample_db.merge_rows("graded_stakes", incoming)
 
 
 def sales_rows(path: Path) -> list[dict]:
@@ -282,8 +282,8 @@ def ingest_sales_lots() -> dict:
         except Exception as exc:
             print(f"  sales skip {path.name}: {exc}")
             continue
-    # Partition-replace by source_file would be ideal per catalog; full upsert is safe/idempotent
-    return sample_db.upsert_rows("sales_lots", incoming)
+    # Merged in Postgres by (source_file, hip, name_key); see also crossr_pipeline sales-import
+    return sample_db.merge_rows("sales_lots", incoming)
 
 
 # stud_fees is not loaded here any more; see crossr_pipeline fees-redate.

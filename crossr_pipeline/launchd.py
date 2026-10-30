@@ -1,9 +1,14 @@
 """launchd agents for the pipeline (written, never loaded, by install-launchd).
 
-    com.crossr.pipeline.scrape        always running; restarted 5 min after it exits
+    com.crossr.pipeline.scrape        one 45-min Equibase batch an hour; when work is
+                                      waiting (exit 75) the next batch starts a minute later
+    com.crossr.pipeline.push          daily at 03:00: staged race records and pedigrees -> Postgres
     com.crossr.pipeline.sales-import  daily at 07:00 (run at wake if the Mac slept)
-    com.crossr.pipeline.racing-post   always running; works through sires due a lookup
+    com.crossr.pipeline.racing-post   weekly, Sunday 04:00: sires due a fee lookup, one push at the end
     com.crossr.pipeline.precompute    nightly 02:30: sales-model hip pages for upcoming catalogs
+
+The two Chrome jobs (scrape, racing-post) share logs/pipeline/chrome.lock, so
+only one browser is open at a time.
 
 All of them run through scripts/pipeline/railway_env.sh, so DATABASE_URL is built
 from the Railway CLI at start and no password is written to disk. The scrapers
@@ -21,6 +26,7 @@ LOG_DIR = REPO / "logs" / "pipeline"
 SCRAPE = "com.crossr.pipeline.scrape"
 SALES = "com.crossr.pipeline.sales-import"
 RACING_POST = "com.crossr.pipeline.racing-post"
+PUSH = "com.crossr.pipeline.push"
 PRECOMPUTE = "com.crossr.pipeline.precompute"
 
 
@@ -39,10 +45,19 @@ def plists(db: str, python: str) -> dict[str, dict]:
             "Label": SCRAPE,
             "ProgramArguments": [env, db, "/usr/bin/caffeinate", "-i", python, "-m", "crossr_pipeline", "scrape"],
             "RunAtLoad": True,
-            "KeepAlive": True,
-            "ThrottleInterval": 300,
+            "StartInterval": 3600,
+            "KeepAlive": {"SuccessfulExit": False},
+            "ThrottleInterval": 60,
             "StandardOutPath": str(LOG_DIR / "scrape.log"),
             "StandardErrorPath": str(LOG_DIR / "scrape.log"),
+            **common,
+        },
+        PUSH: {
+            "Label": PUSH,
+            "ProgramArguments": [env, db, python, "-m", "crossr_pipeline", "push"],
+            "StartCalendarInterval": {"Hour": 3, "Minute": 0},
+            "StandardOutPath": str(LOG_DIR / "push.log"),
+            "StandardErrorPath": str(LOG_DIR / "push.log"),
             **common,
         },
         SALES: {
@@ -55,10 +70,8 @@ def plists(db: str, python: str) -> dict[str, dict]:
         },
         RACING_POST: {
             "Label": RACING_POST,
-            "ProgramArguments": [env, db, "/usr/bin/caffeinate", "-i", python, "-m", "crossr_pipeline", "racing-post", "--loop"],
-            "RunAtLoad": True,
-            "KeepAlive": True,
-            "ThrottleInterval": 300,
+            "ProgramArguments": [env, db, "/usr/bin/caffeinate", "-i", python, "-m", "crossr_pipeline", "racing-post"],
+            "StartCalendarInterval": {"Weekday": 0, "Hour": 4, "Minute": 0},
             "StandardOutPath": str(LOG_DIR / "racing-post.log"),
             "StandardErrorPath": str(LOG_DIR / "racing-post.log"),
             **common,

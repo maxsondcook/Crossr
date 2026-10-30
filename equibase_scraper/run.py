@@ -403,14 +403,15 @@ def fetch_ancestor_profile(page, conn, delay: float, query) -> dict | None:
 
 
 class _PedigreeBook:
-    """Pedigree map and ancestor index. With Postgres, trees go straight to the
-    pedigrees table (no pedigrees_database.py rewrite); ``saved`` counts them."""
+    """Pedigree map and ancestor index. With Postgres (or the pipeline's local
+    stage), trees go to that pedigrees table (no pedigrees_database.py
+    rewrite); ``saved`` counts them."""
 
     def __init__(self, conn=None):
         print("Loading pedigree map for 5-generation fill...", flush=True)
-        self.conn = conn if db is pgdb else None
+        self.conn = conn if db is not sqlite_db else None
         if self.conn is not None:
-            self.pedigree_map = pgdb.load_pedigree_map(self.conn)
+            self.pedigree_map = db.load_pedigree_map(self.conn)
         else:
             self.pedigree_map = load_pedigree_map()
         self.index = build_ancestor_index(self.pedigree_map)
@@ -424,7 +425,7 @@ class _PedigreeBook:
             return
         if self.conn is not None:
             items = {key: self.pedigree_map[key] for key in keys if key in self.pedigree_map}
-            self.saved += pgdb.upsert_pedigrees(self.conn, items)
+            self.saved += db.upsert_pedigrees(self.conn, items)
             return
         save_pedigree_map(self.pedigree_map, overwrite_keys=set(keys))
 
@@ -562,7 +563,7 @@ def fetch_horse(page, conn, horse, delay: float) -> str:
     return resolved["kind"]
 
 
-def _launch_context(playwright):
+def _launch_context(playwright, extra_args: list[str] | None = None):
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     context = playwright.chromium.launch_persistent_context(
         user_data_dir=str(PROFILE_DIR),
@@ -570,7 +571,7 @@ def _launch_context(playwright):
         headless=False,
         locale="en-US",
         viewport={"width": 1440, "height": 900},
-        args=["--disable-blink-features=AutomationControlled"],
+        args=["--disable-blink-features=AutomationControlled", *(extra_args or [])],
         ignore_default_args=["--enable-automation"],
     )
     page = context.pages[0] if context.pages else context.new_page()

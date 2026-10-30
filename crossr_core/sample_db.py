@@ -292,6 +292,48 @@ def upsert_rows(table: str, incoming: list[dict]) -> dict:
     return {"inserted": inserted, "updated": updated, "total": total}
 
 
+def merge_rows(table: str, incoming: list[dict]) -> dict:
+    """upsert_rows done in Postgres: the incoming rows go up by COPY and are
+    merged by UPSERT_KEYS there (blank cells keep the stored value). Nothing is
+    read back and the table is not rewritten. Returns counts."""
+    from crossr_core import pg_push, railway_db
+
+    columns = TABLES[table]
+    if not incoming:
+        return {"inserted": 0, "updated": 0}
+    rows = [{col: _cell(raw.get(col)) for col in columns} for raw in incoming]
+    with railway_db.connect() as conn:
+        out = pg_push.upsert(conn, table, columns, UPSERT_KEYS[table], rows, keep_blanks=True)
+        if out["inserted"] or out["updated"]:
+            _bump_after_write(conn, table)
+    invalidate(table)
+    return out
+
+
+def replace_by_file(table: str, incoming: list[dict]) -> dict:
+    """Replace the rows of each source_file present in ``incoming`` (other
+    files' rows stay). One transaction, COPY in; nothing read back."""
+    from crossr_core import pg_push, railway_db
+
+    columns = TABLES[table]
+    rows = [{col: _cell(raw.get(col)) for col in columns} for raw in incoming]
+    files = {r.get("source_file") for r in rows if r.get("source_file")}
+    with railway_db.connect() as conn:
+        out = pg_push.replace_by(conn, table, columns, "source_file", files, rows)
+        _bump_after_write(conn, table)
+    invalidate(table)
+    return out
+
+
+def _bump_after_write(conn, table: str) -> None:
+    from crossr_core import railway_db
+
+    count = conn.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0]
+    version = railway_db._bump(conn, table, int(count))
+    if table == "sales_lots":
+        railway_db._rebuild_sales_index(conn, version)
+
+
 def replace_partition(table: str, match: dict, incoming: list[dict]) -> dict:
     """Drop rows matching all match fields, then append incoming; atomic write."""
     columns = TABLES[table]

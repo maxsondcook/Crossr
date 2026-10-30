@@ -1,7 +1,8 @@
 """Crossr data pipeline. Needs DATABASE_URL (see scripts/pipeline/railway_env.sh).
 
-    python -m crossr_pipeline scrape [--limit N] [--once] [--delay 3]
+    python -m crossr_pipeline scrape [--minutes 45] [--limit N] [--delay 3]   # one batch
     python -m crossr_pipeline scrape --refresh-only [--refresh-cap N]
+    python -m crossr_pipeline push                    # staged rows -> Postgres (daily)
     python -m crossr_pipeline sales-import [--dry-run] [--force FILE ...]
     python -m crossr_pipeline racing-post [--limit N] [--delay 3]
     python -m crossr_pipeline status
@@ -40,19 +41,45 @@ def _db_name() -> str:
 
 
 def cmd_scrape(args) -> int:
+    import traceback
+
     from crossr_pipeline.scrape import scrape
 
-    print(f"Database: {_db_name()}", flush=True)
-    return scrape(
-        delay=args.delay,
-        limit=args.limit,
-        refresh_cap=args.refresh_cap,
-        once=args.once,
-        skip_refresh=args.skip_refresh,
-        refresh_only=args.refresh_only,
-        role=args.role,
-        catalogs_only=args.catalogs_only,
-    )
+    print(f"Database: {_db_name()}  ({datetime.now():%Y-%m-%d %H:%M})", flush=True)
+    try:
+        return scrape(
+            delay=args.delay,
+            limit=args.limit,
+            refresh_cap=args.refresh_cap,
+            skip_refresh=args.skip_refresh,
+            refresh_only=args.refresh_only,
+            role=args.role,
+            catalogs_only=args.catalogs_only,
+            minutes=args.minutes,
+            light=not args.full_pages,
+        )
+    except Exception:
+        # Exit 0 so launchd waits for the next interval instead of restarting
+        # a failing batch every minute (the notification has gone out).
+        traceback.print_exc()
+        return 0
+
+
+def cmd_push(args) -> int:
+    from crossr_pipeline import stage
+
+    pg = _conn()
+    local = stage.connect()
+    try:
+        print(f"Database: {_db_name()}  ({datetime.now():%Y-%m-%d %H:%M})", flush=True)
+        print(f"Staged: {stage.pending(local)}", flush=True)
+        if args.dry_run:
+            return 0
+        stage.push(local, pg, log=lambda m: print(m, flush=True))
+    finally:
+        local.close()
+        pg.close()
+    return 0
 
 
 def cmd_sales_import(args) -> int:
@@ -236,6 +263,12 @@ def cmd_status(args) -> int:
         print("\nrace_horses by status")
         for row in conn.execute("SELECT status, COUNT(*) AS n FROM race_horses GROUP BY 1 ORDER BY 2 DESC"):
             print(f"  {row['status'] or '-':<14} {row['n']}")
+        from crossr_pipeline import stage
+
+        if stage.STAGE_PATH.exists():
+            local = stage.connect()
+            print(f"\nStaged on this Mac, waiting for a push: {stage.pending(local)}")
+            local.close()
         print("\nTable versions (API reloads when these move)")
         for row in conn.execute("SELECT table_name, row_count, updated_at FROM crossr_table_versions ORDER BY 1"):
             print(f"  {row['table_name']:<18} {row['row_count'] or 0:>9}  {_age(row['updated_at'])}")
@@ -264,10 +297,11 @@ def main(argv: list[str] | None = None) -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("scrape", help="Equibase loop: weekly race refresh + sale-parent pedigrees")
+    p = sub.add_parser("scrape", help="One Equibase batch: catalogs, weekly race refresh, sale-parent pedigrees")
     p.add_argument("--delay", type=float, default=3.0, help="Seconds between page loads (plus jitter)")
+    p.add_argument("--minutes", type=float, default=45, help="Batch length; Chrome closes at the end")
     p.add_argument("--limit", type=int, help="Stop after this many queue items (testing)")
-    p.add_argument("--once", action="store_true", help="One pass over the queue, then exit")
+    p.add_argument("--full-pages", action="store_true", help="Also download pictures, fonts and ad scripts")
     p.add_argument("--refresh-cap", type=int, help="At most this many horses in a race refresh")
     p.add_argument("--skip-refresh", action="store_true", help="Do not run the weekly race refresh")
     p.add_argument("--refresh-only", action="store_true", help="Run only the race refresh, then exit")
@@ -275,6 +309,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--catalogs-only", action="store_true",
                    help="Only run queued upcoming catalogs (with --limit: that many hips each), then exit")
     p.set_defaults(func=cmd_scrape)
+
+    p = sub.add_parser("push", help="Send rows staged on this Mac to Postgres (one transaction, one API reload)")
+    p.add_argument("--dry-run", action="store_true", help="Only show what is staged")
+    p.set_defaults(func=cmd_push)
 
     p = sub.add_parser("sales-import", help="Load new/changed sales_data/*.csv into sales_lots")
     p.add_argument("--dry-run", action="store_true")
