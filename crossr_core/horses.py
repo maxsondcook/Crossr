@@ -1410,6 +1410,10 @@ def build_search_index(profiles=None):
                 entries[eid]["year"] = year
         else:
             same_name = by_name.get(ck, [])
+            if year:
+                # A stud card with a known foaling year never merges into a namesake
+                # of another year (Englishman 2002 is not Englishman 2023).
+                same_name = [e for e in same_name if not entries.get(e, {}).get("year") or str(entries[e]["year"]) == year]
             if len(same_name) == 1:
                 entries[same_name[0]]["has_profile"] = True
                 entries[same_name[0]]["farm"] = str(data.get("Farm", "")).replace("_", " ").title()
@@ -2264,6 +2268,34 @@ def get_horse_profile(search_name, profiles=None):
         }
     pedigree_data = hit["tree"]
 
+    # Never attach a stud card by name alone: check it is the same horse
+    # (sex, foaling year, sire), so a 2023 colt doesn't inherit a namesake
+    # stallion's stud record, fees, rankings or progeny.
+    from crossr_core import identity
+
+    facts = identity.horse_facts(search_name, pedigree_data if isinstance(pedigree_data, dict) else None)
+    identity_note = ""
+    if data:
+        ok, identity_note = identity.card_matches(matched_key, data, facts)
+        card_year = identity._year(data.get("Year Born"))
+        if not ok and card_year and card_year != facts.get("year") and not identity._label_year(search_name):
+            # The bare name found a namesake's pedigree (Accelerate 2003 vs the
+            # stallion foaled 2013): prefer the stud-card stallion's own pedigree.
+            alt = main.lookup_pedigree(f"{clean_search} ({card_year})")
+            alt_tree = alt.get("tree")
+            if isinstance(alt_tree, dict):
+                alt_facts = identity.horse_facts(search_name, alt_tree, year=card_year)
+                alt_ok, _ = identity.card_matches(matched_key, data, alt_facts)
+                if alt_ok:
+                    pedigree_data, facts, ok, identity_note = alt_tree, alt_facts, True, ""
+        if not ok:
+            data = None
+            matched_key = None
+    classification = identity.classify(facts, data)
+    # Stallion-only sections (stud book, rankings, progeny) are looked up by name;
+    # only show them when this horse is the stallion they describe.
+    stallion_sections = classification["is_stallion"]
+
     horse_name = matched_key.upper() if matched_key else search_name.strip().upper()
     if pedigree_data and isinstance(pedigree_data, dict) and pedigree_data.get("Horse"):
         horse_name = pedigree_data.get("Horse")
@@ -2391,7 +2423,7 @@ def get_horse_profile(search_name, profiles=None):
         stallion["badge"] = stallion_badge(stallion)
         stallion["sire"] = tree["sire"]["name"] if tree and tree.get("sire") else None
         stallion["dam"] = tree["dam"]["name"] if tree and tree.get("dam") else None
-    if has_valid_pedigree or data:
+    if stallion_sections and (has_valid_pedigree or data):
         payload_top = top_progeny_for_sire(clean_search)
     else:
         payload_top = []
@@ -2408,9 +2440,12 @@ def get_horse_profile(search_name, profiles=None):
             if stallion:
                 stallion["entered_stud"] = entered_stud
                 stallion["crop"] = crop_label(entered_stud)
-    bms_rows = broodmare_sire_history(matched_key or search_name)
+    bms_rows = broodmare_sire_history(matched_key or search_name) if stallion_sections else []
     try:
-        ranking_rows = stallion_ranking_history(matched_key or search_name, entered_stud=entered_stud)
+        ranking_rows = (
+            stallion_ranking_history(matched_key or search_name, entered_stud=entered_stud)
+            if stallion_sections else {"lists": [], "rows": {}}
+        )
     except Exception:
         ranking_rows = {"lists": [], "rows": {}}
     if stallion:
@@ -2435,5 +2470,9 @@ def get_horse_profile(search_name, profiles=None):
         "female_family": female_family(pedigree_data, parsed["name"]) if pedigree_data else [],
         "ambiguous": False,
         "years": [parsed["year"]] if parsed.get("year") else hit.get("years") or [],
+        "classification": classification,
+        "identity_note": identity_note or None,
     }
+    if stallion:
+        stallion["status"] = classification.get("stallion_status") or stallion.get("status")
     return result
