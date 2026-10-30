@@ -2288,6 +2288,16 @@ def get_horse_profile(search_name, profiles=None):
                 alt_ok, _ = identity.card_matches(matched_key, data, alt_facts)
                 if alt_ok:
                     pedigree_data, facts, ok, identity_note = alt_tree, alt_facts, True, ""
+            elif facts.get("year"):
+                # Two different horses share the name (a 2003 racehorse and the
+                # stallion foaled 2013 with no pedigree on file): ask which one.
+                return {
+                    "ambiguous": True,
+                    "key": clean_search,
+                    "name": clean_search,
+                    "years": sorted({str(facts["year"]), str(card_year)}),
+                    "display": clean_search,
+                }
         if not ok:
             data = None
             matched_key = None
@@ -2433,6 +2443,10 @@ def get_horse_profile(search_name, profiles=None):
         fees_hist, mares_hist = load_book_stats()
         book_key = main.clean_horse_name(matched_key or search_name)
         book_years = set(fees_hist.get(book_key, {})) | set(mares_hist.get(book_key, {}))
+        born = _intish(data.get("Year Born"))
+        if born:
+            # Seasons before this stallion was 2 are a namesake's (Little Big Bear 1998).
+            book_years = {y for y in book_years if y >= born + 2}
         first_book_year = min(book_years) if book_years else None
         duty_year = _intish(entered_stud)
         if first_book_year and (not duty_year or first_book_year < duty_year):
