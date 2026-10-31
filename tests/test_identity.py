@@ -124,6 +124,19 @@ def test_male_without_stud_evidence_is_not_a_stallion():
     assert c["sex"] == "Horse"  # six years old: no longer a colt
 
 
+@pytest.mark.parametrize("card, expected", [
+    ({"Stud Fee Currency": "USD", "Farm": "Spendthrift Farm, KY"}, True),
+    ({"Stud Fee Currency": "CAD", "Farm": "Adena Springs North, ON"}, True),
+    ({"Stud Fee Currency": "GBP", "Farm": "Dalham Hall Stud"}, False),
+    ({"Stud Fee Currency": "EUR", "Farm": "Coolmore Stud"}, False),
+    ({"Stud Fee Currency": "JPY", "Farm": "Shizunai Stallion Station"}, False),
+    ({"Stud Fee Currency": "", "Farm": "Hill 'n' Dale Farms, Kentucky"}, True),
+    ({"Stud Fee Currency": "", "Farm": "Banstead Manor Stud"}, False),
+])
+def test_stands_in_north_america(card, expected):
+    assert identity.stands_in_north_america(card) is expected
+
+
 def test_filly_becomes_mare_at_five():
     assert identity.classify(facts("A FILLY", 2023, sex="F"))["sex"] == "Filly"
     assert identity.classify(facts("A MARE", 2020, sex="F"))["sex"] == "Mare"
