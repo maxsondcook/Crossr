@@ -168,7 +168,7 @@ def build_stallion_roster(profiles=None):
             stud_year = int(stud_year)
         except (TypeError, ValueError):
             stud_year = 0
-        farm_title = str((data or {}).get("Farm", "")).replace("_", " ").title()
+        farm_title = _title(str((data or {}).get("Farm", "")).replace("_", " "))
         if not farm_title and row.get("state"):
             farm_title = row["state"]
         sire, dam = parents.get(key, (None, None))
@@ -423,6 +423,13 @@ def race_results_for(name, foal_year=None, aliases=()):
     return rows, wins
 
 
+
+def _title(text):
+    """str.title() that keeps a possessive 's lower-case ("Banker's Gold", not "Banker'S")
+    and two-letter state codes upper-case ("Farm, KY", not "Farm, Ky")."""
+    out = re.sub(r"(?<=[A-Za-z])'S\b", "'s", str(text or "").title())
+    return re.sub(r"(,\s*)([A-Za-z]{2})$", lambda m: m.group(1) + m.group(2).upper(), out)
+
 _CLASS_ORDER = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "SW": 6}
 
 
@@ -457,7 +464,7 @@ def top_progeny_for_sire(sire_name, limit=None):
         rows.append({
             "name": h_name,
             "sex": "",
-            "broodmare_sire": re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip().title() or None,
+            "broodmare_sire": _title(re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip()) or None,
             "class": h["status"],
             "dam": re.sub(r"\s*\(\d{4}\)", "", dam or "").strip() or None,
             "earnings": earnings or None,
@@ -776,7 +783,7 @@ def pedigree_similarity(
         shared, ancestors = _shared_blood(tree_a, tree_b, cache)
         result["slot_percent"] = percent
         result["shared_blood_percent"] = shared
-        result["shared_ancestors"] = [a_name.title() for a_name in ancestors]
+        result["shared_ancestors"] = [_title(a_name) for a_name in ancestors]
         if shared > percent:
             result["percent"] = shared
             if not label:
@@ -813,7 +820,7 @@ def _same_dam_stakes_rows(dam_name, reference_tree=None, exclude_names=None):
         sim = pedigree_similarity(a_tree=reference_tree, b=h_name) if reference_tree else None
         rows.append({
             "name": h_name,
-            "broodmare_sire": re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip().title() or None,
+            "broodmare_sire": _title(re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip()) or None,
             "class": h.get("status"),
             "dam": re.sub(r"\s*\(\d{4}\)", "", dam or "").strip(),
             "sire": re.sub(r"\s*\(\d{4}\)", "", sire or "").strip(),
@@ -912,7 +919,7 @@ def similar_cross_rows(
     if not damsire and isinstance(ref, dict):
         damsire = hypomating_engine.get_mare_sire_from_pedigree(ref.get("Dam") or {})
     damsire_key = main.clean_horse_name(damsire or "")
-    damsire_display = re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip().title()
+    damsire_display = _title(re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip())
 
     rows, seen = [], {main.clean_horse_name(reference_name or "")} - {""}
 
@@ -927,7 +934,7 @@ def similar_cross_rows(
         earnings = earn_lookup.get(key) or 0
         rows.append({
             "name": h_name,
-            "broodmare_sire": re.sub(r"\s*\(\d{4}\)", "", row_damsire or "").strip().title() or None,
+            "broodmare_sire": _title(re.sub(r"\s*\(\d{4}\)", "", row_damsire or "").strip()) or None,
             "class": h["status"],
             "dam": re.sub(r"\s*\(\d{4}\)", "", dam or "").strip() or None,
             "similarity": (sim or {}).get("percent"),
@@ -1114,8 +1121,8 @@ def _add_nick_reasons(crosses, sire, dam):
     dam_tree = main.pedigree_tree(dam) or {}
     damsire = hypomating_engine.get_mare_sire_from_pedigree(dam_tree)
     line = hypomating_engine.get_sire_line_ancestry(damsire, node=dam_tree.get("Sire")) if damsire else []
-    ds_display = re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip().title()
-    sire_display = re.sub(r"\s*\(\d{4}\)", "", sire or "").strip().title()
+    ds_display = _title(re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip())
+    sire_display = _title(re.sub(r"\s*\(\d{4}\)", "", sire or "").strip())
     for row in crosses:
         row_ds = main.clean_horse_name(row.get("broodmare_sire") or "")
         label = row.get("similarity_label")
@@ -1468,7 +1475,7 @@ def build_search_index(profiles=None):
         eid = _index_id(ck, year) if year else ck
         if eid in entries:
             entries[eid]["has_profile"] = True
-            entries[eid]["farm"] = str(data.get("Farm", "")).replace("_", " ").title()
+            entries[eid]["farm"] = _title(str(data.get("Farm", "")).replace("_", " "))
             if year and not entries[eid]["year"]:
                 entries[eid]["year"] = year
         else:
@@ -1479,7 +1486,7 @@ def build_search_index(profiles=None):
                 same_name = [e for e in same_name if not entries.get(e, {}).get("year") or str(entries[e]["year"]) == year]
             if len(same_name) == 1:
                 entries[same_name[0]]["has_profile"] = True
-                entries[same_name[0]]["farm"] = str(data.get("Farm", "")).replace("_", " ").title()
+                entries[same_name[0]]["farm"] = _title(str(data.get("Farm", "")).replace("_", " "))
             else:
                 by_name.setdefault(ck, []).append(eid)
                 entries[eid] = {
@@ -1489,7 +1496,7 @@ def build_search_index(profiles=None):
                     "display": key,
                     "has_pedigree": False,
                     "has_profile": True,
-                    "farm": str(data.get("Farm", "")).replace("_", " ").title(),
+                    "farm": _title(str(data.get("Farm", "")).replace("_", " ")),
                 }
     _SEARCH_INDEX = list(entries.values())
     return _SEARCH_INDEX
