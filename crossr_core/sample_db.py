@@ -292,6 +292,48 @@ def upsert_rows(table: str, incoming: list[dict]) -> dict:
     return {"inserted": inserted, "updated": updated, "total": total}
 
 
+def merge_rows(table: str, incoming: list[dict]) -> dict:
+    """upsert_rows done in Postgres: the incoming rows go up by COPY and are
+    merged by UPSERT_KEYS there (blank cells keep the stored value). Nothing is
+    read back and the table is not rewritten. Returns counts."""
+    from crossr_core import pg_push, railway_db
+
+    columns = TABLES[table]
+    if not incoming:
+        return {"inserted": 0, "updated": 0}
+    rows = [{col: _cell(raw.get(col)) for col in columns} for raw in incoming]
+    with railway_db.connect() as conn:
+        out = pg_push.upsert(conn, table, columns, UPSERT_KEYS[table], rows, keep_blanks=True)
+        if out["inserted"] or out["updated"]:
+            _bump_after_write(conn, table)
+    invalidate(table)
+    return out
+
+
+def replace_by_file(table: str, incoming: list[dict]) -> dict:
+    """Replace the rows of each source_file present in ``incoming`` (other
+    files' rows stay). One transaction, COPY in; nothing read back."""
+    from crossr_core import pg_push, railway_db
+
+    columns = TABLES[table]
+    rows = [{col: _cell(raw.get(col)) for col in columns} for raw in incoming]
+    files = {r.get("source_file") for r in rows if r.get("source_file")}
+    with railway_db.connect() as conn:
+        out = pg_push.replace_by(conn, table, columns, "source_file", files, rows)
+        _bump_after_write(conn, table)
+    invalidate(table)
+    return out
+
+
+def _bump_after_write(conn, table: str) -> None:
+    from crossr_core import railway_db
+
+    count = conn.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0]
+    version = railway_db._bump(conn, table, int(count))
+    if table == "sales_lots":
+        railway_db._rebuild_sales_index(conn, version)
+
+
 def replace_partition(table: str, match: dict, incoming: list[dict]) -> dict:
     """Drop rows matching all match fields, then append incoming; atomic write."""
     columns = TABLES[table]
@@ -509,6 +551,33 @@ def stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
     return {name: dict(card) for name, card in hit[1].items()}
 
 
+# Without a known foaling year, seasons this far apart belong to different
+# namesakes (Little Big Bear has a 1998 row from an older horse). Shorter gaps
+# are just missing data years and must not move "entered stud".
+_SEASON_GAP = 10
+
+
+def _latest_run_start(seasons, foal_year: int = 0) -> int:
+    """First stud season of the current stallion behind a card.
+
+    With his foaling year known, seasons before he was 2 are a namesake's
+    (Constitution, foaled 2011: the 2006 row is another horse). Otherwise drop
+    seasons separated from the latest run by _SEASON_GAP or more.
+    """
+    years = sorted(y for y in seasons if y)
+    if not years:
+        return 0
+    if foal_year:
+        own = [y for y in years if y >= foal_year + 2]
+        return own[0] if own else years[-1]
+    start = years[-1]
+    for y in reversed(years[:-1]):
+        if start - y >= _SEASON_GAP:
+            break
+        start = y
+    return start
+
+
 def _stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
     """Active stud cards derived from stud_fees (+ latest breeding_seasons).
 
@@ -529,6 +598,7 @@ def _stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
         by_stallion.setdefault(key, []).append(row)
     breeding = {}
     first_bred: dict[str, int] = {}
+    bred_years: dict[str, set] = {}
     for row in load_table("breeding_seasons"):
         key = name_key(row.get("stallion") or "")
         try:
@@ -536,6 +606,7 @@ def _stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
         except ValueError:
             continue
         first_bred[key] = min(y, first_bred.get(key, y))
+        bred_years.setdefault(key, set()).add(y)
         prior = breeding.get(key)
         if prior is None or y > prior[0]:
             breeding[key] = (y, row)
@@ -566,7 +637,15 @@ def _stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
         if not dated:
             continue
         # A mares-bred report counts as a season even when no fee was listed.
-        first_season = min([y for y, _ in dated] + ([first_bred[key]] if key in first_bred else []))
+        seasons = {y for y, _ in dated} | set(bred_years.get(key, ()))
+        latest = max(seasons)
+        from crossr_core.identity import card_foal_year
+
+        # His own foaling year from the rankings (rows that describe stallions):
+        # the youngest ranked namesake old enough to stand in the latest season.
+        # race_horses is not used here: a young unraced namesake would fit too.
+        own_year = card_foal_year((rows[0].get("Stallion") or ""), latest)
+        first_season = _latest_run_start(seasons, own_year)
         if year is not None:
             pool = [pair for pair in dated if pair[0] == year]
         else:
@@ -584,9 +663,14 @@ def _stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
         mb = breeding.get(key)
         rank = ranks.get(key)
         display = (row.get("Stallion") or "").strip()
+        # The rankings record the stallion's own foaling year; race_horses may only
+        # know a younger namesake (e.g. Englishman 2002 vs Englishman 2023).
+        from crossr_core.identity import card_foal_year
+
+        year_born = card_foal_year(display, first_season) or _foal_year_for_stud(foal_years.get(key, []), first_season)
         profiles[display] = {
             "Farm": row.get("Farm") or "",
-            "Year Born": _foal_year_for_stud(foal_years.get(key, []), first_season),
+            "Year Born": year_born,
             "Stud Duty Year": first_season,
             "Latest Season": y,
             "Stud Fee": fee,

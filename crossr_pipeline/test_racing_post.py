@@ -53,3 +53,34 @@ def test_yob_window():
 def test_fee_gaps_only_active_and_internal():
     have = {"NOT THIS TIME": {2017, 2018, 2020, 2021}, "OLD": {2000, 2002}, "FULL": {2020, 2021}}
     assert rp.fee_gaps(have, {"NOT THIS TIME", "FULL"}, 2026) == {"NOT THIS TIME": [2019]}
+
+
+def test_fee_rebuild_csv_first():
+    from crossr_pipeline import fee_redate as fr
+
+    rankings = [
+        {"stallion": "Not This Time", "year": "2020", "list": "First-Crop", "stud_fee": "$40,000",
+         "stud_fee_season": "2021", "stud_fee_raw": "$40,000\nTaylor Made", "farm": None},
+        {"stallion": "Not This Time", "year": "2020", "list": "Two-Year-Old", "stud_fee": "$40,000",
+         "stud_fee_season": "2021", "stud_fee_raw": "$40,000\nTaylor Made", "farm": None},
+        {"stallion": "Not This Time", "year": "2017", "list": "General", "stud_fee": "N/A",
+         "stud_fee_season": None, "stud_fee_raw": "N/A", "farm": None},
+        {"stallion": "Old", "year": "2001", "list": "General", "stud_fee": "$5,000",
+         "stud_fee_season": "1998", "stud_fee_raw": "$5,000", "farm": None},
+    ]
+    fees = [{"Year": "2019", "Stallion": "Not This Time", "Stud Fee": "$15,000", "Farm": "TM",
+             "Source List": "user", "Notes": None}]
+    rp = {"NOT THIS TIME": [
+        {"stallion": "Not This Time", "rp_horse_id": "1", "year": y, "stud_fee": f, "currency": "USD",
+         "is_private": False, "country": "U.S.A", "standing": "Taylor Made"}
+        for y, f in ((2020, 12500), (2021, 45000))]}
+    out, stats, conflicts = fr.rebuild(rankings, fees, rp)
+    got = {(r["Stallion"], r["Year"]): (r["Stud Fee"], r["Source List"]) for r in out}
+    assert got[("Not This Time", "2021")] == ("$40,000", "Leading First Crop Sires; Leading Two-Year-Old Sires")
+    assert got[("Not This Time", "2020")][1] == "Racing Post fee history"       # filled where the CSV has none
+    assert got[("Not This Time", "2019")] == ("$15,000", "user")
+    assert got[("Not This Time", "2017")][0] == "N/A"
+    assert got[("Old", "1998")][0] == "$5,000"                                   # header season
+    assert conflicts == [("NOT THIS TIME", 2021, "$40,000", "$45,000")]          # CSV kept
+    out2, _, _ = fr.rebuild(rankings, fees, rp, early="list-year")
+    assert ("Old", "2001") in {(r["Stallion"], r["Year"]) for r in out2}

@@ -676,7 +676,10 @@ def get_profile_meta(name, all_profiles):
     except ValueError:
         duty_year = None
     is_standing = fee_num > 0 and (duty_year is None or duty_year >= datetime.date.today().year - 1)
-    is_active = (len(profile) > 0) and not is_pensioned and is_standing
+    # Suggestions only use stallions standing in North America for now (user's call).
+    from crossr_core.identity import stands_in_north_america
+
+    is_active = (len(profile) > 0) and not is_pensioned and is_standing and stands_in_north_america(profile)
 
     return {"rank": rank_val, "fee_str": fee_str, "fee_num": fee_num, "has_progeny": has_progeny, "is_active": is_active}
 

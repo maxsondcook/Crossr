@@ -8,7 +8,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-ROOT = Path("/Users/maxsoncook/Desktop/stallion_rankings_data")
+ROOT = Path(__file__).resolve().parent
 OUT_CSV = ROOT / "stud_fee_database.csv"
 OUT_README = ROOT / "stud_fee_database_README.txt"
 
@@ -18,6 +18,27 @@ NA = "N/A"
 COLUMNS = ["Year", "Stallion", "Stud Fee", "Farm", "Source List", "Notes"]
 
 FEE_HEADER_RE = re.compile(r"stud\s*fee|/\s*farm|(?<![a-z])fee(?![a-z])", re.I)
+# The fee header names the season the fees are for: "1998 Stud Fee / Farm" on
+# the 2001 lists, "'21 Stud Fee / Farm" on the 2020 lists. Year is that season,
+# not the list year.
+HEADER_SEASON_RE = re.compile(r"(?:(?P<full>(?:19|20)\d{2})|['\u2019](?P<short>\d{2}))\s*stud\s*fee", re.I)
+# Headers with no season ("Stud Fee / Farm", 2006), dated against Racing Post:
+# offset from the list year, or None when the match was unclear (fees left out).
+UNDATED_FILES = {
+    "2006StallionRankings - Leading Sire Rankings.csv": 0,
+    "2006StallionRankings - Leading Second-Crop Sires.csv": 0,
+    "2006StallionRankings - Leading Third-Crop Sires.csv": 0,
+    "2006StallionRankings - Leading Two-Year-Old Sires.csv": 0,
+    "2006StallionRankings - Leading First Crop Sires.csv": None,
+}
+
+
+def header_season(header: str, list_year: str, filename: str) -> str | None:
+    match = HEADER_SEASON_RE.search(header or "")
+    if match:
+        return match.group("full") or str(2000 + int(match.group("short")))
+    offset = UNDATED_FILES.get(filename)
+    return None if offset is None else str(int(list_year) + offset)
 SKIP_DIR_NAMES = {"bloodhorse_sirelists"}
 
 PRIVATE_RE = re.compile(r"^private(?:\s+fee)?$", re.I)
@@ -311,6 +332,7 @@ def extract_rows() -> tuple[list[dict], dict]:
         "used_lists": defaultdict(int),
         "combined_rows": 0,
         "split_rows": 0,
+        "fees_without_season": 0,
         "ignored_columns": set(),
         "fee_columns_used": set(),
         "name_columns_used": set(),
@@ -360,6 +382,7 @@ def extract_rows() -> tuple[list[dict], dict]:
                 continue
 
             fee, farm, notes = NA, NA, ""
+            season = None
             for i in fee_idxs:
                 if i >= len(row):
                     continue
@@ -367,22 +390,32 @@ def extract_rows() -> tuple[list[dict], dict]:
                 cell = row[i]
                 if re.search(r"stud\s*fee", col, re.I) or ("fee" in col.lower() and "farm" in col.lower()):
                     fee, farm, notes = parse_fee_farm_cell(cell)
+                    season = header_season(col, year, path.name)
                 elif re.search(r"(?<![a-z])fee(?![a-z])", col, re.I):
                     fee, farm, notes = parse_fee_farm_cell(cell)
 
             if is_blank(farm) and embedded_farm:
                 farm = embedded_farm
+            row_year = year
+            if not is_blank(fee):
+                if season is None:
+                    stats["fees_without_season"] += 1
+                    notes = merge_notes(notes, f"fee {fee} left out: header gives no season")
+                    fee = NA
+                else:
+                    row_year = season
+                    notes = merge_notes(notes, f"list year {year}")
 
             extracted.append(
                 {
-                    "Year": year,
+                    "Year": row_year,
                     "Stallion": stallion,
                     "Stud Fee": display_or_na(fee),
                     "Farm": display_or_na(farm),
                     "Source List": source,
                     "Notes": notes,
                     "_combined": combined,
-                    "_key": (year, stallion_key(stallion)),
+                    "_key": (row_year, stallion_key(stallion)),
                     "_fee_key": normalize_fee_for_match(fee),
                     "_farm_key": stallion_key(farm) if not is_blank(farm) else "n/a",
                 }
@@ -548,11 +581,12 @@ Counts
 
 How columns were parsed
 -----------------------
-Year is the ranking-folder / filename prefix (2001–2026), not the year printed
-inside a fee header. Some first-crop lists label an earlier inaugural fee
-(e.g. 2001 list column "1998 Stud Fee / Farm"); AEI lists often label the
-next covering season (e.g. 2001 AEI column "2002 Stud Fee"). Those header
-years are not copied into Year.
+Year is the breeding season the fee is for, read from each file's fee header:
+"1998 Stud Fee / Farm" on the 2001 lists, "'21 Stud Fee / Farm" on the 2020
+lists, "2002 Stud Fee" on the 2001 AEI list. The list year goes in Notes
+("list year 2001"). The 2006 headers give no season; those files were dated
+against Racing Post (the list year) except the First Crop list, whose match
+was unclear, so its fees are left out as N/A ({stats['fees_without_season']:,} fees).
 
 Combined "Stud Fee / Farm" cells (newline- or space-separated) were split:
   $60,000 + WinStar Farm, KY  ->  Stud Fee=$60,000, Farm=WinStar Farm, KY

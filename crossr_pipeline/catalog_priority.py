@@ -123,6 +123,7 @@ HASH_FIELDS = ("HIP", "NAME", "SEX", "SIRE", "DAM", "SIRE OF DAM", "YEAR OF BIRT
                "SOLD AS DESCRIPTION")
 STALE_DAYS = 30
 CHECK_EVERY_S = 300
+PUSH_EVERY_S = 30 * 60  # catalog work reaches Postgres (and the site) at least this often
 JOB_ITEMS = "catalog-items"
 
 
@@ -192,13 +193,12 @@ def sort_key(row: dict) -> tuple:
 # ---------------------------------------------------------------------------
 
 class Assessor:
-    def __init__(self, conn, index: dict, names: set[str]):
+    """``db`` is pgdb or the local stage, ``conn`` its connection."""
+
+    def __init__(self, db, conn, index: dict, names: set[str]):
         self.index = index
         self.rows: dict[str, list[dict]] = {}
-        for row in conn.execute(
-            "SELECT id, name_key, display_name, foal_year, sire, dam, status, fetched_at, profile_url "
-            "FROM race_horses WHERE name_key = ANY(%s)", (sorted(names),)
-        ):
+        for row in db.rows_by_name_keys(conn, names):
             self.rows.setdefault(row["name_key"], []).append(row)
 
     def horse(self, item: dict) -> dict:
@@ -248,19 +248,40 @@ def ensure(conn) -> None:
     conn.execute(VIEWS)
 
 
-def catalog_rows(conn, catalog_id: str) -> list[dict]:
-    return [r["data"] for r in conn.execute(
-        "SELECT data FROM upcoming_catalog_rows WHERE catalog_id = %s ORDER BY row_no", (catalog_id,)
-    )]
+def catalog_rows(conn, catalog_id: str, local=None) -> list[dict]:
+    """A catalog's rows. With ``local`` (the stage), read from Postgres only
+    when the catalog's updated_at has changed since the last read."""
+    def read():
+        return [r["data"] for r in conn.execute(
+            "SELECT data FROM upcoming_catalog_rows WHERE catalog_id = %s ORDER BY row_no", (catalog_id,)
+        )]
+
+    if local is None:
+        return read()
+    from crossr_pipeline import stage
+
+    version = conn.execute("SELECT updated_at::text AS v FROM upcoming_catalogs WHERE id = %s",
+                           (catalog_id,)).fetchone()
+    return stage.cached(local, f"catalog_rows:{catalog_id}", version["v"] if version else "", read)
 
 
-def sync(conn) -> list[str]:
-    """Queue new or changed hips of every upcoming catalog. Returns catalogs with work."""
+def sync(conn, local=None) -> list[str]:
+    """Queue new or changed hips of every upcoming catalog. Returns catalogs with work.
+
+    With ``local``, a catalog whose updated_at is the one already synced is
+    skipped without reading its rows (the check runs every few minutes).
+    """
     ensure(conn)
     queued = []
-    for cat in conn.execute("SELECT id FROM upcoming_catalogs WHERE source = 'upcoming' ORDER BY id").fetchall():
+    for cat in conn.execute("SELECT id, updated_at::text AS v FROM upcoming_catalogs WHERE source = 'upcoming' "
+                            "ORDER BY id").fetchall():
         cid = cat["id"]
-        rows = catalog_rows(conn, cid)
+        if local is not None:
+            from crossr_pipeline import stage
+
+            if stage.meta_get(local, f"catalog_synced:{cid}") == cat["v"]:
+                continue
+        rows = catalog_rows(conn, cid, local)
         known = {r["hip"]: r["row_hash"] for r in conn.execute(
             "SELECT hip, row_hash FROM crossr_catalog_hips WHERE catalog_id = %s", (cid,))}
         current = {}
@@ -275,6 +296,8 @@ def sync(conn) -> list[str]:
                 book, session, hip_no = sort_key(row)
                 changed.append((cid, hip, digest, book, session, hip_no))
         gone = set(known) - set(current)
+        if local is not None:
+            stage.meta_set(local, f"catalog_synced:{cid}", cat["v"])
         if not changed and not gone:
             continue
         with conn.transaction():
@@ -308,42 +331,77 @@ def sync(conn) -> list[str]:
 # run one catalog
 # ---------------------------------------------------------------------------
 
-def _dam_known_foals(conn, rows: list[dict]) -> dict[str, int]:
+def _dam_known_foals(db, conn, rows: list[dict]) -> dict[str, int]:
     dams = sorted({clean_name(r.get("DAM") or "") for r in rows} - {""})
     counts: Counter = Counter()
-    for row in conn.execute(
-        "SELECT upper(dam) AS dam, count(*) AS n FROM race_horses WHERE status = 'ok' AND upper(dam) = ANY(%s) GROUP BY 1",
-        (dams,),
-    ):
+    for row in db.ok_dam_counts(conn, dams):
         counts[clean_name(row["dam"])] += row["n"]
     return counts
 
 
-def _write_hip(conn, cid: str, hip: str, result: dict, foals: int, detail: str = "") -> None:
-    conn.execute(
-        "UPDATE crossr_catalog_hips SET status = %s, pedigree_ok = %s, dam_record_ok = %s, horse_record_ok = %s, "
-        "dam_known_foals = %s, detail = %s, updated_at = now() WHERE catalog_id = %s AND hip = %s",
-        (result["status"], result["pedigree_ok"], result["dam_record_ok"], result["horse_record_ok"],
-         foals, (detail or ", ".join(result["needs"]))[:500], cid, hip),
-    )
+def _hip_values(cid: str, hip: str, result: dict, foals: int, detail: str = "") -> tuple:
+    return (result["status"], result["pedigree_ok"], result["dam_record_ok"], result["horse_record_ok"],
+            foals, (detail or ", ".join(result["needs"]))[:500], cid, hip)
 
 
-def run_catalog(eb, page, conn, book, delay: float, cid: str, limit: int | None = None) -> dict:
-    """Scrape what a catalog's queued hips are missing, in book/session/hip order."""
-    from crossr_pipeline import scrape
+def _write_hips(conn, values: list[tuple]) -> None:
+    if not values:
+        return
+    with conn.cursor() as cur:
+        cur.executemany(
+            "UPDATE crossr_catalog_hips SET status = %s, pedigree_ok = %s, dam_record_ok = %s, horse_record_ok = %s, "
+            "dam_known_foals = %s, detail = %s, updated_at = now() WHERE catalog_id = %s AND hip = %s",
+            values,
+        )
 
+
+class _HipWriter:
+    """Hip statuses wait until the data behind them is pushed: every
+    PUSH_EVERY_S the stage is pushed, then the waiting statuses are written."""
+
+    def __init__(self, conn, local):
+        self.conn, self.local = conn, local
+        self.waiting: list[tuple] = []
+        self.last = time.monotonic()
+
+    def add(self, values: tuple) -> None:
+        self.waiting.append(values)
+        if time.monotonic() - self.last >= PUSH_EVERY_S:
+            self.flush()
+
+    def flush(self) -> None:
+        from crossr_pipeline import stage
+
+        if self.local is not None:
+            stage.push(self.local, self.conn)
+        _write_hips(self.conn, self.waiting)
+        self.waiting = []
+        self.last = time.monotonic()
+
+
+def run_catalog(eb, page, conn, book, delay: float, cid: str, limit: int | None = None, local=None,
+                budget_s: float | None = None) -> dict:
+    """Scrape what a catalog's queued hips are missing, in book/session/hip order.
+
+    ``conn`` is Postgres (catalog tables); ``local`` the stage that the scraper
+    reads and writes (Postgres itself when None). Stops after ``budget_s``.
+    """
+    from crossr_pipeline import scrape, stage
+
+    db, data = (stage, local) if local is not None else (eb.db, conn)
     ensure(conn)
-    rows = {str(r.get("HIP") or "").strip(): r for r in catalog_rows(conn, cid)}
+    rows = {str(r.get("HIP") or "").strip(): r for r in catalog_rows(conn, cid, local)}
     todo = [r["hip"] for r in conn.execute(
         "SELECT hip FROM crossr_catalog_hips WHERE catalog_id = %s AND status = 'updating' "
         "ORDER BY book NULLS LAST, session NULLS LAST, hip_no", (cid,))]
-    foals = _dam_known_foals(conn, [rows[h] for h in todo if h in rows])
+    foals = _dam_known_foals(db, data, [rows[h] for h in todo if h in rows])
 
     # First pass, no page loads: settle every hip the database already covers,
     # so only real work stays "updating".
-    assessor = Assessor(conn, book.index, {i["name_key"] for h in todo if h in rows for i in hip_horses(rows[h])})
+    assessor = Assessor(db, data, book.index, {i["name_key"] for h in todo if h in rows for i in hip_horses(rows[h])})
     need = []
     settled = Counter()
+    first = []
     for hip in todo:
         if hip not in rows:
             continue
@@ -351,8 +409,11 @@ def run_catalog(eb, page, conn, book, delay: float, cid: str, limit: int | None 
         if result["status"] == "updating":
             need.append(hip)
         else:
-            _write_hip(conn, cid, hip, result, foals.get(clean_name(rows[hip].get("DAM") or ""), 0))
+            first.append(_hip_values(cid, hip, result, foals.get(clean_name(rows[hip].get("DAM") or ""), 0)))
             settled[result["status"]] += 1
+    writer = _HipWriter(conn, local)
+    writer.waiting = first
+    writer.flush()
     conn.execute("UPDATE crossr_catalog_jobs SET hips_to_scrape = %s WHERE catalog_id = %s", (len(need), cid))
     print(f"catalog {cid}: {len(todo)} hips checked, {dict(settled)} already settled, {len(need)} to scrape", flush=True)
     todo = need[:limit] if limit else need
@@ -371,14 +432,19 @@ def run_catalog(eb, page, conn, book, delay: float, cid: str, limit: int | None 
     started = time.monotonic()
     done_items: dict[str, tuple[str, str]] = {}
     hips_scraped = 0
+    worked = 0
     try:
         for n, hip in enumerate(todo, start=1):
+            if budget_s is not None and time.monotonic() - started >= budget_s:
+                print(f"catalog {cid}: batch time is up after {n - 1} hips", flush=True)
+                break
+            worked = n
             row = rows.get(hip)
             if row is None:
                 continue
-            before = assess_hip(Assessor(conn, book.index, {i["name_key"] for i in hip_horses(row)}), row)
+            before = assess_hip(Assessor(db, data, book.index, {i["name_key"] for i in hip_horses(row)}), row)
             if before["status"] == "complete":
-                _write_hip(conn, cid, hip, before, foals.get(clean_name(row.get("DAM") or ""), 0))
+                writer.add(_hip_values(cid, hip, before, foals.get(clean_name(row.get("DAM") or ""), 0)))
                 run.bump("already complete")
                 continue
             hips_scraped += 1
@@ -390,21 +456,21 @@ def run_catalog(eb, page, conn, book, delay: float, cid: str, limit: int | None 
                 if check["stale"] and check["row"] and check["row"].get("profile_url"):
                     result = scrape._with_block_retry(
                         eb, page, run, dict(check["row"]),
-                        lambda: scrape.refresh_one(eb, page, conn, dict(check["row"]), delay))
+                        lambda: scrape.refresh_one(eb, page, data, dict(check["row"]), delay))
                     done_items[item["key"]] = (result, "refreshed")
                     continue
                 try:
                     done_items[item["key"]] = scrape._with_block_retry(
                         eb, page, run, {"display_name": item["name"], "pedigree_key": item["name_key"]},
-                        lambda: scrape.process_item(eb, page, conn, book, item, delay))
+                        lambda: scrape.process_item(eb, page, data, book, item, delay))
                 except Exception as exc:
                     done_items[item["key"]] = ("error", f"{exc.__class__.__name__}: {exc}"[:200])
-                state.mark_item(conn, JOB_ITEMS, item["key"], *done_items[item["key"]])
-            after = assess_hip(Assessor(conn, book.index, {i["name_key"] for i in hip_horses(row)}), row)
+                (stage if local is not None else state).mark_item(data, JOB_ITEMS, item["key"], *done_items[item["key"]])
+            after = assess_hip(Assessor(db, data, book.index, {i["name_key"] for i in hip_horses(row)}), row)
             if after["status"] == "updating":
                 results = [done_items.get(i["key"], ("", ""))[0] for i in hip_horses(row) if i["part"] in after["needs"]]
                 after["status"] = "not_found" if any(r in ("not_found", "ambiguous", "year_mismatch") for r in results) else "partial"
-            _write_hip(conn, cid, hip, after, foals.get(clean_name(row.get("DAM") or ""), 0))
+            writer.add(_hip_values(cid, hip, after, foals.get(clean_name(row.get("DAM") or ""), 0)))
             run.bump(f"hips {after['status']}")
             run.bump("page loads", loads["n"] - loads_before)
             print(f"[catalog {n}/{len(todo)}] hip {hip}: {before['status']} -> {after['status']} "
@@ -417,11 +483,13 @@ def run_catalog(eb, page, conn, book, delay: float, cid: str, limit: int | None 
                              "WHERE catalog_id = %s", (n, loads["n"], cid))
     except BaseException as exc:
         run.finish("partial", f"stopped: {exc}")
+        writer.flush()
         conn.execute("UPDATE crossr_catalog_jobs SET status = 'queued', page_loads = %s "
                      "WHERE catalog_id = %s", (loads["n"], cid))
         raise
     finally:
         eb.polite_wait = real_wait
+    writer.flush()
     left = conn.execute("SELECT count(*) AS n FROM crossr_catalog_hips WHERE catalog_id = %s AND status = 'updating'",
                         (cid,)).fetchone()["n"]
     minutes = (time.monotonic() - started) / 60
@@ -429,8 +497,8 @@ def run_catalog(eb, page, conn, book, delay: float, cid: str, limit: int | None 
     conn.execute(
         "UPDATE crossr_catalog_jobs SET status = %s, hips_done = hips_done + %s, "
         "page_loads = %s, completed_at = CASE WHEN %s = 'complete' THEN now() END, detail = %s WHERE catalog_id = %s",
-        (status, len(todo), loads["n"], status,
-         f"{hips_scraped} of {len(todo)} hips scraped, {loads['n']} pages, {minutes:.0f} min", cid),
+        (status, worked, loads["n"], status,
+         f"{hips_scraped} of {worked} hips scraped, {loads['n']} pages, {minutes:.0f} min", cid),
     )
     run.finish("ok" if status == "complete" else "partial", f"{hips_scraped} hips scraped in {minutes:.0f} min")
     if status == "complete":
@@ -438,26 +506,41 @@ def run_catalog(eb, page, conn, book, delay: float, cid: str, limit: int | None 
         precompute("--full", cid)
     elif hips_scraped:
         precompute("--rescraped", cid)
-    return {"checked": len(todo), "scraped": hips_scraped, "page_loads": loads["n"], "minutes": round(minutes, 1),
+    return {"checked": worked, "scraped": hips_scraped, "page_loads": loads["n"], "minutes": round(minutes, 1),
             "left": left}
 
 
 class Hook:
-    """Called between items of the normal queue; runs queued catalogs first."""
+    """Called between items of the normal queue; runs queued catalogs first.
 
-    def __init__(self, eb, page, conn, book, delay: float, limit: int | None = None):
+    ``deadline`` (time.monotonic) ends catalog work with the batch; ``left``
+    then counts hips still waiting, so the caller can start the next batch.
+    """
+
+    def __init__(self, eb, page, conn, book, delay: float, limit: int | None = None, local=None,
+                 deadline: float | None = None):
         self.args = (eb, page, conn, book, delay)
         self.limit = limit
+        self.local = local
+        self.deadline = deadline
         self.last = 0.0
+        self.left = 0
 
     def __call__(self, force: bool = False) -> None:
         if not force and time.monotonic() - self.last < CHECK_EVERY_S:
             return
         self.last = time.monotonic()
         eb, page, conn, book, delay = self.args
-        for cid in sync(conn):
+        self.left = 0
+        for cid in sync(conn, self.local):
+            budget = None if self.deadline is None else self.deadline - time.monotonic()
+            if budget is not None and budget <= 0:
+                self.left += 1
+                continue
             print(f"Pausing the queue for catalog {cid}", flush=True)
-            print(run_catalog(eb, page, conn, book, delay, cid, self.limit), flush=True)
+            result = run_catalog(eb, page, conn, book, delay, cid, self.limit, local=self.local, budget_s=budget)
+            print(result, flush=True)
+            self.left += result["left"]
 
 
 # ---------------------------------------------------------------------------
@@ -471,10 +554,12 @@ def report(conn, cid: str, book_index: dict | None = None) -> dict:
         from equibase_scraper.pedigree_fill import build_ancestor_index
 
         book_index = build_ancestor_index(pgdb.load_pedigree_map(conn))
+    from equibase_scraper import pgdb
+
     rows = catalog_rows(conn, cid)
     names = {i["name_key"] for r in rows for i in hip_horses(r)}
-    assessor = Assessor(conn, book_index, names)
-    foals = _dam_known_foals(conn, rows)
+    assessor = Assessor(pgdb, conn, book_index, names)
+    foals = _dam_known_foals(pgdb, conn, rows)
     out = Counter()
     incomplete = []
     for row in rows:
