@@ -7,6 +7,7 @@ import { apiGet, horseHref } from "../../../lib/api";
 import { isStarred, toggleStar, saveFavorite } from "../../../lib/barn";
 import PedigreeChart from "../../../components/PedigreeChart";
 import FemaleFamily from "../../../components/FemaleFamily";
+import StallionSalesPanel from "../../../components/StallionSalesPanel";
 import {
   horseHrefWithReturn,
   rememberSalesVisit,
@@ -905,6 +906,8 @@ function HorsePage() {
         ) : null}
 
         {BREEDING_TYPES.has(cls.profile_type) ? <BreedingPanel panel={breeding} hrefFor={hrefFor} /> : null}
+
+        {isStallion ? <StallionSalesPanel name={data.name} hrefFor={hrefFor} /> : null}
 
         {isStallion ? (
         <div className="panel">

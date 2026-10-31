@@ -453,3 +453,143 @@ def auctions_for_horses(crosses, limit=40):
         -(item["price_num"] or 0),
     ))
     return out[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Stallion sales panel
+# ---------------------------------------------------------------------------
+
+def lot_type(sale_year, birth_year, sex_letter):
+    """Horse type from age at sale: Weanling, Yearling, Two-Year-Old, Mare/Broodmare, Horse."""
+    try:
+        age = int(sale_year) - int(birth_year)
+    except (TypeError, ValueError):
+        return "Unknown"
+    if age <= 0:
+        return "Weanling"
+    if age == 1:
+        return "Yearling"
+    if age == 2:
+        return "Two-Year-Old"
+    return "Mare / Broodmare" if (sex_letter or "").upper() in ("F", "M") else "Horse of Racing Age"
+
+
+def lot_status(price, is_rna, is_out):
+    if is_out:
+        return "out"
+    if is_rna or not price or price <= 0:
+        return "not sold"
+    return "sold"
+
+
+def _price_stats(prices):
+    prices = sorted(p for p in prices if p and p > 0)
+    if not prices:
+        return {"sold": 0, "average": None, "median": None, "high": None, "gross": 0}
+    n = len(prices)
+    mid = prices[n // 2] if n % 2 else (prices[n // 2 - 1] + prices[n // 2]) / 2
+    return {"sold": n, "average": round(sum(prices) / n), "median": round(mid), "high": round(prices[-1]),
+            "gross": round(sum(prices))}
+
+
+CATEGORIES = {"yearlings": ("Yearling",), "weanlings": ("Weanling",), "all": None}
+
+
+def sire_sales_summary(sire_name, entered_stud=None, catalog_id=None, today=None):
+    """Everything the stallion sales panel needs, from the sales index.
+
+    - Periods: current year (to date), latest completed year (today.year - 1),
+      last three completed years, lifetime. Averages use sold lots only; RNAs
+      count as not sold and outs are excluded.
+    - Lots foaled before the stallion entered stud belong to a namesake and are
+      dropped.
+    - ``catalog_id`` selects one sale for the per-sale stats and horse list
+      (default: his most recent sale).
+    """
+    import datetime as _dt
+
+    today = today or _dt.date.today()
+    current_year = today.year
+    latest_done = current_year - 1
+    key = sales_history.clean_search_string(sire_name)
+    conn = connect()
+    if conn is None:
+        return {"lots_total": 0, "sales": [], "by_year": [], "summary": {}}
+    try:
+        rows = conn.execute(
+            LOT_SELECT + f" WHERE l.sire_key = ? ORDER BY c.year DESC, c.month_index DESC, {HIP_NUM}",
+            [key],
+        ).fetchall()
+    finally:
+        conn.close()
+
+    lots = []
+    for r in rows:
+        try:
+            born = int(str(r.get("birth_year") or "").strip())
+        except ValueError:
+            born = None
+        if entered_stud and born and born <= int(entered_stud):
+            continue  # conceived before he stood: a namesake's foal
+        price = float(r.get("price_num") or 0)
+        lots.append({
+            "id": r["id"], "catalog_id": r["catalog_id"], "year": r["year"], "sale": r["sale_title"],
+            "month_index": r.get("month_index") or 0, "hip": r.get("hip"), "name": r.get("name"),
+            "sex": r.get("sex_letter") or r.get("sex"), "dam": r.get("dam"), "damsire": r.get("damsire"),
+            "type": lot_type(r["year"], born, r.get("sex_letter")),
+            "status": lot_status(price, r.get("is_rna"), r.get("is_out")),
+            "price": round(price) if price > 0 else None, "price_raw": r.get("price_raw"),
+            "purchaser": r.get("purchaser"), "consignor": r.get("consignor"),
+        })
+
+    def stats(pool):
+        offered = [l for l in pool if l["status"] != "out"]
+        out = _price_stats(l["price"] for l in offered if l["status"] == "sold")
+        out["offered"] = len(offered)
+        return out
+
+    def by_category(pool):
+        return {cat: stats([l for l in pool if types is None or l["type"] in types]) for cat, types in CATEGORIES.items()}
+
+    periods = {
+        "current": [l for l in lots if l["year"] == current_year],
+        "latest": [l for l in lots if l["year"] == latest_done],
+        "last3": [l for l in lots if latest_done - 2 <= l["year"] <= latest_done],
+        "lifetime": lots,
+    }
+    summary = {cat: {p: by_category(pool)[cat] for p, pool in periods.items()} for cat in CATEGORIES}
+
+    by_year = []
+    if lots:
+        for y in range(min(l["year"] for l in lots), max(l["year"] for l in lots) + 1):
+            pool = [l for l in lots if l["year"] == y]
+            cats = by_category(pool)
+            by_year.append({"year": y, "complete": y <= latest_done,
+                            **{f"{c}_avg": cats[c]["average"] for c in CATEGORIES},
+                            **{f"{c}_sold": cats[c]["sold"] for c in CATEGORIES}})
+
+    sales = {}
+    for l in lots:
+        s = sales.setdefault(l["catalog_id"], {"catalog_id": l["catalog_id"], "year": l["year"], "title": l["sale"],
+                                                "month_index": l["month_index"], "pool": []})
+        s["pool"].append(l)
+    sale_list = []
+    for s in sales.values():
+        st = stats(s.pop("pool"))
+        if st["offered"]:
+            sale_list.append({**s, "progeny": st["offered"], "sold": st["sold"], "average": st["average"]})
+    sale_list.sort(key=lambda s: (-s["year"], -(s["month_index"] or 0), s["title"]))
+
+    selected = catalog_id or (sale_list[0]["catalog_id"] if sale_list else None)
+    sale_lots = [l for l in lots if l["catalog_id"] == selected]
+    return {
+        "current_year": current_year,
+        "latest_completed_year": latest_done,
+        "lots_total": len(lots),
+        "summary": summary,
+        "by_year": by_year,
+        "sales": sale_list,
+        "selected_catalog_id": selected,
+        "sale_stats": by_category(sale_lots) if sale_lots else None,
+        "sale_lots": sale_lots,
+    }
