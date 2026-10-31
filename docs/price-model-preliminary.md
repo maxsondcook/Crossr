@@ -112,16 +112,6 @@ Feature coverage (share of eligible sales with a value):
 | X_interactions | x_sirefee_damrel | 85.0% |
 | X_interactions | x_sirefee_bmsfee | 47.8% |
 
-## Leakage check
-
-Features for a sale year rebuilt from source tables cut off at that year (later fees, races, rankings, sales and this year's prices removed) and compared with the full build:
-
-| year | rows | features | mismatched_features | mismatched_cells |
-|---|---|---|---|---|
-| 2,012 | 400 | 74 | none | 0 |
-| 2,018 | 400 | 74 | none | 0 |
-| 2,024 | 400 | 74 | none | 0 |
-
 ## Validation design
 
 Time-based: train ≤ 2018, early stopping 2019–2020, interval calibration 2021–2022, test 2023–2025. Sold lots only (RNAs are censored and kept for the Tobit model in docs/sales-model.md). Group-aware check: test sales whose dam had no sale in the training years.
@@ -135,15 +125,15 @@ Time-based: train ≤ 2018, early stopping 2019–2020, interval calibration 202
 | baseline: sire_year_median | 20,760 | 0.322 |  | 0.969 | 1.246 | 0.783 | 1.231 | 67% | 35,000 |
 | baseline: comparable_sales | 20,760 | 0.335 |  | 0.959 | 1.233 | 0.771 | 1.214 | 67% | 35,217 |
 | baseline: regression (sire fee + sex + age + sale level) | 20,760 | 0.386 | 0.385 | 0.944 | 1.185 | 0.800 | 1.184 | 64% | 30,342 |
-| ridge (all features): train | 124,401 | 0.550 | 0.550 | 0.833 | 1.054 | 0.695 | 1.054 | 59% | 14,992 |
-| ridge (all features): valid | 12,392 | 0.568 | 0.564 | 0.838 | 1.066 | 0.688 | 1.059 | 60% | 16,908 |
-| ridge (all features): test | 20,760 | 0.572 | 0.570 | 0.779 | 0.989 | 0.646 | 0.986 | 55% | 24,374 |
-| lightgbm (all features): train | 124,401 | 0.660 |  | 0.720 | 0.916 | 0.600 | 0.916 | 53% | 13,019 |
-| lightgbm (all features): valid | 12,392 | 0.600 |  | 0.805 | 1.026 | 0.663 | 1.025 | 58% | 15,893 |
-| lightgbm (all features): calib | 13,573 | 0.566 |  | 0.750 | 0.943 | 0.631 | 0.921 | 54% | 20,866 |
-| lightgbm (all features): test | 20,760 | 0.570 |  | 0.775 | 0.992 | 0.632 | 0.992 | 55% | 26,594 |
-| lightgbm: test, dams unseen in training | 15,033 | 0.573 |  | 0.776 | 0.995 | 0.630 | 0.995 | 55% | 26,593 |
-| lightgbm: test, dams seen in training | 5,727 | 0.562 |  | 0.772 | 0.982 | 0.638 | 0.982 | 55% | 26,597 |
+| ridge (all features): train | 124,401 | 0.550 | 0.550 | 0.833 | 1.054 | 0.695 | 1.054 | 59% | 14,994 |
+| ridge (all features): valid | 12,392 | 0.568 | 0.564 | 0.838 | 1.066 | 0.688 | 1.059 | 60% | 16,912 |
+| ridge (all features): test | 20,760 | 0.572 | 0.570 | 0.779 | 0.989 | 0.646 | 0.986 | 55% | 24,354 |
+| lightgbm (all features): train | 124,401 | 0.661 |  | 0.720 | 0.915 | 0.599 | 0.915 | 53% | 13,023 |
+| lightgbm (all features): valid | 12,392 | 0.599 |  | 0.806 | 1.027 | 0.667 | 1.026 | 58% | 15,966 |
+| lightgbm (all features): calib | 13,573 | 0.562 |  | 0.753 | 0.946 | 0.632 | 0.925 | 54% | 21,099 |
+| lightgbm (all features): test | 20,760 | 0.574 |  | 0.771 | 0.987 | 0.630 | 0.987 | 55% | 26,597 |
+| lightgbm: test, dams unseen in training | 15,033 | 0.577 |  | 0.772 | 0.991 | 0.629 | 0.990 | 55% | 26,557 |
+| lightgbm: test, dams seen in training | 5,727 | 0.565 |  | 0.770 | 0.979 | 0.634 | 0.979 | 55% | 26,764 |
 
 Adjusted R² is shown for the linear models only; for gradient boosting the parameter count is not meaningful, so out-of-sample R² on later years is the measure.
 
@@ -151,23 +141,54 @@ Adjusted R² is shown for the linear models only; for gradient boosting the para
 
 | method | coverage | mean_width_log | median_width_ratio |
 |---|---|---|---|
-| group-normalized conformal | 79.1% | 2.425 | 10.61 |
-| single-width conformal | 79.3% | 2.424 | 11.29 |
+| group-normalized conformal | 79.6% | 2.433 | 10.61 |
+| single-width conformal | 79.6% | 2.432 | 11.38 |
+| conformalized quantile regression | 80.9% | 2.535 | 13.35 |
 
 Width ratio = upper / lower bound in dollars. Group-normalized intervals are wider where the model has erred more on held-out sales (new sire, unproven dam, missing fee):
 
 | segment | median |error| (log) |
 |---|---|
-| Y|sire_few|dam_unproven|nofee | 0.792 |
-| Y|sire_few|dam_unproven|fee | 0.777 |
-| Y|sire_few|dam_sold_before|fee | 0.709 |
-| Y|sire_few|dam_sold_before|nofee | 0.681 |
-| Y|sire_many|dam_sold_before|nofee | 0.672 |
-| Y|sire_many|dam_unproven|fee | 0.648 |
-| Y|sire_many|dam_sold_before|fee | 0.619 |
-| W|sire_new|dam_sold_before|fee | 0.566 |
-| W|sire_many|dam_unproven|fee | 0.549 |
-| W|sire_many|dam_sold_before|fee | 0.533 |
+| Y|sire_few|dam_unproven|nofee | 0.803 |
+| Y|sire_few|dam_unproven|fee | 0.802 |
+| Y|sire_few|dam_sold_before|fee | 0.711 |
+| Y|sire_few|dam_sold_before|nofee | 0.675 |
+| Y|sire_many|dam_sold_before|nofee | 0.662 |
+| Y|sire_many|dam_unproven|fee | 0.654 |
+| Y|sire_many|dam_sold_before|fee | 0.618 |
+| W|sire_new|dam_sold_before|fee | 0.582 |
+| W|sire_many|dam_sold_before|fee | 0.544 |
+| W|sire_many|dam_unproven|fee | 0.524 |
+
+By the price the model predicted (the honest view of interval width: grouping by the actual price conditions on the outcome, so extreme actual prices always look under-covered):
+
+| predicted price band | n | conformal coverage | conformal median_width_ratio | CQR coverage | CQR median_width_ratio |
+|---|---|---|---|---|---|
+| $10-50k | 8,126 | 76.0% | 10.61 | 82.8% | 18.16 |
+| $150-500k | 2,843 | 88.8% | 10.61 | 79.7% | 6.74 |
+| $50-150k | 7,323 | 81.0% | 10.61 | 79.2% | 9.70 |
+| $500k+ | 195 | 90.3% | 10.61 | 80.5% | 6.47 |
+| <$10k | 2,273 | 75.1% | 10.61 | 80.6% | 17.53 |
+
+## Interaction search (Phase 12.4, ridge, one product term at a time)
+
+| interaction | rows with both | held-out r2 gain | t (train) |
+|---|---|---|---|
+| log_sire_fee_conception x weanling | 103,283 | +0.0025 | 5.2 |
+| dam_pedigree_completeness x weanling | 124,401 | +0.0013 | 4.8 |
+| log_sire_fee_conception x dam_rel | 103,283 | +0.0005 | -4.2 |
+| log_sire_fee_conception x dam_starts | 49,982 | +0.0005 | -1.1 |
+| dam_starts x dam_pedigree_completeness | 57,226 | +0.0003 | -3.2 |
+| log_sire_fee_conception x log_bms_fee_highest | 49,313 | +0.0001 | 0.7 |
+| sire_rel x damsire_rel | 124,401 | +0.0001 | -2.9 |
+| dam_rel x damsire_rel | 124,401 | +0.0000 | -5.4 |
+| log_sire_fee_conception x filly | 103,283 | +0.0000 | 0.3 |
+| filly x weanling | 124,401 | +0.0000 | 2.4 |
+| sire_trend x market_trend | 84,785 | -0.0001 | -5.7 |
+| log_bms_fee_highest x bms_trend | 27,435 | -0.0003 | -0.5 |
+| sale_level x log_sire_fee_conception | 103,283 | -0.0003 | 3.5 |
+
+Gradient boosting already models interactions; a term is worth keeping in an interpretable model only if it raises held-out R2, not just when its training t-stat is large.
 
 ## Performance by segment (test years, LightGBM)
 
@@ -175,108 +196,108 @@ Width ratio = upper / lower bound in dollars. Group-normalized intervals are wid
 
 | sale_year | n | r2 | mae | bias | median_abs_pct | coverage | mean_width_log | median_width_ratio |
 |---|---|---|---|---|---|---|---|---|
-| 2023.000 | 6547.000 | 0.567 | 0.768 | -0.041 | 54% | 79.2% | 2.418 | 10.61 |
-| 2024.000 | 6412.000 | 0.587 | 0.771 | -0.065 | 55% | 78.6% | 2.401 | 10.61 |
-| 2025.000 | 7801.000 | 0.551 | 0.783 | 0.030 | 55% | 79.3% | 2.450 | 10.61 |
+| 2023.000 | 6547.000 | 0.569 | 0.767 | -0.039 | 54% | 79.6% | 2.427 | 10.61 |
+| 2024.000 | 6412.000 | 0.590 | 0.767 | -0.071 | 55% | 79.3% | 2.410 | 10.61 |
+| 2025.000 | 7801.000 | 0.556 | 0.779 | 0.033 | 55% | 79.7% | 2.458 | 10.61 |
 
 ### venue
 
 | venue | n | r2 | mae | bias | median_abs_pct | coverage | mean_width_log | median_width_ratio |
 |---|---|---|---|---|---|---|---|---|
-| fasig_tipton | 7,058 | 0.571 | 0.796 | 0.117 | 55% | 78.3% | 2.446 | 10.61 |
-| keeneland | 13,702 | 0.553 | 0.764 | -0.093 | 55% | 79.5% | 2.414 | 10.61 |
+| fasig_tipton | 7,058 | 0.574 | 0.791 | 0.090 | 55% | 78.7% | 2.455 | 10.61 |
+| keeneland | 13,702 | 0.557 | 0.761 | -0.079 | 55% | 80.0% | 2.422 | 10.61 |
 
 ### kind
 
 | kind | n | r2 | mae | bias | median_abs_pct | coverage | mean_width_log | median_width_ratio |
 |---|---|---|---|---|---|---|---|---|
-| W | 2,227 | 0.573 | 0.713 | 0.093 | 51% | 77.3% | 2.160 | 8.12 |
-| Y | 18,533 | 0.568 | 0.782 | -0.035 | 55% | 79.3% | 2.457 | 10.61 |
+| W | 2,227 | 0.572 | 0.715 | 0.096 | 51% | 77.6% | 2.172 | 8.00 |
+| Y | 18,533 | 0.573 | 0.778 | -0.036 | 55% | 79.8% | 2.465 | 10.61 |
 
 ### sex
 
 | sex | n | r2 | mae | bias | median_abs_pct | coverage | mean_width_log | median_width_ratio |
 |---|---|---|---|---|---|---|---|---|
-| colt | 11,353 | 0.571 | 0.769 | -0.015 | 54% | 79.7% | 2.423 | 10.61 |
-| filly | 9,407 | 0.564 | 0.782 | -0.030 | 55% | 78.4% | 2.428 | 10.61 |
+| colt | 11,353 | 0.572 | 0.767 | -0.022 | 54% | 80.0% | 2.431 | 10.61 |
+| filly | 9,407 | 0.571 | 0.777 | -0.022 | 55% | 79.0% | 2.436 | 10.61 |
 
 ### price_band
 
 | price_band | n | r2 | mae | bias | median_abs_pct | coverage | mean_width_log | median_width_ratio |
 |---|---|---|---|---|---|---|---|---|
-| $10-50k | 7,006 | -2.548 | 0.683 | -0.143 | 55% | 84.9% | 2.431 | 10.61 |
-| $150-500k | 3,807 | -5.988 | 0.713 | 0.630 | 48% | 83.0% | 2.407 | 10.61 |
-| $50-150k | 5,246 | -5.273 | 0.602 | 0.336 | 42% | 87.1% | 2.414 | 10.61 |
-| $500k+ | 800 | -7.342 | 0.961 | 0.957 | 59% | 69.0% | 2.424 | 10.61 |
-| <$10k | 3,901 | -3.926 | 1.193 | -1.121 | 190% | 56.2% | 2.446 | 10.61 |
+| $10-50k | 7,006 | -2.502 | 0.678 | -0.141 | 55% | 85.6% | 2.440 | 10.61 |
+| $150-500k | 3,807 | -5.944 | 0.714 | 0.629 | 49% | 83.2% | 2.414 | 10.61 |
+| $50-150k | 5,246 | -5.185 | 0.599 | 0.335 | 42% | 87.3% | 2.422 | 10.61 |
+| $500k+ | 800 | -7.298 | 0.957 | 0.953 | 59% | 69.8% | 2.431 | 10.61 |
+| <$10k | 3,901 | -3.901 | 1.190 | -1.122 | 188% | 56.8% | 2.455 | 10.61 |
 
 ### fee_known
 
 | fee_known | n | r2 | mae | bias | median_abs_pct | coverage | mean_width_log | median_width_ratio |
 |---|---|---|---|---|---|---|---|---|
-| sire fee known | 18,834 | 0.573 | 0.772 | -0.018 | 55% | 79.0% | 2.411 | 10.61 |
-| sire fee missing | 1,926 | 0.501 | 0.803 | -0.053 | 58% | 79.6% | 2.566 | 13.00 |
+| sire fee known | 18,834 | 0.578 | 0.768 | -0.021 | 54% | 79.6% | 2.421 | 10.61 |
+| sire fee missing | 1,926 | 0.501 | 0.808 | -0.028 | 58% | 79.3% | 2.556 | 12.56 |
 
 ### dam_record
 
 | dam_record | n | r2 | mae | bias | median_abs_pct | coverage | mean_width_log | median_width_ratio |
 |---|---|---|---|---|---|---|---|---|
-| dam race record found | 10,988 | 0.593 | 0.756 | -0.002 | 53% | 80.1% | 2.420 | 10.61 |
-| no dam race record | 9,772 | 0.530 | 0.797 | -0.044 | 57% | 77.9% | 2.431 | 10.61 |
+| dam race record found | 10,988 | 0.597 | 0.752 | -0.007 | 53% | 80.6% | 2.428 | 10.61 |
+| no dam race record | 9,772 | 0.534 | 0.793 | -0.038 | 57% | 78.4% | 2.440 | 10.61 |
 
 ### bms_fee
 
 | bms_fee | n | r2 | mae | bias | median_abs_pct | coverage | mean_width_log | median_width_ratio |
 |---|---|---|---|---|---|---|---|---|
-| bms fee known | 14,411 | 0.588 | 0.767 | 0.021 | 54% | 79.6% | 2.429 | 10.61 |
-| bms fee missing | 6,349 | 0.526 | 0.792 | -0.118 | 58% | 77.9% | 2.416 | 10.61 |
+| bms fee known | 14,411 | 0.592 | 0.763 | 0.012 | 53% | 80.1% | 2.437 | 10.61 |
+| bms fee missing | 6,349 | 0.530 | 0.791 | -0.098 | 57% | 78.3% | 2.424 | 10.61 |
 
 ### sire (12 most-sold)
 
 | sire | n | r2 | mae | bias | median_abs_pct | coverage | mean_width_log | median_width_ratio |
 |---|---|---|---|---|---|---|---|---|
-| Authentic | 196 | 0.512 | 0.684 | -0.039 | 48% | 83.7% | 2.506 | 11.89 |
-| Into Mischief | 196 | 0.597 | 0.611 | 0.017 | 47% | 86.7% | 2.383 | 10.61 |
-| Liam's Map | 213 | 0.254 | 0.652 | 0.069 | 48% | 87.8% | 2.372 | 10.61 |
-| Maclean's Music | 238 | 0.070 | 0.809 | -0.194 | 59% | 77.3% | 2.346 | 10.61 |
-| McKinzie | 263 | 0.096 | 0.758 | -0.010 | 54% | 78.7% | 2.328 | 10.61 |
-| Munnings | 207 | 0.293 | 0.618 | -0.019 | 46% | 88.4% | 2.366 | 10.61 |
-| Not This Time | 211 | 0.341 | 0.669 | -0.002 | 45% | 81.5% | 2.374 | 10.61 |
-| Omaha Beach | 203 | 0.169 | 0.747 | -0.095 | 51% | 76.8% | 2.339 | 10.61 |
-| Practical Joke | 238 | 0.043 | 0.677 | 0.124 | 49% | 82.4% | 2.344 | 10.61 |
-| Uncle Mo | 225 | 0.257 | 0.689 | -0.205 | 51% | 86.2% | 2.371 | 10.61 |
-| Vekoma | 206 | 0.185 | 0.695 | 0.054 | 48% | 83.0% | 2.341 | 10.61 |
-| Yaupon | 247 | -0.016 | 0.695 | 0.336 | 51% | 82.2% | 2.345 | 10.61 |
+| Authentic | 196 | 0.504 | 0.688 | -0.048 | 48% | 83.7% | 2.517 | 12.15 |
+| Into Mischief | 196 | 0.594 | 0.614 | 0.017 | 47% | 87.2% | 2.389 | 10.61 |
+| Liam's Map | 213 | 0.250 | 0.659 | 0.092 | 48% | 89.7% | 2.378 | 10.61 |
+| Maclean's Music | 238 | 0.090 | 0.795 | -0.185 | 58% | 79.8% | 2.346 | 10.61 |
+| McKinzie | 263 | 0.113 | 0.751 | -0.016 | 53% | 79.8% | 2.330 | 10.61 |
+| Munnings | 207 | 0.318 | 0.607 | 0.007 | 45% | 88.9% | 2.371 | 10.61 |
+| Not This Time | 211 | 0.343 | 0.663 | -0.038 | 45% | 82.9% | 2.378 | 10.61 |
+| Omaha Beach | 203 | 0.149 | 0.753 | -0.106 | 53% | 77.3% | 2.345 | 10.61 |
+| Practical Joke | 238 | 0.036 | 0.678 | 0.119 | 49% | 81.5% | 2.349 | 10.61 |
+| Uncle Mo | 225 | 0.256 | 0.687 | -0.205 | 50% | 86.2% | 2.375 | 10.61 |
+| Vekoma | 206 | 0.184 | 0.698 | 0.072 | 49% | 84.0% | 2.350 | 10.61 |
+| Yaupon | 247 | -0.007 | 0.693 | 0.349 | 52% | 82.6% | 2.354 | 10.61 |
 
 ### broodmare sire (12 most-sold)
 
 | damsire | n | r2 | mae | bias | median_abs_pct | coverage | mean_width_log | median_width_ratio |
 |---|---|---|---|---|---|---|---|---|
-|  | 13,702 | 0.553 | 0.764 | -0.093 | 55% | 79.5% | 2.414 | 10.61 |
-| BERNARDINI | 112 | 0.667 | 0.715 | 0.041 | 52% | 82.1% | 2.407 | 10.61 |
-| CANDY RIDE (ARG) | 111 | 0.439 | 0.847 | 0.104 | 57% | 77.5% | 2.462 | 11.11 |
-| HARD SPUN | 92 | 0.516 | 0.825 | 0.027 | 51% | 76.1% | 2.477 | 11.11 |
-| INTO MISCHIEF | 113 | 0.495 | 0.746 | 0.018 | 50% | 77.9% | 2.521 | 11.89 |
-| MALIBU MOON | 151 | 0.531 | 0.802 | 0.121 | 52% | 76.8% | 2.412 | 10.61 |
-| MEDAGLIA D'ORO | 156 | 0.685 | 0.691 | 0.198 | 50% | 83.3% | 2.426 | 10.61 |
-| MORE THAN READY | 96 | 0.550 | 0.834 | 0.041 | 62% | 77.1% | 2.484 | 11.11 |
-| SPEIGHTSTOWN | 102 | 0.585 | 0.799 | 0.206 | 51% | 75.5% | 2.452 | 10.61 |
-| TAPIT | 158 | 0.600 | 0.845 | 0.189 | 58% | 78.5% | 2.434 | 10.61 |
-| TIZNOW | 103 | 0.547 | 0.869 | 0.170 | 60% | 70.9% | 2.438 | 10.61 |
-| UNCLE MO | 108 | 0.563 | 0.780 | 0.238 | 53% | 78.7% | 2.423 | 10.61 |
+|  | 13,702 | 0.557 | 0.761 | -0.079 | 55% | 80.0% | 2.422 | 10.61 |
+| BERNARDINI | 112 | 0.665 | 0.720 | 0.027 | 52% | 82.1% | 2.417 | 10.61 |
+| CANDY RIDE (ARG) | 111 | 0.449 | 0.838 | 0.074 | 58% | 77.5% | 2.470 | 11.19 |
+| HARD SPUN | 92 | 0.521 | 0.816 | 0.003 | 50% | 77.2% | 2.486 | 11.19 |
+| INTO MISCHIEF | 113 | 0.501 | 0.740 | -0.001 | 50% | 77.9% | 2.539 | 12.15 |
+| MALIBU MOON | 151 | 0.551 | 0.781 | 0.093 | 54% | 77.5% | 2.419 | 10.61 |
+| MEDAGLIA D'ORO | 156 | 0.687 | 0.685 | 0.161 | 49% | 84.6% | 2.431 | 10.61 |
+| MORE THAN READY | 96 | 0.565 | 0.818 | 0.001 | 62% | 77.1% | 2.495 | 11.19 |
+| SPEIGHTSTOWN | 102 | 0.599 | 0.788 | 0.180 | 51% | 73.5% | 2.463 | 10.61 |
+| TAPIT | 158 | 0.604 | 0.842 | 0.147 | 57% | 76.6% | 2.441 | 10.61 |
+| TIZNOW | 103 | 0.554 | 0.860 | 0.133 | 61% | 72.8% | 2.449 | 10.61 |
+| UNCLE MO | 108 | 0.567 | 0.779 | 0.209 | 53% | 78.7% | 2.435 | 10.61 |
 
 ## What each feature group adds (drop one group, refit, score test years)
 
 | group dropped | features | r2 lost (lightgbm) | r2 lost (ridge) | mae added (lightgbm) |
 |---|---|---|---|---|
-| G_horse_sale | 9 | +0.1149 | +0.0943 | +0.0874 |
-| F_progression | 10 | +0.0162 | +0.0951 | +0.0387 |
-| A_sire | 18 | +0.0023 | +0.0163 | +0.0079 |
-| E_pedigree | 2 | +0.0005 | +0.0119 | +0.0068 |
-| B_dam_production | 16 | -0.0069 | +0.0035 | -0.0057 |
-| X_interactions | 2 | -0.0097 | +0.0005 | -0.0066 |
-| D_broodmare_sire | 8 | -0.0134 | +0.0003 | -0.0126 |
-| C_dam_race_record | 9 | -0.0140 | +0.0001 | -0.0095 |
+| G_horse_sale | 9 | +0.1146 | +0.0943 | +0.0877 |
+| F_progression | 10 | +0.0169 | +0.0950 | +0.0396 |
+| A_sire | 18 | +0.0021 | +0.0163 | +0.0069 |
+| E_pedigree | 2 | +0.0010 | +0.0120 | +0.0073 |
+| B_dam_production | 16 | -0.0062 | +0.0035 | -0.0046 |
+| X_interactions | 2 | -0.0102 | +0.0005 | -0.0076 |
+| D_broodmare_sire | 8 | -0.0132 | +0.0003 | -0.0126 |
+| C_dam_race_record | 9 | -0.0134 | +0.0001 | -0.0092 |
 
 Positive = the group helps on later years. Small negatives are noise: those features are redundant with others, not harmful.
 
@@ -284,50 +305,50 @@ Positive = the group helps on later years. Small negatives are noise: those feat
 
 | broodmare-sire fee used | test r2 | test mae |
 |---|---|---|
-| none | 0.598 | 0.751 |
-| highest | 0.581 | 0.764 |
-| latest | 0.583 | 0.763 |
-| at conception | 0.583 | 0.763 |
+| none | 0.599 | 0.751 |
+| highest | 0.582 | 0.764 |
+| latest | 0.582 | 0.764 |
+| at conception | 0.582 | 0.764 |
 
 ## Main contributing features (mean |SHAP| on test sales, log-price units)
 
 | group | mean |SHAP| |
 |---|---|
-| F_progression | 0.704 |
+| F_progression | 0.692 |
+| A_sire | 0.596 |
 | G_horse_sale | 0.594 |
-| A_sire | 0.589 |
-| B_dam_production | 0.206 |
-| E_pedigree | 0.118 |
-| D_broodmare_sire | 0.066 |
+| B_dam_production | 0.208 |
+| E_pedigree | 0.115 |
+| D_broodmare_sire | 0.063 |
 | X_interactions | 0.015 |
 | C_dam_race_record | 0.009 |
 
 | feature | mean |SHAP| |
 |---|---|
-| sale_level | 0.427 |
-| log_sire_fee_latest | 0.358 |
-| hip_signal | 0.198 |
-| sire_last_year_median_lp | 0.171 |
-| hip_pct | 0.158 |
-| sale_month_f | 0.121 |
-| dam_pedigree_completeness | 0.098 |
-| dam_rel | 0.087 |
-| filly | 0.073 |
-| dam_foals_before | 0.040 |
-| sire_rel | 0.033 |
-| bms_fee_years_listed | 0.033 |
+| sale_level | 0.420 |
+| log_sire_fee_latest | 0.363 |
+| hip_signal | 0.194 |
+| sire_last_year_median_lp | 0.168 |
+| hip_pct | 0.163 |
+| sale_month_f | 0.117 |
+| dam_pedigree_completeness | 0.095 |
+| dam_rel | 0.089 |
+| filly | 0.076 |
+| dam_foals_before | 0.039 |
+| bms_fee_years_listed | 0.032 |
+| sire_last_year_rel | 0.032 |
+| sire_rel | 0.031 |
 | fee_momentum | 0.030 |
-| sire_prog_win_rate | 0.029 |
-| sire_last_year_rel | 0.028 |
-| dam_age_at_foaling | 0.027 |
-| venue_keeneland | 0.024 |
-| sire_fee_latest_vs_initial | 0.023 |
-| bms_trend | 0.023 |
-| sire_fee_years_listed | 0.022 |
+| dam_age_at_foaling | 0.028 |
+| sire_prog_win_rate | 0.028 |
+| venue_keeneland | 0.023 |
+| bms_trend | 0.022 |
+| sire_fee_latest_vs_initial | 0.021 |
+| sire_fee_years_listed | 0.021 |
 | nick | 0.020 |
-| sire_prog_earn_per_runner | 0.018 |
-| dam_prog_earnings | 0.016 |
-| market_median_lp_last_year | 0.016 |
-| dam_log_n | 0.014 |
+| sire_prog_earn_per_runner | 0.019 |
+| sire_log_n | 0.017 |
+| dam_prog_earnings | 0.017 |
+| log_fee_conception_hist | 0.015 |
 
 SHAP and drop-one results measure predictive contribution, not causal effect: sire fee and sale level, for example, partly reflect market judgments of the same horse.

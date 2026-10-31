@@ -191,16 +191,46 @@ def main():
         bms_alt.append({"broodmare-sire fee used": label, "test r2": r["r2"], "test mae": r["mae"]})
     bms_alt = pd.DataFrame(bms_alt)
 
+    # ---------------------------------------------------------------- quantile intervals (CQR) vs conformal
+    q_models = {a_: pe.lgbm_fit(X[m["train"]], y[m["train"]], X[m["valid"]], y[m["valid"]], objective="quantile", alpha=a_)
+                for a_ in (0.1, 0.9)}
+    qp = {k: {a_: mdl.predict(X[m[k]], num_iteration=mdl.best_iteration) for a_, mdl in q_models.items()}
+          for k in ("calib", "test")}
+    clo, chi, cqr = pe.cqr_intervals(qp["calib"][0.1], qp["calib"][0.9], y[m["calib"]], qp["test"][0.1],
+                                     qp["test"][0.9], level=LEVEL)
+    intervals["conformalized quantile regression"] = pe.interval_metrics(tst.lp, clo, chi)
+    log(f"CQR: {intervals['conformalized quantile regression']}")
+    # judge ranges by the price the model expected (conditioning on the actual price conditions on the outcome)
+    tst = tst.assign(predicted_band=pe.price_band(pd.Series(p_gbm["test"], index=tst.index)))
+    by_pred = []
+    for band, g in tst.groupby("predicted_band"):
+        ix = tst.index.get_indexer(g.index)
+        by_pred.append({"predicted price band": band, "n": len(g),
+                        **{f"conformal {k}": v for k, v in pe.interval_metrics(g.lp, lo[ix], hi[ix]).items() if k != "mean_width_log"},
+                        **{f"CQR {k}": v for k, v in pe.interval_metrics(g.lp, clo[ix], chi[ix]).items() if k != "mean_width_log"}})
+    by_pred = pd.DataFrame(by_pred)
+
+    # ---------------------------------------------------------------- interaction search (Phase 12.4)
+    pairs = [("log_sire_fee_conception", "dam_rel"), ("log_sire_fee_conception", "dam_starts"),
+             ("log_sire_fee_conception", "log_bms_fee_highest"), ("dam_rel", "damsire_rel"),
+             ("dam_starts", "dam_pedigree_completeness"), ("log_bms_fee_highest", "bms_trend"),
+             ("sire_trend", "market_trend"), ("dam_pedigree_completeness", "weanling"),
+             ("sire_rel", "damsire_rel"), ("filly", "weanling"), ("log_sire_fee_conception", "weanling"),
+             ("log_sire_fee_conception", "filly"), ("sale_level", "log_sire_fee_conception")]
+    base_cols = [c for c in cols if not c.startswith("x_")]
+    inter = pe.interaction_search(X[m["train"]], y[m["train"]], X[m["test"]], y[m["test"]], base_cols, pairs)
+    log("interactions:\n" + inter.to_string())
+
     # ---------------------------------------------------------------- explanations
     shap_feat, shap_group = pe.shap_by_feature(gbm, X[m["test"]], pf.FEATURE_GROUPS)
 
     write_report(Path(args.report), provenance, tx, exclusions, feats, cols, leakage, results, intervals, conf,
-                 seg, ablation, bms_alt, shap_feat, shap_group, split, gbm)
+                 seg, ablation, bms_alt, shap_feat, shap_group, split, gbm, by_pred, inter)
     log(f"wrote {args.report}")
 
 
 def write_report(path, provenance, tx, exclusions, feats, cols, leakage, results, intervals, conf, seg, ablation,
-                 bms_alt, shap_feat, shap_group, split, gbm):
+                 bms_alt, shap_feat, shap_group, split, gbm, by_pred, inter):
     L = ["# Sale-price model — PRELIMINARY run", "",
          "> **Preliminary.** The data-readiness gate (docs/data-readiness.md) has not passed, so this is not the "
          "final model. It proves the pipeline end to end on the data available today. Numbers will change.", "",
@@ -243,6 +273,14 @@ def write_report(path, provenance, tx, exclusions, feats, cols, leakage, results
           "model has erred more on held-out sales (new sire, unproven dam, missing fee):", "",
           md_table(pd.DataFrame([{"segment": k, "median |error| (log)": v} for k, v in sorted(conf["scales"].items(),
                                                                                                key=lambda kv: -kv[1])])), "",
+          "By the price the model predicted (the honest view of interval width: grouping by the actual price "
+          "conditions on the outcome, so extreme actual prices always look under-covered):", "",
+          md_table(by_pred, {c: ".1%" for c in by_pred.columns if "coverage" in c} |
+                   {c: ".2f" for c in by_pred.columns if "ratio" in c}), "",
+          "## Interaction search (Phase 12.4, ridge, one product term at a time)", "",
+          md_table(inter, {"held-out r2 gain": "+.4f", "t (train)": ".1f"}), "",
+          "Gradient boosting already models interactions; a term is worth keeping in an interpretable model only "
+          "if it raises held-out R2, not just when its training t-stat is large.", "",
           "## Performance by segment (test years, LightGBM)", ""]
     for name, df in seg.items():
         if len(df):

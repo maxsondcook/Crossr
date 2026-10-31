@@ -65,6 +65,10 @@ Not included, and why:
 - A same-named older stallion's fees are separated at a 4+ year gap, using only
   earlier fees.
 
+The same placing rule is now used by the live model's training script
+(`scripts/train_sales_model.py`); the live model was trained before that fix, but the
+affected feature (dam's graded-placed foals) was already dropped by its keep/drop rule.
+
 `truncation_check(sources, year)` rebuilds the features of a year's sales from source
 tables cut off at that year, with later fees, races, rankings and sales removed and that
 year's prices blanked, and requires them to equal the full build. In the preliminary
@@ -88,6 +92,16 @@ run: 0 mismatched cells across all 74 features for 2012, 2018 and 2024.
   by segment (yearling/weanling × sire track record × dam track record × fee known),
   so the range widens where the model has erred more. Coverage and width are
   reported on the test years.
+- **Quantile intervals:** conformalized quantile regression (LightGBM 10th / 90th
+  percentile models, widened by the calibration years' miss scores). In the
+  preliminary run it holds ~80% coverage in every predicted-price band (79–83%), with
+  ranges that adapt to the horse (about 6.5× upper/lower for $500k+ horses, about 18×
+  under $50k). The group-normalized conformal method ranged 75–90% by band, so CQR is
+  the recommended method for the final model. Coverage is judged by predicted price:
+  grouping by actual price conditions on the outcome.
+- **Interaction search:** each Phase 12.4 pair is added to the ridge model one at a time
+  and kept only if it raises held-out R². None adds more than +0.003 (sire fee ×
+  weanling is the largest); gradient boosting already models interactions.
 - **Segments:** sale year, venue, yearling / weanling, sex, price band, fee known,
   dam record found, broodmare-sire fee known, most-sold sires and broodmare sires.
 - **Feature-group value:** drop one group, refit, score the test years.

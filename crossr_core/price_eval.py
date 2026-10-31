@@ -161,6 +161,38 @@ def interval_metrics(y, lo, hi) -> dict:
             "median_width_ratio": float(np.median(np.exp(hi - lo)))}
 
 
+def cqr_intervals(q_lo_cal, q_hi_cal, y_cal, q_lo_test, q_hi_test, level: float = 0.8) -> tuple:
+    """Conformalized quantile regression: widen (or shrink) the quantile band by the
+    calibration-set quantile of max(lo - y, y - hi), so coverage holds on held-out sales."""
+    score = np.maximum(np.asarray(q_lo_cal) - y_cal, np.asarray(y_cal) - q_hi_cal)
+    q = float(np.quantile(score, min(1.0, level * (1 + 1 / len(score)))))
+    return np.asarray(q_lo_test) - q, np.asarray(q_hi_test) + q, {"adjustment": q}
+
+
+def interaction_search(X_tr: pd.DataFrame, y_tr, X_te: pd.DataFrame, y_te, base_cols: List[str],
+                       pairs: Iterable[tuple], alpha: float = 10.0) -> pd.DataFrame:
+    """Add one product term at a time to the ridge model; held-out R2 gain and the term's t-stat (train)."""
+    base = ridge_fit(X_tr[base_cols], y_tr, alpha)
+    r2_0 = fit_metrics(y_te, ridge_predict(base, X_te[base_cols]))["r2"]
+    rows = []
+    for a, b in pairs:
+        name = f"{a} x {b}"
+        tr = X_tr[base_cols].assign(**{name: X_tr[a] * X_tr[b]})
+        te = X_te[base_cols].assign(**{name: X_te[a] * X_te[b]})
+        m = ridge_fit(tr, y_tr, alpha)
+        r2 = fit_metrics(y_te, ridge_predict(m, te))["r2"]
+        # OLS t-stat of the product on complete rows (residualized on the base fit)
+        ok = tr[name].notna().values
+        resid = y_tr[ok] - ridge_predict(base, X_tr[base_cols][ok])
+        x = tr[name].values[ok]
+        x = x - x.mean()
+        beta = float(x @ resid / (x @ x)) if (x @ x) > 0 else float("nan")
+        se = float(np.sqrt(np.sum((resid - beta * x) ** 2) / (len(x) - 2) / (x @ x))) if (x @ x) > 0 else float("nan")
+        rows.append({"interaction": name, "rows with both": int(ok.sum()), "held-out r2 gain": r2 - r2_0,
+                     "t (train)": beta / se if se else float("nan")})
+    return pd.DataFrame(rows).sort_values("held-out r2 gain", ascending=False)
+
+
 # ------------------------------------------------------------------ segments
 def price_band(lp: pd.Series) -> pd.Series:
     edges = [0, math.log(10_000), math.log(50_000), math.log(150_000), math.log(500_000), 99]
