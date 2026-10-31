@@ -233,6 +233,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.scra
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.push.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.sales-import.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.racing-post.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.mares-bred.plist
 ```
 
 Stop with `launchctl bootout gui/$(id -u) <plist>`.
@@ -242,6 +243,10 @@ Stop with `launchctl bootout gui/$(id -u) <plist>`.
   75 (more work), the next starts a minute later.
 - **`com.crossr.pipeline.push`** runs daily at 03:00.
 - **`com.crossr.pipeline.racing-post`** runs Sundays at 04:00.
+- **`com.crossr.pipeline.mares-bred`** runs Saturdays at 05:00:
+  `scripts/jockeyclub_mares_bred.py --apply` reads The Jockey Club's Report of
+  Mares Bred (one page) into `breeding_seasons`. The report fills in through
+  the year, so new stallions join the directory each week.
 - **`com.crossr.pipeline.sales-import`** runs daily at 07:00. If the Mac was
   asleep at 07:00, it runs on wake.
 - **Logs** go to `logs/pipeline/<job>.log`.
