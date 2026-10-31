@@ -6,9 +6,9 @@ Phase 10 — expected stallion deal value of a colt (one value):
     Σ (initial stud fee of each of his sire's sons that stood at stud × 400)
     / sire's colts of racing age,   colts of racing age = (total foals − foals of the last 3 crops) / 2
 
-  A sire whose first crop is under four years old has too little racing-age
-  progeny: his value is the mean of comparable North American stallions' values
-  (initial or current fee within ±10%, first crop at least four years old), each
+  A sire whose first crop is under seven years old has too few sons old enough to
+  be at stud: his value is the mean of comparable North American stallions' values
+  (initial or current fee within ±10%, first crop at least seven years old), each
   scaled by the fee ratio (target fee / comparable fee).
 
 Phase 11 — broodmare added value (sale price / sire's fee at conception), the
@@ -32,7 +32,9 @@ from typing import Any, Dict, List, Optional, Tuple
 STUD_DEAL_MULTIPLIER = 400  # stallion deal value = initial stud fee × 400
 RACING_AGE = 3  # a foal is of racing age (and counts as a colt/foal "aged 3+") from age 3
 COMPARABLE_FEE_BAND = 0.10  # ±10% of the target's initial or current fee
-COMPARABLE_MIN_CROP_AGE = 4  # comparables' first crop at least four years old
+# A sire's first son reaches stud a median 7 years after his first crop (730 sires), so a
+# sire is valued from his own sons only once his first crop is 7, and comparables must be too.
+COMPARABLE_MIN_CROP_AGE = 7
 EXPECTED_LIVE_FOALS = 7.0  # project rule: 10 foals/broodmare × 0.70 live-foal rate
 AV_SHRINK_K = None  # set from data in _added_value_tables (empirical Bayes)
 MIN_BMS_LOTS = 20  # below this a broodmare sire's own averages are "insufficient"
@@ -242,13 +244,13 @@ def own_deal_value(key: str) -> Optional[dict]:
 
 
 def limited_progeny(s: dict, year: Optional[int] = None) -> bool:
-    """First crop under four years old: too little racing-age progeny for his own record."""
+    """First crop under COMPARABLE_MIN_CROP_AGE years old: too few sons old enough to be at stud."""
     year = year or _year_now()
     return year - s["first_crop"] < COMPARABLE_MIN_CROP_AGE
 
 
 def comparables(key: str) -> List[dict]:
-    """Phase 10.2: NA stallions with initial or current fee within ±10%, first crop ≥ 4 years old."""
+    """Phase 10.2: NA stallions with initial or current fee within ±10%, first crop ≥ 7 years old."""
     table = stallions()
     s = table.get(key)
     if not s:
@@ -306,7 +308,7 @@ def _colt_deal_value(sire: str) -> Optional[dict]:
     comps = comparables(key)
     if not comps:
         return {"value": None, "method": "no_comparables", "sire": s["name"],
-                "note": "First crop under four years old and no North American stallion within ±10% of his fee."}
+                "note": "First crop under seven years old and no North American stallion within ±10% of his fee."}
     value = statistics.mean(c["normalized_value"] for c in comps)
     return {"value": value, "method": "comparable_stallions", "sire": s["name"],
             "formula": "mean of comparable stallions' deal value per colt × (target fee / comparable fee)",
@@ -562,6 +564,9 @@ def _racing_value(sire: str) -> Optional[dict]:
     s = stallions().get(key)
     if not s:
         return None
+    own = _own_racing(key)
+    if own:  # his own runners, however young his crops (the 7-year line is about sons at stud)
+        return {**own, "method": "own_progeny"}
     if limited_progeny(s):
         comps = [c for c in comparables(key)]
         vals = []
@@ -573,8 +578,7 @@ def _racing_value(sire: str) -> Optional[dict]:
             return None
         return {"value": statistics.mean(v for v, _, _ in vals), "method": "comparable_stallions",
                 "comparables": [{**c, "racing_value": r["value"], "normalized": v} for v, c, r in vals]}
-    own = _own_racing(key)
-    return {**own, "method": "own_progeny"} if own else None
+    return None
 
 
 def _own_racing(key: str) -> Optional[dict]:

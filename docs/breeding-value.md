@@ -29,21 +29,19 @@ and as comparables; other countries' data is kept for later.
   mares bred, fitted on stallions whose initial fee is on file (r = 0.65, n = 1,260),
   and each is labelled "estimated". The value with fees on file only is also returned
   (`value_fees_on_file_only`).
-- **Limited racing-age progeny** = first crop under four years old. Such a sire is
-  valued from **comparable stallions**: North American, first crop at least four years
-  old, initial fee within ±10% of his initial fee or current fee within ±10% of his
-  current fee. Each comparable's own value per colt is scaled by **target fee /
-  comparable fee** (the fee that matched: $200,000 vs $220,000 → × 0.909), and the
-  colt's value is their mean. The comparables, the fee each matched on and the factors
-  are returned with the value.
+- **Limited racing-age progeny** = first crop under **seven** years old (decision
+  2026-10-31; the prompt's example line was four). A sire's first son reaches stud a
+  median seven years after his first crop (730 sires; quartiles 5 and 9), so before
+  that his own sons say little. Such a sire is valued from **comparable stallions**:
+  North American, first crop at least seven years old, initial fee within ±10% of his
+  initial fee or current fee within ±10% of his current fee. Each comparable's own value
+  per colt is scaled by **target fee / comparable fee** (the fee that matched: $200,000
+  vs $220,000 → × 0.909), and the colt's value is their mean. The comparables, the fee
+  each matched on and the factors are returned with the value.
 - No sire's-sire fallback; a sire with no card, or a young sire with no comparable,
   gets no value.
 
-Note on the four-year line: a sire's first son typically reaches stud about seven
-years after his first crop (median over 730 sires; quartiles 5 and 9). A sire whose
-first crop is 4–6 years old therefore usually has no sons at stud yet and is valued
-$0 by his own record (e.g. Instagrand, first crop 2022), and comparables in that age
-band contribute $0. `COMPARABLE_MIN_CROP_AGE` sets the line for both.
+`COMPARABLE_MIN_CROP_AGE` (7) sets both lines.
 
 ## Phase 11
 
@@ -104,8 +102,8 @@ extrapolation).
   runners / foals can exceed 1; the product is career progeny earnings per foal aged 3+.
 - Foals aged 3+: live foals in crops at least three years old (breeding_seasons).
 - Seasons in which he made no list are missing, which understates lesser sires.
-- A sire whose first crop is under four is valued from the Phase 10 comparables,
-  scaled by fee ratio.
+- A sire with no leading-sire seasons yet (no runners on file) is valued from the
+  Phase 10 comparables, scaled by fee ratio.
 
 ### 6. Geldings
 

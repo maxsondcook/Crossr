@@ -349,8 +349,8 @@ def project_colt_bv(colt_sire: str, verbose: bool = True) -> dict:
     """
     Expected stallion deal value of a colt by `colt_sire` (one value):
     Σ (initial fee of each of his sire's sons at stud × 400) / sire's colts of racing age,
-    or, when the sire's first crop is under four years old, comparable stallions'
-    values scaled by fee ratio. See docs/breeding-value.md.
+    or, when the sire's first crop is under seven years old, comparable stallions'
+    values scaled by fee ratio (first crop under seven). See docs/breeding-value.md.
     """
     from crossr_core import breeding_value
 
@@ -1049,7 +1049,7 @@ def _colt_vp_summary(colt_sire: str) -> dict:
         comps = []
     else:
         comps = raw.get("comparables") or []
-        basis = f"{len(comps)} comparable stallions within ±10% of his fee, scaled by fee ratio (first crop under 4 years old)"
+        basis = f"{len(comps)} comparable stallions within ±10% of his fee, scaled by fee ratio (first crop under 7 years old)"
     packed = _pack_vp_result(kind="colt", point=float(point), n=len(comps) or len(raw.get("sons") or []),
                              detail=f"method={raw.get('method')}")
     packed["basis"] = basis
