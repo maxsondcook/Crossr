@@ -8,6 +8,9 @@
     com.crossr.pipeline.mares-bred    weekly, Saturday 05:00: The Jockey Club's Report of Mares Bred
                                       -> breeding_seasons (one page; scripts/jockeyclub_mares_bred.py)
     com.crossr.pipeline.precompute    nightly 02:30: sales-model hip pages for upcoming catalogs
+    com.crossr.pipeline.weekly        Monday 08:00 (run at wake if the Mac slept): weekly entries /
+                                      results lists and starred-horse emails (crossr_core.weekly);
+                                      the SMTP settings come from the api service's Railway variables
 
 The two Chrome jobs (scrape, racing-post) share logs/pipeline/chrome.lock, so
 only one browser is open at a time.
@@ -31,6 +34,7 @@ RACING_POST = "com.crossr.pipeline.racing-post"
 PUSH = "com.crossr.pipeline.push"
 MARES_BRED = "com.crossr.pipeline.mares-bred"
 PRECOMPUTE = "com.crossr.pipeline.precompute"
+WEEKLY = "com.crossr.pipeline.weekly"
 
 
 def plists(db: str, python: str) -> dict[str, dict]:
@@ -95,6 +99,16 @@ def plists(db: str, python: str) -> dict[str, dict]:
             "StartCalendarInterval": {"Hour": 2, "Minute": 30},
             "StandardOutPath": str(LOG_DIR / "precompute.log"),
             "StandardErrorPath": str(LOG_DIR / "precompute.log"),
+            **common,
+        },
+        # Safe to re-run: reports are upserted and emails already sent are skipped.
+        WEEKLY: {
+            "Label": WEEKLY,
+            "ProgramArguments": [str(Path.home() / ".local" / "railway-cli" / "node_modules" / ".bin" / "railway"),
+                                 "run", "-s", "api", "--", env, db, python, "-m", "crossr_core.weekly", "run"],
+            "StartCalendarInterval": {"Weekday": 1, "Hour": 8, "Minute": 0},
+            "StandardOutPath": str(LOG_DIR / "weekly.log"),
+            "StandardErrorPath": str(LOG_DIR / "weekly.log"),
             **common,
         },
     }

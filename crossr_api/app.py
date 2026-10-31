@@ -1,4 +1,5 @@
 """Crossr FastAPI — JSON only. Never serves sales_data/ or stakes CSVs."""
+import datetime
 import os
 import threading
 import time
@@ -178,6 +179,7 @@ class PreferencesBody(BaseModel):
     hypofoals: Optional[list] = None
     favorites: Optional[list] = None
     analyzed: Optional[list] = None
+    notifications: Optional[dict] = None
 
 
 class UpcomingLotBody(BaseModel):
@@ -251,6 +253,31 @@ def auth_preferences(body: PreferencesBody, crossr_session: Optional[str] = Cook
         raise HTTPException(status_code=401, detail="Sign in required")
     prefs = auth_svc.save_preferences(user["id"], body.model_dump())
     return {"preferences": prefs}
+
+
+@app.get("/api/weekly/{kind}")
+def weekly_report(kind: str, week: Optional[str] = None):
+    """Stored weekly entries / results list (built by the Monday job); latest week by default."""
+    if kind not in ("entries", "results"):
+        raise HTTPException(status_code=404, detail="Unknown report")
+    if week:
+        try:
+            week = datetime.date.fromisoformat(week).isoformat()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="week must be YYYY-MM-DD")
+    from crossr_core import railway_db
+
+    with railway_db.connect() as conn:
+        if conn.execute("SELECT to_regclass('weekly_reports')").fetchone()[0] is None:
+            return {"kind": kind, "week_start": week, "rows": []}  # the Monday job has not run yet
+        row = conn.execute(
+            "SELECT week_start::text, generated_at::text, row_count, payload FROM weekly_reports "
+            "WHERE kind = %s AND (%s::date IS NULL OR week_start = %s::date) ORDER BY week_start DESC LIMIT 1",
+            (kind, week, week),
+        ).fetchone()
+    if not row:
+        return {"kind": kind, "week_start": week, "rows": []}
+    return {"kind": kind, "week_start": row[0], "generated_at": row[1], "row_count": row[2], "rows": row[3]}
 
 
 @app.get("/api/search")
