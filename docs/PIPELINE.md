@@ -8,6 +8,7 @@ horse.
 | Job | What it does | When |
 | --- | --- | --- |
 | `pedigrees-sales` | Sire and dam of every lot in `sales_lots`, filled to a full 5-generation tree from Equibase. Every horse opened on the way is stored as a race record too. | in hourly 45-minute `scrape` batches; pushed daily |
+| `damsire-dams` | Dams whose sale lots still have no broodmare sire (`state/shared/missing-damsire-dams.csv`, most lots since 2010 first): one Equibase search each, then the push fills those lots (see below). | inside the `scrape` batches, after catalogs and the refresh, before `pedigrees-sales`; filled at the daily push |
 | `races-refresh` | Re-opens each ok horse with a start in the last 60 days, so new starts and earnings land in `race_seasons` / `race_starts`. | weekly, inside the `scrape` batches |
 | upcoming catalogs | Hips of a newly published catalog, ahead of everything else. | inside the `scrape` batches; pushed every 30 min |
 | `push` | Sends staged race records, pedigrees and queue states to Postgres in one transaction. | daily at 03:00 |
@@ -60,8 +61,10 @@ on the next pass.
   minute later. Exit 0 means nothing is left; the next batch starts within
   the hour.
 - **Lighter pages.** Pictures, video, fonts and ad or tracking hosts are not
-  downloaded (`--full-pages` turns this off). While a block page is up,
-  everything loads, so the check can be done.
+  downloaded (`--full-pages` turns this off). Chrome does the blocking itself
+  (DevTools URL blocking, and ad hosts never resolve), so requests do not pass
+  through Python, and Chrome runs without its GPU process. While a block page
+  is up, pictures load again, so the check can be done.
 - About 3 s plus jitter between page loads.
 - **Queue order:** sires first, then dams, each by their most recent sale
   (newest first), then by number of lots. Parents already complete in
@@ -80,6 +83,28 @@ on the next pass.
   are leaves.
 - **Table versions** (what makes the API reload) are bumped once per push:
   daily, or every 30 minutes while a catalog is being filled.
+
+### Broodmare sires from the dams (`damsire-dams`)
+
+For each dam on the list, one Equibase name search (cached in
+`equibase_scraper/cache/search`) lists her namesakes with foal year, sex and
+sire. Thoroughbred fillies/mares foaled between `last_sale_year - 27` and
+`earliest_foal_year - 3` are kept and staged. When exactly one is kept, her
+profile (race record, sire, foal year, sex) is fetched into `race_horses`.
+
+The push then fills each blank-damsire lot of those dams on its own: among
+the kept namesakes, the ones aged 3–26 at the lot's foaling (3–27 at the sale
+when the foal year is unknown), with the same country suffix as the lot's dam
+(none also matches CAN). One distinct sire fills `damsire` / `damsire_key`.
+Existing values are never overwritten, and every fill is logged in
+`sales_lots_fill_log` with source `damsire-scraped-dam`.
+
+On lots that already had a damsire, this method agreed with it 99.6% of the
+time (5,700 of 5,724).
+
+```
+$E railway $PY -m crossr_pipeline scrape --dams-only --limit 200   # only this list, then exit
+```
 
 ### Batched writes
 
@@ -233,6 +258,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.scra
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.push.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.sales-import.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.racing-post.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.mares-bred.plist
 ```
 
 Stop with `launchctl bootout gui/$(id -u) <plist>`.
@@ -242,6 +268,10 @@ Stop with `launchctl bootout gui/$(id -u) <plist>`.
   75 (more work), the next starts a minute later.
 - **`com.crossr.pipeline.push`** runs daily at 03:00.
 - **`com.crossr.pipeline.racing-post`** runs Sundays at 04:00.
+- **`com.crossr.pipeline.mares-bred`** runs Saturdays at 05:00:
+  `scripts/jockeyclub_mares_bred.py --apply` reads The Jockey Club's Report of
+  Mares Bred (one page) into `breeding_seasons`. The report fills in through
+  the year, so new stallions join the directory each week.
 - **`com.crossr.pipeline.sales-import`** runs daily at 07:00. If the Mac was
   asleep at 07:00, it runs on wake.
 - **Logs** go to `logs/pipeline/<job>.log`.

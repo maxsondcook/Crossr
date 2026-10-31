@@ -5,6 +5,8 @@
     com.crossr.pipeline.push          daily at 03:00: staged race records and pedigrees -> Postgres
     com.crossr.pipeline.sales-import  daily at 07:00 (run at wake if the Mac slept)
     com.crossr.pipeline.racing-post   weekly, Sunday 04:00: sires due a fee lookup, one push at the end
+    com.crossr.pipeline.mares-bred    weekly, Saturday 05:00: The Jockey Club's Report of Mares Bred
+                                      -> breeding_seasons (one page; scripts/jockeyclub_mares_bred.py)
     com.crossr.pipeline.precompute    nightly 02:30: sales-model hip pages for upcoming catalogs
 
 The two Chrome jobs (scrape, racing-post) share logs/pipeline/chrome.lock, so
@@ -27,6 +29,7 @@ SCRAPE = "com.crossr.pipeline.scrape"
 SALES = "com.crossr.pipeline.sales-import"
 RACING_POST = "com.crossr.pipeline.racing-post"
 PUSH = "com.crossr.pipeline.push"
+MARES_BRED = "com.crossr.pipeline.mares-bred"
 PRECOMPUTE = "com.crossr.pipeline.precompute"
 
 
@@ -74,6 +77,15 @@ def plists(db: str, python: str) -> dict[str, dict]:
             "StartCalendarInterval": {"Weekday": 0, "Hour": 4, "Minute": 0},
             "StandardOutPath": str(LOG_DIR / "racing-post.log"),
             "StandardErrorPath": str(LOG_DIR / "racing-post.log"),
+            **common,
+        },
+        # Away from sales-import (07:00, also writes breeding_seasons) and the Chrome jobs.
+        MARES_BRED: {
+            "Label": MARES_BRED,
+            "ProgramArguments": [env, db, python, str(REPO / "scripts" / "jockeyclub_mares_bred.py"), "--apply"],
+            "StartCalendarInterval": {"Weekday": 6, "Hour": 5, "Minute": 0},
+            "StandardOutPath": str(LOG_DIR / "mares-bred.log"),
+            "StandardErrorPath": str(LOG_DIR / "mares-bred.log"),
             **common,
         },
         # Sales-model hip pages: every upcoming catalog, stale hips only.

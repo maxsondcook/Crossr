@@ -42,7 +42,11 @@ def get_sale_month_index(sale_title):
     for month_name, index in MONTH_ORDER.items():
         if month_name in title_lower:
             return index
-    return 13 
+    # Sale names that imply a month without naming it.
+    for word, index in (("winter", 2), ("spring", 4), ("summer", 7), ("saratoga", 8), ("fall", 10), ("autumn", 10)):
+        if word in title_lower:
+            return index
+    return 13  # unknown month 
 
 def parse_price(val):
     """Cleans up raw prices into floats for accurate sorting."""

@@ -132,6 +132,10 @@ def _warm_caches():
         _warm_stallion_ancestors,
         horse_svc._cross_index,  # similar crosses: (sire, damsire) -> stakes winners
         lambda: horse_svc._standing_sons("", profiles()),
+        # breeding / racing value tables (master prompt Phases 10-11)
+        lambda: __import__("crossr_core.breeding_value", fromlist=["x"]).sons_at_stud(),
+        lambda: __import__("crossr_core.breeding_value", fromlist=["x"]).added_value_tables(),
+        lambda: __import__("crossr_core.breeding_value", fromlist=["x"]).bms_fee_relationship(),
     )
     for step in steps:
         try:
@@ -322,6 +326,15 @@ def horse_profile(name: str):
     if not payload:
         raise HTTPException(status_code=404, detail="Horse not found")
     return payload
+
+
+@app.get("/api/horses/{name}/breeding")
+def horse_breeding(name: str, limit: int = Query(10, ge=1, le=25)):
+    """Suggested stallions (fillies/mares) or similar active stallions (colts/horses).
+
+    Loaded separately from the profile so the page renders first.
+    """
+    return horse_svc.breeding_panel(name, profiles=profiles(), limit=limit)
 
 
 def _add_cross_similarity(result):
@@ -656,10 +669,20 @@ def sales_upcoming_lots(
 
 @app.get("/api/sales/upcoming/{catalog_id}/lots/{hip}")
 def sales_upcoming_lot(catalog_id: str, hip: str):
-    lot = upcoming_svc.get_lot(catalog_id, hip)
-    if not lot:
+    """Precomputed hip page (crossr_core/hip_cache.py); computed live and stored when missing."""
+    from crossr_core import hip_cache
+
+    # Stars / notes and the pedigree-scrape status are read live on top of the stored page.
+    payload = hip_cache.get(catalog_id, hip, _compute_upcoming_lot)
+    if payload is None:
         raise HTTPException(status_code=404, detail="Hip not found")
-    book = profiles()
+    return payload
+
+
+def build_upcoming_lot_payload(catalog_id: str, lot: dict, book=None) -> dict:
+    """Everything the hip page shows for one catalog lot (what hip_cache stores)."""
+    book = profiles() if book is None else book
+    lot = dict(lot)
     lot["height"] = horse_svc.sire_height(lot.get("sire"), horse_svc.profile_lookup(book))
     return {
         "lot": lot,
@@ -672,12 +695,30 @@ def sales_upcoming_lot(catalog_id: str, hip: str):
     }
 
 
+def _compute_upcoming_lot(catalog_id: str, hip: str):
+    lot = upcoming_svc.get_lot(catalog_id, hip)
+    return build_upcoming_lot_payload(catalog_id, lot) if lot else None
+
+
 @app.post("/api/sales/upcoming/{catalog_id}/lots/{hip}")
 def sales_upcoming_update(catalog_id: str, hip: str, body: UpcomingLotBody):
     lot = upcoming_svc.update_lot(catalog_id, hip, starred=body.starred, notes=body.notes)
     if not lot:
         raise HTTPException(status_code=404, detail="Hip not found")
     return {"lot": lot}
+
+
+@app.get("/api/sales/sire/{name}/summary")
+def sales_sire_summary(name: str, catalog_id: Optional[int] = None):
+    """Stallion sales panel: period averages, annual averages, his sales, and one sale's horses."""
+    card = next((v for k, v in profiles().items() if main.clean_horse_name(k) == main.clean_horse_name(name)), None)
+    entered = None
+    if card:
+        try:
+            entered = int(str(card.get("Stud Duty Year") or "")[:4])
+        except ValueError:
+            entered = None
+    return sales_svc.sire_sales_summary(name, entered_stud=entered, catalog_id=catalog_id)
 
 
 @app.get("/api/sales/sire/{name}")
