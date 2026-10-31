@@ -689,6 +689,19 @@ def sales_upcoming_update(catalog_id: str, hip: str, body: UpcomingLotBody):
     return {"lot": lot}
 
 
+@app.get("/api/sales/sire/{name}/summary")
+def sales_sire_summary(name: str, catalog_id: Optional[int] = None):
+    """Stallion sales panel: period averages, annual averages, his sales, and one sale's horses."""
+    card = next((v for k, v in profiles().items() if main.clean_horse_name(k) == main.clean_horse_name(name)), None)
+    entered = None
+    if card:
+        try:
+            entered = int(str(card.get("Stud Duty Year") or "")[:4])
+        except ValueError:
+            entered = None
+    return sales_svc.sire_sales_summary(name, entered_stud=entered, catalog_id=catalog_id)
+
+
 @app.get("/api/sales/sire/{name}")
 def sales_sire(
     name: str,
