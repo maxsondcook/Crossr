@@ -1036,7 +1036,8 @@ def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, 
         })
     rows.sort(key=lambda r: (
         -(r["similarity"] if r["similarity"] is not None else -1),
-        r.get("fee_num") or 0,
+        # Ties: the more established stallion (higher fee) first.
+        -(r.get("fee_num") or 0),
         (r.get("name") or "").lower(),
     ))
     return rows[:limit]
