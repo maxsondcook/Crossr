@@ -197,8 +197,10 @@ def offspring_counts(facts: dict) -> tuple[int, int]:
         sires, dams = _parent_index()
     except Exception:
         return 0, 0
-    keys = [f"{facts['name']} ({facts['year']})"] if facts.get("year") else []
-    keys.append(facts["name"])
+    # Undated parent labels can't be told apart from a namesake's, so they only
+    # count when this horse's own year is unknown (Sovereignty 2022 is not the
+    # older SOVEREIGNTY recorded as a sire).
+    keys = [f"{facts['name']} ({facts['year']})"] if facts.get("year") else [facts["name"]]
     return (sum(sires.get(k, 0) for k in keys), sum(dams.get(k, 0) for k in keys))
 
 
