@@ -43,7 +43,7 @@ TABLE_COLUMNS = {
                    "sire", "dam", "damsire", "consignor", "birth_year", "price_num", "is_rna", "is_out"],
     "stud_fees": ["Year", "Stallion", "Stud Fee"],
     "breeding_seasons": ["breeding_year", "stallion", "mares_bred", "live_foals"],
-    "race_horses": ["id", "name_key", "foal_year", "sex", "sire", "dam", "best_class"],
+    "race_horses": ["id", "name_key", "foal_year", "sex", "sire", "dam", "best_class", "status"],
     "race_seasons": ["horse_id", "year", "starts", "firsts", "earnings"],
     "race_starts": ["horse_id", "race_date", "place", "grade", "race_name", "esf"],
     "graded_stakes": ["Horse Name", "Place", "Race Year", "Foaling Year", "Grade"],
@@ -67,11 +67,19 @@ class Sources:
         return f"csv:{self.csv_dir / (table + '.csv')}" if table in self.csv_tables else "postgres"
 
     def table(self, name: str) -> pd.DataFrame:
+        frame = self._table(name)
+        if name == "race_horses" and "status" in frame:
+            # duplicate Equibase records merged into another row (status 'merged') are not horses
+            frame = frame[frame.status.astype(str) != "merged"]
+        return frame
+
+    def _table(self, name: str) -> pd.DataFrame:
         if name not in self._frames:
             cols = TABLE_COLUMNS[name]
             if name in self.csv_tables:
-                self._frames[name] = pd.read_csv(self.csv_dir / f"{name}.csv", usecols=lambda c: c in cols,
-                                                 dtype=str, keep_default_na=False)
+                frame = pd.read_csv(self.csv_dir / f"{name}.csv", usecols=lambda c: c in cols,
+                                    dtype=str, keep_default_na=False)
+                self._frames[name] = frame.reindex(columns=cols, fill_value="")
             else:
                 from crossr_core import railway_db
 

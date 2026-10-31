@@ -49,6 +49,9 @@ def sources():
     horses = [
         {"id": "1", "name_key": "DAM A", "foal_year": 2008, "sex": "M", "sire": "Bms X", "dam": "Old Mare"},
         {"id": "2", "name_key": "STAR FOAL", "foal_year": 2014, "sex": "C", "sire": "Sire B", "dam": "Dam A"},
+        # a duplicate Equibase record merged into id 2: must not count as a second foal
+        {"id": "3", "name_key": "STAR FOAL", "foal_year": 2014, "sex": "C", "sire": "Sire B", "dam": "Dam A",
+         "status": "merged"},
     ]
     seasons = [
         {"horse_id": "2", "year": 2016, "starts": 4, "firsts": 1, "earnings": 50000},
@@ -109,6 +112,7 @@ def test_no_future_progeny_results(sources):
     assert _row(feats, 2018).dam_prog_won == 1  # his 2016 maiden win was known
     assert _row(feats, 2020).dam_prog_g1 == 1
     assert _row(feats, 2018).dam_starts == 6  # the dam's own record (raced 2011)
+    assert _row(feats, 2018).dam_foals_before == 1  # the merged duplicate is not a second foal
 
 
 def test_truncation_check_finds_no_leakage(sources):
