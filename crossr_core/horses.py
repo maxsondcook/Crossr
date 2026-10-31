@@ -1042,6 +1042,61 @@ def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, 
     return rows[:limit]
 
 
+def breeding_panel(search_name, profiles=None, limit=10):
+    """The breeding panel a horse's profile should show, by profile type.
+
+    Fillies/mares/broodmares: suggested stallions (hypomating engine).
+    Colts and intact horses: similar active stallions (pedigree similarity).
+    Geldings and stallions: nothing (geldings have no breeding value; stallions
+    have their own stud sections).
+    """
+    from crossr_core import identity
+
+    profiles = profiles if profiles is not None else main.load_master_profiles()
+    hit = main.lookup_pedigree(search_name)
+    if hit.get("ambiguous"):
+        return {"kind": "none", "reason": "ambiguous", "years": hit.get("years") or [], "rows": []}
+    tree = hit.get("tree") if isinstance(hit.get("tree"), dict) else None
+    clean = main.clean_horse_name(search_name)
+    card_name = next((k for k in profiles if main.clean_horse_name(k) == clean), None)
+    facts = identity.horse_facts(search_name, tree)
+    card = profiles.get(card_name) if card_name else None
+    if card and not identity.card_matches(card_name, card, facts)[0]:
+        card = None
+    kind = identity.classify(facts, card)["profile_type"]
+
+    if kind in ("racing_female", "broodmare"):
+        mare = (tree or {}).get("Horse") or search_name
+        result = hypomating_engine.suggest_matings(main.PEDIGREE_DATABASE, profiles, mare)
+        if result.get("error"):
+            return {"kind": "suggested_stallions", "rows": [], "reason": result.get("error")}
+        rows = []
+        for s in (result.get("suggestions") or [])[:limit]:
+            crosses = s.get("crosses") or []
+            rows.append({
+                "name": s.get("name"),
+                "location": str((profiles.get(s.get("name")) or {}).get("Farm") or "").strip() or None,
+                "stud_fee": s.get("stud_fee"),
+                "fee_num": s.get("fee_num") or 0,
+                "rank": s.get("rank") if str(s.get("rank") or "").upper() not in ("", "N/A") else None,
+                "evidence": len(crosses) + len(s.get("cross_meta") or []),
+                "best_class": next((c.get("status") for c in crosses if c.get("status")), None),
+            })
+        return {"kind": "suggested_stallions", "rows": rows}
+
+    if kind == "racing_male" and tree:
+        rows = similar_active_stallions(tree, profiles=profiles, exclude_names={search_name}, limit=limit)
+        for row in rows:
+            row["location"] = str((profiles.get(row["name"]) or {}).get("Farm") or "").strip() or None
+            if str(row.get("rank") or "").upper() == "N/A":
+                row["rank"] = None
+        return {"kind": "similar_stallions", "rows": rows}
+
+    reason = {"gelding": "Geldings have no breeding recommendations.",
+              "stallion": "Stallions show their own stud sections."}.get(kind, "Not enough identity data.")
+    return {"kind": "none", "rows": [], "reason": reason}
+
+
 def _add_nick_reasons(crosses, sire, dam):
     """Tag each similar cross with why it resembles this mating (row["nick"]).
 

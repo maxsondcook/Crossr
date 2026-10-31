@@ -523,6 +523,58 @@ function StallionRankingsPanel({ rankingMeta: rawRankingMeta, rankList: rawRankL
   );
 }
 
+// Breeding panel by profile type: suggested stallions for fillies/mares,
+// similar active stallions for colts/horses, nothing for geldings.
+const BREEDING_TYPES = new Set(["racing_female", "broodmare", "racing_male"]);
+
+function BreedingPanel({ panel, hrefFor }) {
+  if (!panel) {
+    return (
+      <div className="panel panel-wide">
+        <h4>STALLIONS</h4>
+        <p className="catalog-empty">Loading…</p>
+      </div>
+    );
+  }
+  const suggested = panel.kind === "suggested_stallions";
+  const rows = panel.rows || [];
+  return (
+    <div className="panel panel-wide">
+      <h4>{suggested ? "SUGGESTED STALLIONS" : "SIMILAR ACTIVE STALLIONS"}</h4>
+      {rows.length ? (
+        <div className="history-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Stallion</th>
+                <th>Location</th>
+                <th>Stud Fee</th>
+                <th>{suggested ? "Proven crosses" : "Similarity"}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.name}>
+                  <td><Link href={hrefFor(r.name)}>{r.name}</Link></td>
+                  <td>{r.location || "—"}</td>
+                  <td className="money">{r.stud_fee || "—"}</td>
+                  <td>{suggested ? (r.evidence || "—") : (r.similarity != null ? `${r.similarity}%` : "—")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="catalog-empty">
+          {suggested
+            ? "No standing stallions have proven crosses with this mare's sire line yet."
+            : "No active stallions with a comparable pedigree found."}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function HorsePage() {
   const { name } = useParams();
   const router = useRouter();
@@ -533,6 +585,7 @@ function HorsePage() {
   const [tick, setTick] = useState(0);
   const [rankList, setRankList] = useState("leading_sire");
   const [showAllProgeny, setShowAllProgeny] = useState(false);
+  const [breeding, setBreeding] = useState(null);
   const returnTarget = useMemo(() => resolveReturnTarget(searchParams), [searchParams]);
   const salesReturn = returnTarget.sales;
   const hrefFor = useMemo(
@@ -557,6 +610,15 @@ function HorsePage() {
       })
       .catch((e) => setError(e.message));
   }, [decoded]);
+
+  const profileType = data?.classification?.profile_type;
+  useEffect(() => {
+    setBreeding(null);
+    if (!BREEDING_TYPES.has(profileType)) return;
+    apiGet(`/api/horses/${encodeURIComponent(decoded)}/breeding`)
+      .then(setBreeding)
+      .catch(() => setBreeding({ kind: profileType === "racing_male" ? "similar_stallions" : "suggested_stallions", rows: [] }));
+  }, [decoded, profileType]);
 
   function goBack() {
     const href = returnTarget?.href;
@@ -618,6 +680,17 @@ function HorsePage() {
   }
 
   const s = data.stallion || {};
+  const cls = data.classification || {};
+  const isStallion = Boolean(data.stallion) || Boolean(cls.is_stallion);
+  const isFemale = cls.profile_type === "racing_female" || cls.profile_type === "broodmare";
+  const typeLabel = {
+    broodmare: "BROODMARE",
+    racing_female: cls.sex ? cls.sex.toUpperCase() : "FILLY / MARE",
+    racing_male: cls.sex ? cls.sex.toUpperCase() : "COLT / HORSE",
+    gelding: "GELDING",
+  }[cls.profile_type];
+  const sireName = data.pedigree?.sire?.name;
+  const damName = data.pedigree?.dam?.name;
   const racing = s.progeny_racing || {};
   const earn = s.progeny_earnings || {};
   const legacy = s.legacy_progeny || {};
@@ -667,33 +740,51 @@ function HorsePage() {
 
       <div className="horse-panels">
         <div className="panel">
-          <div className="hero">
-            <div className="farm">{s.farm || "PEDIGREE PROFILE"}</div>
-            <h1>{data.name.toUpperCase()}</h1>
-            <div className="sub">
-              Foaled: {s.year_foaled || data.year || "—"} · Entered Stud: {s.entered_stud || "—"}
-            </div>
-            <div className="kpi-row">
-              <div className="kpi">
-                <span>Stud Fee</span>
-                <b>{s.stud_fee || "—"}</b>
+          {data.stallion ? (
+            <div className="hero">
+              <div className="farm">{s.farm || "PEDIGREE PROFILE"}</div>
+              <h1>{data.name.toUpperCase()}</h1>
+              <div className="sub">
+                Foaled: {s.year_foaled || data.year || "—"} · Entered Stud: {s.entered_stud || "—"}
+                {s.status && s.status !== "active" ? ` · ${s.status[0].toUpperCase()}${s.status.slice(1)}` : ""}
               </div>
-              {s.rank && String(s.rank).toUpperCase() !== "N/A" ? (
+              <div className="kpi-row">
                 <div className="kpi">
-                  <span>Sire Rank</span>
-                  <b className="muted">#{s.rank}</b>
+                  <span>Stud Fee</span>
+                  <b>{s.stud_fee || "—"}</b>
                 </div>
-              ) : null}
+                {s.rank && String(s.rank).toUpperCase() !== "N/A" ? (
+                  <div className="kpi">
+                    <span>Sire Rank</span>
+                    <b className="muted">#{s.rank}</b>
+                  </div>
+                ) : null}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="hero">
+              <div className="farm">{typeLabel || (isStallion ? "STALLION" : "PEDIGREE PROFILE")}</div>
+              <h1>{data.name.toUpperCase()}</h1>
+              <div className="sub">
+                Foaled: {data.year || "—"}
+                {sireName ? ` · By ${sireName}` : ""}
+                {damName ? ` out of ${damName}` : ""}
+              </div>
+            </div>
+          )}
           {s.career_highlight ? (
             <div className="notes" style={{ marginTop: 16 }}>{s.career_highlight}</div>
           ) : null}
-          <div style={{ marginTop: 16, textAlign: "center" }}>
-            <Link className="primary" href={data.has_profile ? `/hypomating?sire=${encodeURIComponent(data.name)}` : `/hypomating?mare=${encodeURIComponent(data.name)}`}>
-              {data.has_profile ? "Select for hypomating" : "Use as broodmare"}
-            </Link>
-          </div>
+          {isStallion || isFemale ? (
+            <div style={{ marginTop: 16, textAlign: "center" }}>
+              <Link
+                className="primary"
+                href={isStallion ? `/hypomating?sire=${encodeURIComponent(data.name)}` : `/hypomating?mare=${encodeURIComponent(data.name)}`}
+              >
+                {isStallion ? "Select for hypomating" : "Use as broodmare"}
+              </Link>
+            </div>
+          ) : null}
         </div>
 
         <div className="panel">
@@ -775,6 +866,9 @@ function HorsePage() {
           </div>
         ) : null}
 
+        {BREEDING_TYPES.has(cls.profile_type) ? <BreedingPanel panel={breeding} hrefFor={hrefFor} /> : null}
+
+        {isStallion ? (
         <div className="panel">
           <h4>TOP PROGENY{(data.top_progeny || []).length ? ` · ${data.top_progeny.length}` : ""}</h4>
           {(data.top_progeny || []).length ? (
@@ -806,6 +900,7 @@ function HorsePage() {
             <p className="catalog-empty">No top progeny recorded for this stallion yet.</p>
           )}
         </div>
+        ) : null}
 
       </div>
     </div>
