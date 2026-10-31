@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import socket
+import time
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS crossr_pipeline_runs (
@@ -43,11 +44,20 @@ CREATE TABLE IF NOT EXISTS crossr_pipeline_files (
 """
 
 # Run statuses: running, ok, partial (stopped early: limit, block timeout,
-# Ctrl-C), blocked, failed. A 'running' row whose heartbeat is old crashed.
+# Ctrl-C), blocked, failed. A 'running' row whose heartbeat is old crashed;
+# ensure() closes those as failed. Heartbeats come at least hourly, even
+# while a block page waits.
+STALE_HOURS = 6
+FINISH_TRIES, FINISH_WAIT_S = 6, 20
 
 
 def ensure(conn) -> None:
     conn.execute(SCHEMA)
+    conn.execute(
+        "UPDATE crossr_pipeline_runs SET status = 'failed', finished_at = heartbeat_at, "
+        "detail = concat_ws(' ', detail, '(abandoned: no heartbeat, connection or Mac lost)') "
+        f"WHERE status = 'running' AND heartbeat_at < now() - interval '{STALE_HOURS} hours'"
+    )
 
 
 class Run:
@@ -75,11 +85,21 @@ class Run:
         )
 
     def finish(self, status: str, detail: str | None = None) -> None:
-        self.conn.execute(
-            "UPDATE crossr_pipeline_runs SET status = %s, finished_at = now(), heartbeat_at = now(), "
-            "counts = %s::jsonb, detail = COALESCE(%s, detail) WHERE id = %s",
-            (status, json.dumps(self.counts), detail, self.id),
-        )
+        """Close the row, retrying while the connection comes back (the pgdb
+        connection reconnects on its own). Still failing: leave it to ensure()."""
+        for attempt in range(1, FINISH_TRIES + 1):
+            try:
+                self.conn.execute(
+                    "UPDATE crossr_pipeline_runs SET status = %s, finished_at = now(), heartbeat_at = now(), "
+                    "counts = %s::jsonb, detail = COALESCE(%s, detail) WHERE id = %s",
+                    (status, json.dumps(self.counts), detail, self.id),
+                )
+                return
+            except Exception as exc:  # psycopg.OperationalError, DNS failures, ...
+                if attempt == FINISH_TRIES:
+                    print(f"run {self.id} ({self.job}) not closed: {exc}", flush=True)
+                    return
+                time.sleep(FINISH_WAIT_S)
 
 
 def last_run(conn, job: str, status: str | None = None):
