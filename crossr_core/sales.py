@@ -319,7 +319,7 @@ def _auction_candidates(name_keys, pairs):
         return []
     try:
         return conn.execute(
-            f"""
+            """
             SELECT l.name AS horse_name, l.nk, l.sk, l.dk, l.is_out, l.is_rna,
                    l.price_num, l.price_raw, l.purchaser, l.birth_year, l.hip,
                    c.title AS sale_title, CASE WHEN c.year > 0 THEN c.year::text ELSE '' END AS sale_year
