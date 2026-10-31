@@ -94,13 +94,6 @@ def load_models(source: Path, railway_db) -> None:
         print(f"  model   sales_model    from {sales.name}")
     else:
         print(f"  model   sales_model    skipped (no {sales})")
-    stud = source / "Analyzed Sales" / "stud_value_model.json.gz"
-    if stud.exists():
-        with gzip.open(stud, "rt", encoding="utf-8") as fh:
-            railway_db.save_model("stud_value", json.load(fh))
-        print(f"  model   stud_value     from {stud.name}")
-    else:
-        print(f"  model   stud_value     skipped (no {stud})")
 
 
 def load_hypofoals(source: Path, railway_db) -> None:

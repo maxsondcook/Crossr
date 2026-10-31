@@ -125,7 +125,7 @@ sp_mod = _StallionProfilesProxy()
 # ---------------------------------------------------------------------------
 # Constants (from notebook)
 # ---------------------------------------------------------------------------
-from crossr_core.stud_value import STUD_DEAL_MULTIPLIER  # noqa: E402  (ISF × 400, one place)
+from crossr_core.breeding_value import STUD_DEAL_MULTIPLIER  # noqa: E402  (ISF × 400, one place)
 # Maxson locked crop: 8–12 foals × 0.7 live-foal rate → 5.6–8.4 live foals.
 LIVE_FOAL_RATE = 0.70
 FOALS_PER_BROODMARE_LOW = 8
@@ -343,61 +343,19 @@ def stands_at_stud(profile: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Colt E[BV] — comparable stallions (crossr_core/stud_value.py, docs/stud-value.md)
+# Colt E[BV] — expected stallion deal value (master prompt Phase 10; crossr_core/breeding_value.py)
 # ---------------------------------------------------------------------------
-def project_colt_bv(colt_sire: str, verbose: bool = True, year: Optional[int] = None) -> dict:
+def project_colt_bv(colt_sire: str, verbose: bool = True) -> dict:
     """
-    Expected breeding value of a colt by `colt_sire`.
-
-    What his sire's colts are worth at stud per colt (sons' initial fee ×
-    STUD_DEAL_MULTIPLIER / colts): the sire's own record once his crops are old
-    enough, else stallions that looked like him at the same career stage (initial
-    fee and fee change since). No sire's-sire fallback: an unknown sire gets no value.
+    Expected stallion deal value of a colt by `colt_sire` (one value):
+    Σ (initial fee of each of his sire's sons at stud × 400) / sire's colts of racing age,
+    or, when the sire's first crop is under four years old, comparable stallions'
+    values scaled by fee ratio. See docs/breeding-value.md.
     """
-    from crossr_core import stud_value
+    from crossr_core import breeding_value
 
-    model = stud_value.load()
-    display_sire = (colt_sire or "").strip()
-    year = year or (model or {}).get("year_now")
-    res = stud_value.colt_value(display_sire, int(year), model=model) if model and year else None
-    if not res:
-        result = {
-            "kind": "colt",
-            "colt_sire": display_sire,
-            "resolution": "unavailable" if model else "model_missing",
-            "expected_bv": None,
-            "low": None,
-            "high": None,
-            "contributions": [],
-            "note": "No initial stud fee or mature crops on file for this sire.",
-        }
-    else:
-        result = {
-            "kind": "colt",
-            "colt_sire": display_sire,
-            "resolution": "own_record" if res["own_weight"] >= 0.5 else "comparable_stallions",
-            "expected_bv": res["point"],
-            "low": res["low"],
-            "high": res["high"],
-            "own_record": res["own"],
-            "own_weight": res["own_weight"],
-            "prediction": res["prediction"],
-            "initial_fee": res["initial_fee"],
-            "fee_now": res["fee_now"],
-            "first_season": res["first_season"],
-            "contributions": [
-                {
-                    "stallion": c["stallion"],
-                    "isf": c["initial_fee"],
-                    "fee_at_stage": c["fee_at_stage"],
-                    "contribution": c["value_per_colt"],
-                    "sons_at_stud": c["sons_at_stud"],
-                    "relation": "comparable",
-                }
-                for c in res["comparables"]
-            ],
-            "note": res["basis"] + ". Most colts never stand at stud, so the typical outcome is $0.",
-        }
+    res = breeding_value.colt_deal_value(colt_sire) or {}
+    result = {"kind": "colt", "colt_sire": (colt_sire or "").strip(), "expected_bv": res.get("value"), **res}
     if verbose:
         _print_colt_report(result)
     return result
@@ -405,24 +363,22 @@ def project_colt_bv(colt_sire: str, verbose: bool = True, year: Optional[int] = 
 
 def _print_colt_report(r: dict) -> None:
     print("\n" + "=" * 72)
-    print("  VALUE PROJECTOR — COLT BREEDING VALUE")
+    print("  VALUE PROJECTOR — EXPECTED STALLION DEAL VALUE (per colt)")
     print("=" * 72)
-    print(f"  Colt sire       : {r['colt_sire']}  [{r['resolution']}]")
+    print(f"  Colt sire : {r['colt_sire']}  [{r.get('method', 'unavailable')}]")
     if r.get("expected_bv") is None:
-        print(f"  {r['note']}")
+        print(f"  {r.get('note') or 'No stud card for this sire.'}")
         print("=" * 72 + "\n")
         return
-    print(f"  Expected value  : {fmt_money(r['expected_bv'])} per colt")
-    if r.get("low") is not None:
-        print(f"  p25–p75         : {fmt_money(r['low'])} – {fmt_money(r['high'])}")
-    print(f"  Basis           : {r['note']}")
-    print("-" * 72)
-    print(f"  {'Comparable stallion':<24} {'ISF':>10} {'Fee @stage':>12} {'Value/colt':>12} {'Sons':>6}")
-    for c in r["contributions"]:
-        print(
-            f"  {c['stallion'].title():<24} {fmt_money(c['isf'] or 0):>10} "
-            f"{fmt_money(c['fee_at_stage'] or 0):>12} {fmt_money(c['contribution']):>12} {c['sons_at_stud']:>6}"
-        )
+    print(f"  Value     : {fmt_money(r['expected_bv'])}   ({r.get('formula', '')})")
+    if r.get("method") == "sons_of_sire":
+        print(f"  Colts of racing age: {r['colts_of_racing_age']:,.0f}")
+        for son in r["sons"]:
+            tag = " (estimated)" if son["estimated"] else ""
+            print(f"    {son['stallion']:<24} ISF {fmt_money(son['initial_fee']):>10}{tag}  deal {fmt_money(son['deal_value'])}")
+    else:
+        for c in r.get("comparables", []):
+            print(f"    {c['stallion']:<24} {c['matched_on']:<12} ×{c['factor']:.2f}  {fmt_money(c['deal_value'])} → {fmt_money(c['normalized_value'])}")
     print("=" * 72 + "\n")
 
 
@@ -1080,115 +1036,67 @@ def _empty_vp(kind: str = "") -> dict:
 
 
 def _colt_vp_summary(colt_sire: str) -> dict:
+    """One value (no range): master prompt Phase 10."""
     raw = project_colt_bv(colt_sire, verbose=False)
     point = raw.get("expected_bv")
     if point is None:
         return _empty_vp("colt")
-    comps = raw.get("contributions") or []
-    detail = f"resolution={raw.get('resolution')}; comparables={len(comps)}; range=p25–p75 of value per colt"
-    packed = _pack_vp_result(
-        kind="colt",
-        point=float(point),
-        low=raw.get("low"),
-        high=raw.get("high"),
-        n=len(comps),
-        detail=detail,
-    )
-    packed["basis"] = raw.get("note")
+    if raw.get("method") == "sons_of_sire":
+        basis = (
+            f"{len(raw['sons'])} sons at stud ({raw['sons_estimated_fee']} with initial fee estimated from "
+            f"first-season book) × 400 / {raw['colts_of_racing_age']:,.0f} colts of racing age"
+        )
+        comps = []
+    else:
+        comps = raw.get("comparables") or []
+        basis = f"{len(comps)} comparable stallions within ±10% of his fee, scaled by fee ratio (first crop under 4 years old)"
+    packed = _pack_vp_result(kind="colt", point=float(point), n=len(comps) or len(raw.get("sons") or []),
+                             detail=f"method={raw.get('method')}")
+    packed["basis"] = basis
     packed["comparables"] = comps
+    packed["sons_at_stud"] = raw.get("sons") or []
+    packed["formula"] = raw.get("formula")
+    return packed
+
+
+def _broodmare_pack(kind: str, res: Optional[dict]) -> dict:
+    """Pack breeding_value.broodmare_value (master prompt Phase 11.4) for the catalog / API."""
+    if not res:
+        return _empty_vp(kind)
+    from crossr_core import breeding_value
+
+    packed = _pack_vp_result(kind=kind, point=res["value"], low=res["low"], high=res["high"],
+                             n=res["foals_sold"], detail=res["cover_fee_basis"])
+    bms = breeding_value.lots_by("bms").get(breeding_value._key(res["broodmare_sire"]), [])
+    multipliers = [{"stud_fee": lot["fee"], "multiplier": lot["added_value"], "price": lot["price"]} for lot in bms]
+    packed.update({
+        "basis": (
+            f"{fmt_money(res['realized'])} from {res['foals_sold']} foals sold + {res['remaining_foals']:.1f} more foals × "
+            f"{fmt_money(res['cover_fee'])} covering fee × {res['added_value_multiple']:.2f} added value"
+        ),
+        "added_value_multiple": res["added_value_multiple"],
+        "cover_fee": res["cover_fee"],
+        "cover_fee_estimate": res["cover_fee_estimate"],
+        "broodmare_sire": res["broodmare_sire"],
+        "foals_produced": res["foals_sold"],
+        "mean_added_value_multiplier": (res["broodmare_sire_added_value"] or {}).get("multiple"),
+        "added_value_by_fee_bracket": _added_value_by_fee_bracket(multipliers),
+    })
     return packed
 
 
 def _filly_bms_vp_summary(bms_name: str) -> dict:
-    raw = project_filly_bv(bms_name, mode="bms", verbose=False)
-    point = raw.get("projected_career_bv")
-    if point is None:
-        point = raw.get("empirical_bv")
-    if point is None:
-        return _empty_vp("filly_bms")
-    point = float(point)
+    """A filly by `bms_name`: her sire is her future foals' broodmare sire."""
+    from crossr_core import breeding_value
 
-    # Rebuild price list from the same sales source the projector used
-    if raw.get("used_similar_isf_fallback") and raw.get("fallback_peer"):
-        sales = sales_by_dam_sire(raw["fallback_peer"])
-    else:
-        sales = sales_by_dam_sire(bms_name)
-        if len(sales) < 5 and raw.get("fallback_peer"):
-            sales = sales_by_dam_sire(raw["fallback_peer"])
-
-    prices = sorted(r["price"] for r in sales if r.get("price"))
-    n = len(prices)
-    used_fallback = bool(raw.get("used_similar_isf_fallback"))
-    detail = f"n_sales={n}; crop={EXPECTED_LIVE_FOALS_LOW:.1f}–{EXPECTED_LIVE_FOALS_HIGH:.1f}"
-    if used_fallback:
-        detail += f"; peer={raw.get('fallback_peer')}"
-
-    low = raw.get("projected_career_bv_low")
-    high = raw.get("projected_career_bv_high")
-    if low is not None and high is not None:
-        detail += f"; range={EXPECTED_LIVE_FOALS:.0f} foals × p25–p75 foal price"
-
-    packed = _pack_vp_result(
-        kind="filly_bms",
-        point=point,
-        low=low,
-        high=high,
-        n=n,
-        detail=detail,
-    )
-    packed["added_value_by_fee_bracket"] = raw.get("added_value_by_fee_bracket") or []
-    packed["mean_added_value_multiplier"] = raw.get("mean_added_value_multiplier")
-    return packed
+    return _broodmare_pack("filly_bms", breeding_value.broodmare_value(mare_sire=bms_name))
 
 
 def _mare_vp_summary(mare_name: str, mare_sire: str = "") -> dict:
-    raw = project_filly_bv(mare_name, mode="mare", verbose=False)
-    sales = sales_by_dam(mare_name)
-    n = len(sales)
-    point = raw.get("projected_career_bv")
-    if point is None:
-        point = raw.get("empirical_bv")
-    if (point is None or point == 0) and mare_sire:
-        return _filly_bms_vp_summary(mare_sire)
+    """A broodmare: credit for foals already sold, plus her remaining expected foals."""
+    from crossr_core import breeding_value
 
-    if point is None:
-        return _empty_vp("mare")
-    point = float(point)
-
-    low = high = None
-    detail = f"n_progeny_sales={n}"
-    prices = sorted(r["price"] for r in sales) if sales else []
-    bring = statistics.mean(prices) if prices else None
-    # Proven broodmares: realized sales + remaining expected foals at the p25 / p75 price.
-    remaining = max(EXPECTED_LIVE_FOALS - n, 0.0)
-    rem_low = rem_high = remaining
-    if n >= MARE_RANGE_MIN_N and bring is not None:
-        total = sum(prices)
-        low = total + remaining * _percentile(prices, 0.25)
-        high = total + remaining * _percentile(prices, 0.75)
-        detail += f"; range=realized + {remaining:.1f} remaining foals × p25–p75 price"
-    elif bring is not None:
-        # Few sales: realized + remaining foals (5.6–8.4 expected, less those produced) × mean price
-        total = sum(prices)
-        rem_low = max(EXPECTED_LIVE_FOALS_LOW - n, 0.0)
-        rem_high = max(EXPECTED_LIVE_FOALS_HIGH - n, 0.0)
-        low = total + rem_low * bring
-        high = total + rem_high * bring
-        detail += f"; range=realized + {rem_low:.1f}–{rem_high:.1f} remaining foals × mean price"
-    elif mare_sire:
-        return _filly_bms_vp_summary(mare_sire)
-
-    packed = _pack_vp_result(
-        kind="mare",
-        point=point,
-        low=low,
-        high=high,
-        n=n,
-        detail=detail,
-    )
-    packed["foals_produced"] = n
-    packed["remaining_live_foals_range"] = (rem_low, rem_high)
-    return packed
+    return _broodmare_pack("mare", breeding_value.broodmare_value(mare=mare_name, mare_sire=mare_sire))
 
 
 def classify_catalog_role(
@@ -1215,31 +1123,29 @@ def classify_catalog_role(
 
 
 def _race_earnings_vp_summary(sire_name: str) -> dict:
-    """Projected race earnings (per foal) for youngstock, keyed by sire."""
+    """Racing value per foal (master prompt Phase 11.5), keyed by sire."""
     if not sire_name or not str(sire_name).strip():
-        return {
-            "display": "",
-            "point": None,
-            "PROJECTED RACE EARNINGS": "",
-            "detail": "no sire",
-        }
+        return {"display": "", "point": None, "PROJECTED RACE EARNINGS": "", "detail": "no sire"}
     cache_key = f"race::{clean_horse_name(sire_name)}"
     if cache_key in _HIP_CACHE:
         return _HIP_CACHE[cache_key]
+    from crossr_core import breeding_value
 
-    raw = project_race_earnings(sire_name, verbose=False)
-    point = raw.get("projected_earnings_per_foal")
-    detail = f"sire={raw.get('stallion')}"
-    if raw.get("used_similar_isf_fallback"):
-        detail += f"; peer={raw.get('fallback_peer')}"
+    raw = breeding_value.racing_value(sire_name) or {}
+    point = raw.get("value")
+    if raw.get("method") == "own_progeny":
+        detail = (
+            f"{fmt_money(raw['earnings_per_runner'])} per runner-season × "
+            f"{raw['runners']:,.0f} runner-seasons / {raw['foals_aged_3_plus']:,.0f} foals aged 3+ "
+            f"({raw['seasons']} seasons, USD)"
+        )
+    elif raw.get("method") == "comparable_stallions":
+        detail = f"{len(raw['comparables'])} comparable stallions, scaled by fee ratio"
+    else:
+        detail = "no leading-sire seasons on file"
     display = fmt_money(point) if point else ""
-    result = {
-        "display": display,
-        "point": point,
-        "PROJECTED RACE EARNINGS": display,
-        "detail": detail,
-        "n": raw.get("foals_age_ge_3") or raw.get("runners") or 0,
-    }
+    result = {"display": display, "point": point, "PROJECTED RACE EARNINGS": display, "detail": detail,
+              "n": raw.get("foals_aged_3_plus") or 0, "racing_value": raw}
     _HIP_CACHE[cache_key] = result
     return result
 

@@ -9,7 +9,7 @@ Code: `crossr_core/hip_cache.py`, `scripts/precompute_catalogs.py`.
 - **Never blocks.** A catalog shows on the site as soon as it is loaded. A hip with
   no stored page is computed live, stored and returned; later opens read it.
 - **Stays current.** Each stored page records a fingerprint of its inputs: the
-  catalog, the models (`sales_model`, `stud_value`, `fee_bands`), the tables
+  catalog, the models (`sales_model`, `fee_bands`), the tables
   `sales_lots`, `stud_fees`, `breeding_seasons`, `race_horses`, `race_seasons`,
   `race_starts`, `graded_stakes`, `stallion_rankings`, `pedigrees`
   (`crossr_table_versions`), and `CACHE_VERSION` (bump it when the page's code or
