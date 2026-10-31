@@ -58,3 +58,6 @@ crossr_core/__pycache__/
 .mplconfig/
 .venv/
 logs/
+
+# Pipeline staging (crossr_pipeline/stage.py)
+state/

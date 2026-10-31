@@ -227,6 +227,29 @@ def find_horses(conn: PgConn, query: str, name_key: str, year: str | None) -> li
     return list(rows)
 
 
+def key_taken(conn: PgConn, key: str) -> bool:
+    return bool(conn.execute(f"SELECT 1 FROM {HORSES} WHERE pedigree_key = %s LIMIT 1", (key,)).fetchone())
+
+
+def rows_by_name_keys(conn: PgConn, names) -> list[dict]:
+    return conn.execute(
+        "SELECT id, name_key, display_name, foal_year, sire, dam, status, fetched_at, profile_url "
+        f"FROM {HORSES} WHERE name_key = ANY(%s)", (sorted(names),)
+    ).fetchall()
+
+
+def ok_dam_counts(conn: PgConn, dams) -> list[dict]:
+    return conn.execute(
+        f"SELECT upper(dam) AS dam, count(*) AS n FROM {HORSES} WHERE status = 'ok' AND upper(dam) = ANY(%s) "
+        "GROUP BY 1", (sorted(dams),)
+    ).fetchall()
+
+
+def fetched_at_by_id(conn: PgConn, ids) -> dict[str, str]:
+    return {r["id"]: r["fetched_at"] or "" for r in conn.execute(
+        f"SELECT id, fetched_at FROM {HORSES} WHERE id = ANY(%s)", ([str(i) for i in ids],))}
+
+
 def insert_batch_horse(conn: PgConn, subj: dict) -> bool:
     """Insert one new queue row. An existing pedigree_key, including ok, is left alone."""
     with conn.transaction():

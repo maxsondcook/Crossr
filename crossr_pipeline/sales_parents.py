@@ -62,11 +62,12 @@ def load_parents(conn) -> list[dict]:
     damsires: dict[str, Counter] = {}
     for row in conn.execute(
         """
-        SELECT dam_key, damsire FROM sales_lots
+        SELECT dam_key, btrim(damsire) AS damsire, COUNT(*) AS n FROM sales_lots
         WHERE COALESCE(dam_key, '') <> '' AND COALESCE(damsire, '') <> ''
+        GROUP BY 1, 2
         """
     ):
-        damsires.setdefault(row["dam_key"], Counter())[row["damsire"].strip()] += 1
+        damsires.setdefault(row["dam_key"], Counter())[row["damsire"]] += row["n"]
     dams = conn.execute(
         """
         SELECT dam_key, MAX(dam) AS name, MAX(catalog_year) AS latest, COUNT(*) AS lots,
@@ -116,12 +117,13 @@ def due(item: dict, states: dict, now_ts: float) -> bool:
     return now_ts - state["last_attempt"].timestamp() >= days * 86400
 
 
-def build_queue(conn, index: dict, states: dict, now_ts: float, limit: int | None = None,
+def build_queue(parents: list[dict], index: dict, states: dict, now_ts: float, limit: int | None = None,
                 role: str | None = None) -> tuple[list[dict], Counter]:
-    """Items still to do, in order, plus counts of why the others were skipped."""
+    """Items still to do (of load_parents' list), in order, plus counts of why
+    the others were skipped."""
     skipped: Counter = Counter()
     todo = []
-    for item in load_parents(conn):
+    for item in parents:
         if role and item["role"] != role:
             continue
         if not item["name_key"]:

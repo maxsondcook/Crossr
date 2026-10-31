@@ -58,6 +58,11 @@ Complete that check in the open Chrome window. This run keeps Chrome open and co
 BLOCK_TIMEOUT_S = 600
 CLEAR_GAP_MS = 4000
 
+# A queue row whose horse (Equibase refno) is already stored under another id
+# keeps its pedigree_key, so it is not queued again, but no record of its own.
+MERGED = "merged"
+MERGED_PREFIX = "merged into race_horses "
+
 
 class Blocked(RuntimeError):
     pass
@@ -231,14 +236,53 @@ def goto_profile(page, url: str) -> tuple[str, str | None]:
         return "", f"error:{exc}"
 
 
+def _ok_row_for_refno(conn, horse_id, refno):
+    """The status=ok row already holding this Equibase horse, if it is not horse_id."""
+    row = db.find_by_equibase_refno(conn, refno)
+    if row is None or row["status"] != "ok" or str(row["id"]) == str(horse_id):
+        return None
+    return row
+
+
+def _mark_merged(conn, horse_id, kept_id, fetched_at: str) -> None:
+    """Clear horse_id's record (profile, seasons, starts) and point it at kept_id."""
+    db.save_profile(conn, horse_id, {}, MERGED, f"{MERGED_PREFIX}{kept_id}", fetched_at)
+
+
+def merged_into(row) -> str | None:
+    if row is None or row["status"] != MERGED:
+        return None
+    detail = row["detail"] or ""
+    if not detail.startswith(MERGED_PREFIX):
+        return None
+    return detail[len(MERGED_PREFIX):].strip() or None
+
+
+def follow_merged(conn, row):
+    """The kept row for a merged queue row; any other row as is."""
+    kept_id = merged_into(row)
+    if kept_id is None:
+        return row
+    kept = db.get_by_id(conn, kept_id)
+    return kept if kept is not None else row
+
+
 def _store_resolved(conn, horse_id: int, resolved: dict) -> str:
     kind = resolved["kind"]
     fetched_at = _now()
     if kind == "profile":
         profile = resolved["profile"]
+        starts = len(profile.get("starts") or [])
+        # One row per Equibase horse: catalog spellings and bare / dated keys
+        # of a stored horse update that row instead of copying its starts.
+        kept = _ok_row_for_refno(conn, horse_id, profile.get("equibase_refno"))
+        if kept is not None:
+            db.save_profile(conn, kept["id"], profile, "ok", "", fetched_at)
+            _mark_merged(conn, horse_id, kept["id"], fetched_at)
+            conn.commit()
+            return f"ok starts={starts} merged into {kept['id']}"
         db.save_profile(conn, horse_id, profile, "ok", "", fetched_at)
         conn.commit()
-        starts = len(profile.get("starts") or [])
         return f"ok starts={starts}"
     if kind in {"not_found", "ambiguous", "year_mismatch"}:
         db.mark_status(conn, horse_id, kind, resolved.get("detail") or "", fetched_at)
@@ -403,14 +447,15 @@ def fetch_ancestor_profile(page, conn, delay: float, query) -> dict | None:
 
 
 class _PedigreeBook:
-    """Pedigree map and ancestor index. With Postgres, trees go straight to the
-    pedigrees table (no pedigrees_database.py rewrite); ``saved`` counts them."""
+    """Pedigree map and ancestor index. With Postgres (or the pipeline's local
+    stage), trees go to that pedigrees table (no pedigrees_database.py
+    rewrite); ``saved`` counts them."""
 
     def __init__(self, conn=None):
         print("Loading pedigree map for 5-generation fill...", flush=True)
-        self.conn = conn if db is pgdb else None
+        self.conn = conn if db is not sqlite_db else None
         if self.conn is not None:
-            self.pedigree_map = pgdb.load_pedigree_map(self.conn)
+            self.pedigree_map = db.load_pedigree_map(self.conn)
         else:
             self.pedigree_map = load_pedigree_map()
         self.index = build_ancestor_index(self.pedigree_map)
@@ -424,7 +469,7 @@ class _PedigreeBook:
             return
         if self.conn is not None:
             items = {key: self.pedigree_map[key] for key in keys if key in self.pedigree_map}
-            self.saved += pgdb.upsert_pedigrees(self.conn, items)
+            self.saved += db.upsert_pedigrees(self.conn, items)
             return
         save_pedigree_map(self.pedigree_map, overwrite_keys=set(keys))
 
@@ -537,6 +582,12 @@ def fetch_horse(page, conn, horse, delay: float) -> str:
         f"{label}: match refno={candidate.get('refno')} registry={candidate.get('registry')}",
         flush=True,
     )
+    kept = None if refresh else _ok_row_for_refno(conn, horse_id, candidate.get("refno"))
+    if kept is not None and (not year or not kept["foal_year"] or str(kept["foal_year"]) == str(year)):
+        _mark_merged(conn, horse_id, kept["id"], _now())
+        conn.commit()
+        print(f"{label}: already stored as race_horses {kept['id']}, merged", flush=True)
+        return MERGED
     polite_wait(page, delay)
     profile_html, err = goto_profile(page, candidate["url"])
     if is_blocked(profile_html):
@@ -562,7 +613,7 @@ def fetch_horse(page, conn, horse, delay: float) -> str:
     return resolved["kind"]
 
 
-def _launch_context(playwright):
+def _launch_context(playwright, extra_args: list[str] | None = None):
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     context = playwright.chromium.launch_persistent_context(
         user_data_dir=str(PROFILE_DIR),
@@ -570,7 +621,7 @@ def _launch_context(playwright):
         headless=False,
         locale="en-US",
         viewport={"width": 1440, "height": 900},
-        args=["--disable-blink-features=AutomationControlled"],
+        args=["--disable-blink-features=AutomationControlled", *(extra_args or [])],
         ignore_default_args=["--enable-automation"],
     )
     page = context.pages[0] if context.pages else context.new_page()
@@ -615,7 +666,7 @@ def run_fetch(conn, horses, delay: float, pedigree_fill: bool = True) -> int:
                     try:
                         if horse["status"] != "ok":
                             fetch_horse(page, conn, horse, delay)
-                            fresh = db.get_by_id(conn, horse["id"])
+                            fresh = follow_merged(conn, db.get_by_id(conn, horse["id"]))
                             if fresh is not None:
                                 horse = dict(fresh)
                         if horse["status"] == "ok" and book is not None:
