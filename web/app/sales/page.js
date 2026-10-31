@@ -671,8 +671,10 @@ function SalesPage() {
   }
 
   function jumpToHip(raw) {
-    const hip = String(raw || "").trim();
-    const found = filtered.find((lot) => String(lot.hip) === hip);
+    // "35" finds hip "0035" (and "35a" finds "0035A"): compare without leading zeros or case.
+    const norm = (v) => String(v ?? "").trim().toUpperCase().replace(/^0+(?=\d)/, "");
+    const hip = norm(raw);
+    const found = filtered.find((lot) => norm(lot.hip) === hip);
     if (!found) {
       setJumpError("That hip is not in this list.");
       return;
