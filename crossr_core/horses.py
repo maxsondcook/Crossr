@@ -467,6 +467,9 @@ def top_progeny_for_sire(sire_name, limit=None):
     return rows[:limit] if limit else rows
 
 
+from crossr_core.stallion_stats import bms_crosses  # noqa: E402
+
+
 _RACE_HORSE_PROGENY = None
 
 
@@ -2538,6 +2541,7 @@ def get_horse_profile(search_name, profiles=None):
         "pedigree": tree,
         "inbreeding": inbreeding,
         "top_progeny": payload_top,
+        "bms_crosses": bms_crosses(payload_top) if stallion_sections else [],
         "stud_book": stud_book_history(matched_key or search_name, entered_stud=entered_stud) if data else [],
         "broodmare_sire": bms_rows,
         "sire_rankings": ranking_rows,

@@ -523,6 +523,43 @@ function StallionRankingsPanel({ rankingMeta: rawRankingMeta, rankList: rawRankL
   );
 }
 
+const BMS_COLUMNS = [
+  ["mg1w", "#MG1Ws", "Multiple Grade 1 winners"],
+  ["g1w", "#G1Ws", "Grade 1 winners (one G1)"],
+  ["gsw", "#GSWs", "All graded stakes winners"],
+  ["g2w", "#G2Ws", "Best win a Grade 2"],
+  ["g3w", "#G3Ws", "Best win a Grade 3"],
+  ["sw", "#SWs", "Ungraded / listed stakes winners"],
+];
+
+function BmsCrossesTable({ rows }) {
+  // Hide columns that are zero for every broodmare sire of this stallion.
+  const cols = BMS_COLUMNS.filter(([key]) => rows.some((r) => r[key] > 0));
+  return (
+    <>
+      <h4>BEST BROODMARE SIRE CROSSES · {rows.length}</h4>
+      <div className="history-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Broodmare Sire</th>
+              {cols.map(([key, label, title]) => <th key={key} title={title}>{label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.broodmare_sire}>
+                <td>{r.broodmare_sire}</td>
+                {cols.map(([key]) => <td key={key}>{r[key] || "—"}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 // Breeding panel by profile type: suggested stallions for fillies/mares,
 // similar active stallions for colts/horses, nothing for geldings.
 const BREEDING_TYPES = new Set(["racing_female", "broodmare", "racing_male"]);
@@ -586,6 +623,7 @@ function HorsePage() {
   const [rankList, setRankList] = useState("leading_sire");
   const [showAllProgeny, setShowAllProgeny] = useState(false);
   const [breeding, setBreeding] = useState(null);
+  const [progenyView, setProgenyView] = useState("top");
   const returnTarget = useMemo(() => resolveReturnTarget(searchParams), [searchParams]);
   const salesReturn = returnTarget.sales;
   const hrefFor = useMemo(
@@ -870,6 +908,28 @@ function HorsePage() {
 
         {isStallion ? (
         <div className="panel">
+          {(data.bms_crosses || []).length ? (
+            <div className="view-toggle" style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <button
+                type="button"
+                className={progenyView === "top" ? "primary" : "ghost"}
+                onClick={() => setProgenyView("top")}
+              >
+                TOP PROGENY
+              </button>
+              <button
+                type="button"
+                className={progenyView === "bms" ? "primary" : "ghost"}
+                onClick={() => setProgenyView("bms")}
+              >
+                BEST BROODMARE SIRE CROSSES
+              </button>
+            </div>
+          ) : null}
+          {progenyView === "bms" && (data.bms_crosses || []).length ? (
+            <BmsCrossesTable rows={data.bms_crosses} />
+          ) : (
+          <>
           <h4>TOP PROGENY{(data.top_progeny || []).length ? ` · ${data.top_progeny.length}` : ""}</h4>
           {(data.top_progeny || []).length ? (
             <>
@@ -898,6 +958,8 @@ function HorsePage() {
             </>
           ) : (
             <p className="catalog-empty">No top progeny recorded for this stallion yet.</p>
+          )}
+          </>
           )}
         </div>
         ) : null}
