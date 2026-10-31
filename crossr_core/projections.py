@@ -330,6 +330,9 @@ def _value_projector_payload(lot: dict) -> Dict[str, Any]:
         "high": high,
         "display": display,
         "detail": raw.get("detail") or "",
+        # colts: how the breeding value was reached and the comparable stallions behind it
+        "basis": raw.get("basis") or "",
+        "comparables": raw.get("comparables") or [],
         "projected_race_earnings": race,
         "race_detail": raw.get("race_detail") or "",
         "added_value_by_fee_bracket": raw.get("added_value_by_fee_bracket") or [],
