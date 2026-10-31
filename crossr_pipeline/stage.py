@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from crossr_core import pg_push
+from crossr_pipeline import damsire_dams
 
 REPO = Path(__file__).resolve().parents[1]
 STAGE_PATH = Path(os.environ.get("CROSSR_STAGE", REPO / "state" / "stage.sqlite"))
@@ -91,6 +92,7 @@ CREATE TABLE IF NOT EXISTS queue (
 
 CREATE TABLE IF NOT EXISTS rp_fees_stage (rp_horse_id TEXT NOT NULL, row TEXT);
 CREATE TABLE IF NOT EXISTS stud_fee_stage (row TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS dam_candidates_stage (name_key TEXT PRIMARY KEY, name TEXT, candidates TEXT);
 CREATE TABLE IF NOT EXISTS cache (k TEXT PRIMARY KEY, version TEXT, value TEXT);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 """
@@ -199,6 +201,7 @@ def _dirty_count(conn) -> int:
         "SELECT count(*) AS n FROM queue WHERE _dirty > 0",
         "SELECT count(*) AS n FROM rp_fees_stage",
         "SELECT count(*) AS n FROM stud_fee_stage",
+        "SELECT count(*) AS n FROM dam_candidates_stage",
     ))
 
 
@@ -359,9 +362,10 @@ def push(local, pg, log=print) -> dict:
                               "FROM queue WHERE _dirty > 0").fetchall()
         rp_rows = local.execute("SELECT rp_horse_id, row FROM rp_fees_stage").fetchall()
         fee_rows = [json.loads(r["row"]) for r in local.execute("SELECT row FROM stud_fee_stage")]
+        dam_rows = local.execute("SELECT name_key, name, candidates FROM dam_candidates_stage").fetchall()
         counts: dict = {}
         changed: list[str] = []
-        if any((horses, children, peds, marks, rp_rows, fee_rows)):
+        if any((horses, children, peds, marks, rp_rows, fee_rows, dam_rows)):
             with pg.transaction():
                 if horses:
                     counts["race_horses"] = pg_push.upsert(pg, "race_horses", HORSE_COLS, ("id",), horses)
@@ -387,6 +391,10 @@ def push(local, pg, log=print) -> dict:
                     counts["stud_fees"] = pg_push.upsert(pg, "stud_fees", FEE_COLS, ("Year", "Stallion", "Source List"),
                                                          fee_rows, keep_blanks=True)
                     changed.append("stud_fees")
+                if dam_rows:
+                    counts["damsires filled"] = damsire_dams.push_fills(pg, dam_rows)
+                    if counts["damsires filled"]:
+                        changed.append("sales_lots")
         if changed:
             pgdb.flush_versions(pg, changed)
             versions = pg_push.table_versions(pg, ("race_horses", "pedigrees"))
@@ -396,7 +404,8 @@ def push(local, pg, log=print) -> dict:
         local.execute("UPDATE race_horses SET _dirty = 0 WHERE _dirty > 0")
         local.execute("UPDATE pedigrees SET _dirty = 0 WHERE _dirty > 0")
         local.execute("UPDATE queue SET _dirty = 0 WHERE _dirty > 0")
-        for table in ("stage_children", "race_seasons_stage", "race_starts_stage", "rp_fees_stage", "stud_fee_stage"):
+        for table in ("stage_children", "race_seasons_stage", "race_starts_stage", "rp_fees_stage", "stud_fee_stage",
+                      "dam_candidates_stage"):
             local.execute(f"DELETE FROM {table}")
         local.execute("COMMIT")
     except BaseException:
@@ -447,6 +456,7 @@ def pending(local) -> dict:
         ("queue marks", "SELECT count(*) AS n FROM queue WHERE _dirty > 0"),
         ("racing post horses", "SELECT count(DISTINCT rp_horse_id) AS n FROM rp_fees_stage"),
         ("stud_fees rows", "SELECT count(*) AS n FROM stud_fee_stage"),
+        ("dams searched", "SELECT count(*) AS n FROM dam_candidates_stage"),
     ):
         out[label] = local.execute(sql).fetchone()["n"]
     return out

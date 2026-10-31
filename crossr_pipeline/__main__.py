@@ -57,6 +57,7 @@ def cmd_scrape(args) -> int:
             catalogs_only=args.catalogs_only,
             minutes=args.minutes,
             light=not args.full_pages,
+            dams_only=args.dams_only,
         )
     except Exception:
         # Exit 0 so launchd waits for the next interval instead of restarting
@@ -306,6 +307,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--skip-refresh", action="store_true", help="Do not run the weekly race refresh")
     p.add_argument("--refresh-only", action="store_true", help="Run only the race refresh, then exit")
     p.add_argument("--role", choices=["sire", "dam"], help="Only sale sires or only sale dams")
+    p.add_argument("--dams-only", action="store_true",
+                   help="Only the damsire-dams list (no catalogs, refresh or pedigrees); --limit caps the dams")
     p.add_argument("--catalogs-only", action="store_true",
                    help="Only run queued upcoming catalogs (with --limit: that many hips each), then exit")
     p.set_defaults(func=cmd_scrape)
