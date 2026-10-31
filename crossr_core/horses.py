@@ -140,8 +140,12 @@ def _roster_foal_year(name, data, stud_year):
 def build_stallion_roster(profiles=None):
     """Cheap list cache: 2026 mares-bred roster + profile/CSV parents. No pedigree scans."""
     global _STALLION_ROSTER
-    if _STALLION_ROSTER is not None:
-        return _STALLION_ROSTER
+    from crossr_core import sample_db as _sdb
+
+    # Rebuild when a source table changes (new mares-bred report, fees), not only at startup.
+    version = tuple(_sdb.table_version(t) for t in ("breeding_seasons", "stud_fees", "stallion_rankings"))
+    if _STALLION_ROSTER is not None and _STALLION_ROSTER[0] == version:
+        return _STALLION_ROSTER[1]
     profiles = profiles if profiles is not None else main.load_master_profiles()
     by_profile = _profile_by_key(profiles)
     parents = _parent_lookup()
@@ -195,7 +199,7 @@ def build_stallion_roster(profiles=None):
             "state": row.get("state"),
             "avatar": (display or row["name"] or "?")[:1].upper(),
         })
-    _STALLION_ROSTER = roster
+    _STALLION_ROSTER = (version, roster)
     return roster
 
 
