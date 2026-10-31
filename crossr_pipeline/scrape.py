@@ -238,7 +238,7 @@ def process_item(eb, page, conn, book, item: dict, delay: float) -> tuple[str, s
     row, why = _row_for_item(eb, conn, item)
     if row is None:
         return ("ambiguous" if why == "ambiguous rows" else "error"), why
-    horse = dict(row)
+    horse = dict(eb.follow_merged(conn, row))
     if horse["status"] in sales_parents.DONE:
         return horse["status"], f"race_horses {horse['id']}"
     if horse["status"] != "ok":
@@ -247,7 +247,7 @@ def process_item(eb, page, conn, book, item: dict, delay: float) -> tuple[str, s
         if item["role"] == "dam" and not horse.get("sire") and item["sire"]:
             horse["sire"] = item["sire"]
         eb.fetch_horse(page, conn, horse, delay)
-        horse = dict(eb.db.get_by_id(conn, horse["id"]))
+        horse = dict(eb.follow_merged(conn, eb.db.get_by_id(conn, horse["id"])))
         if horse["status"] != "ok":
             return horse["status"], horse.get("detail") or ""
     eb.fill_horse_pedigree(page, conn, horse, book, delay)
