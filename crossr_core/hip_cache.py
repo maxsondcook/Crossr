@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 # Bump when the hip payload's shape or the code computing it changes.
-CACHE_VERSION = "3"
+CACHE_VERSION = "4"  # 4: pedigree gaps filled from ancestors' own records
 
 TABLE = "upcoming_hip_cache"
 # Owned by the data pipeline: per-hip scrape state and the "catalog complete" signal.

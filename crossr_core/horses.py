@@ -1250,7 +1250,20 @@ def _is_catalog_placeholder(name):
     return False
 
 
+CATALOG_GENERATIONS = 5  # ancestor generations the catalog pedigree chart shows
+
+
 def catalog_pedigree(name=None, year=None, sire=None, dam=None, damsire=None):
+    """Subject tree (or the sire × dam fallback), with short branches filled from ancestors' own records."""
+    from crossr_core.pedigree_fill import fill_gaps
+
+    tree = _catalog_pedigree_raw(name=name, year=year, sire=sire, dam=dam, damsire=damsire)
+    if not isinstance(tree, dict):
+        return tree
+    return fill_gaps(tree, CATALOG_GENERATIONS, main.pedigree_tree, main.clean_horse_name)
+
+
+def _catalog_pedigree_raw(name=None, year=None, sire=None, dam=None, damsire=None):
     """Subject tree when the horse is on file, otherwise the sire × dam catalog fallback."""
     label = (name or "").strip()
     # Upcoming yearlings often use 2025-DAM or "Sire x Dam" labels — prefer catalog parents.
