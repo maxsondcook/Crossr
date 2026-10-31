@@ -105,6 +105,32 @@ def card_sire(name: str, foal_year: int | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Where a stallion stands
+# ---------------------------------------------------------------------------
+
+_NA_PLACES = re.compile(
+    r"\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|"
+    r"OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|AB|BC|MB|NB|NS|ON|PE|QC|SK|"
+    r"Alabama|Arizona|Arkansas|California|Colorado|Florida|Georgia|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|"
+    r"Louisiana|Maryland|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Jersey|New Mexico|"
+    r"New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|South Carolina|South Dakota|"
+    r"Tennessee|Texas|Utah|Virginia|Washington|West Virginia|Wisconsin|Wyoming|Alberta|British Columbia|"
+    r"Manitoba|Ontario|Quebec|Saskatchewan|USA|U\.S\.A|Canada)\b"
+)
+
+
+def stands_in_north_america(card: dict | None) -> bool:
+    """True when the stud card's fee is in US/Canadian dollars, or (no fee
+    currency) its farm location names a US state or Canadian province."""
+    if not card:
+        return False
+    currency = str(card.get("Stud Fee Currency") or "").upper()
+    if currency:
+        return currency in ("USD", "CAD")
+    return bool(_NA_PLACES.search(str(card.get("Farm") or "")))
+
+
+# ---------------------------------------------------------------------------
 # Facts about one horse
 # ---------------------------------------------------------------------------
 
