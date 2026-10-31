@@ -578,7 +578,8 @@ def sire_sales_summary(sire_name, entered_stud=None, catalog_id=None, today=None
         st = stats(s.pop("pool"))
         if st["offered"]:
             sale_list.append({**s, "progeny": st["offered"], "sold": st["sold"], "average": st["average"]})
-    sale_list.sort(key=lambda s: (-s["year"], -(s["month_index"] or 0), s["title"]))
+    # month_index 13 means "unknown month" (sales_history): sort those last in their year.
+    sale_list.sort(key=lambda s: (-s["year"], -(s["month_index"] if 0 < (s["month_index"] or 0) <= 12 else 0), s["title"]))
 
     selected = catalog_id or (sale_list[0]["catalog_id"] if sale_list else None)
     sale_lots = [l for l in lots if l["catalog_id"] == selected]
