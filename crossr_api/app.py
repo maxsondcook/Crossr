@@ -324,6 +324,15 @@ def horse_profile(name: str):
     return payload
 
 
+@app.get("/api/horses/{name}/breeding")
+def horse_breeding(name: str, limit: int = Query(10, ge=1, le=25)):
+    """Suggested stallions (fillies/mares) or similar active stallions (colts/horses).
+
+    Loaded separately from the profile so the page renders first.
+    """
+    return horse_svc.breeding_panel(name, profiles=profiles(), limit=limit)
+
+
 def _add_cross_similarity(result):
     """Similarity of each winning cross to the stallion × mare foal being suggested."""
     mare = result.get("mare_key") or result.get("mare")
