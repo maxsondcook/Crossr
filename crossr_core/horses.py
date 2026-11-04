@@ -277,6 +277,55 @@ def _progeny_earnings_lookup():
     return earn
 
 
+_CAREER_EARNINGS_SQL = """
+SELECT h.name_key, h.sire, h.foal_year,
+       COALESCE(SUM(NULLIF(regexp_replace(s.earnings::text, '[^0-9]', '', 'g'), '')::numeric)
+                FILTER (WHERE s.year ~ '^[0-9]{4}$'), 0) AS earnings
+FROM race_horses h
+LEFT JOIN race_seasons s ON s.horse_id = h.id
+WHERE h.name_key = ANY(%s) AND h.status = 'ok'
+GROUP BY h.id, h.name_key, h.sire, h.foal_year
+"""
+
+
+def career_earnings(names, sire_name=None):
+    """cleaned name -> career earnings (sum of race_seasons) for these horses.
+
+    Names are reused, so a horse only gets a figure when its race record is
+    unambiguous: same sire as ``sire_name``, or the only horse of that name.
+    Horses whose race record hasn't been collected get no entry (shown as "—").
+    """
+    from crossr_core import sample_db
+
+    names = [n for n in dict.fromkeys(names or []) if n]
+    pg = sample_db._pg() if names else None
+    if not pg:
+        return {}
+    key_to_clean = {}
+    for name in names:
+        for key in _race_name_keys([name]):
+            key_to_clean.setdefault(key, main.clean_horse_name(name))
+    try:
+        with pg.connect() as conn:
+            rows = conn.execute(_CAREER_EARNINGS_SQL, (list(key_to_clean),)).fetchall()
+    except Exception:
+        return {}
+    sire_clean = main.clean_horse_name(re.sub(r"\s*\(\d{4}\)", "", sire_name or ""))
+    by_name = {}
+    for name_key, sire, foal_year, earnings in rows:
+        clean = key_to_clean.get(name_key)
+        if clean:
+            by_name.setdefault(clean, []).append((main.clean_horse_name(sire or ""), foal_year, int(earnings or 0)))
+    out = {}
+    for clean, cands in by_name.items():
+        same_sire = [c for c in cands if sire_clean and c[0] == sire_clean]
+        pool = same_sire or (cands if len({c[1] for c in cands}) == 1 else [])
+        best = max((c[2] for c in pool), default=0)  # duplicate rows of one horse: keep the fullest
+        if best > 0:
+            out[clean] = best
+    return out
+
+
 _RACE_INDEX = None
 
 
@@ -467,7 +516,9 @@ _CLASS_ORDER = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "S
 def top_progeny_for_sire(sire_name, limit=None):
     """Every black-type winner by this sire, best class first, then earnings (no cap by default)."""
     payload = hypomating_engine.top_crosses_payload(main.PEDIGREE_DATABASE, sire_name, limit=None)
-    earn_lookup = _progeny_earnings_lookup()
+    names = [w["name"] for cross in payload.get("crosses", []) for w in cross.get("winners", [])]
+    names += [h_name for h_name, _, _ in _race_horse_progeny().get(main.clean_horse_name(sire_name), {}).values()]
+    earn_lookup = career_earnings(names, sire_name)
     rows = []
     for cross in payload.get("crosses", []):
         for w in cross.get("winners", []):
@@ -939,8 +990,8 @@ def similar_cross_rows(
     class_rank = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "SW": 6}
     ref = resolve_pedigree_tree(name=reference_name, tree=reference_tree, sire=reference_sire, dam=reference_dam)
     has_ref = bool(ref and _horse_id(ref))
-    earn_lookup = _progeny_earnings_lookup()
     summaries = hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
+    earn_lookup = career_earnings(list(summaries), sire_name)
     sire_display = re.sub(r"\s*\(\d{4}\)", "", sire_name or "").strip()
     sire_key = main.clean_horse_name(sire_name)
 
