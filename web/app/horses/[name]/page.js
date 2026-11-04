@@ -599,6 +599,8 @@ function CrossSalesTable({ name }) {
   const [error, setError] = useState("");
   const [type, setType] = useState("yearlings");
   const [minSold, setMinSold] = useState(2);
+  const [openRow, setOpenRow] = useState(null);
+  const typeMatch = { yearlings: ["Yearling"], weanlings: ["Weanling"], all: null }[type];
   useEffect(() => {
     setData(null);
     setError("");
@@ -635,15 +637,47 @@ function CrossSalesTable({ name }) {
               <tr><th>Broodmare Sire</th><th>Average</th><th>Median</th><th>Top price</th><th>Sold</th></tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.broodmare_sire}>
-                  <td>{r.broodmare_sire}</td>
-                  <td className="money">{money(r[type].average)}</td>
-                  <td className="money">{r[type].median != null ? money(r[type].median) : "—"}</td>
-                  <td className="money">{r[type].high != null ? money(r[type].high) : "—"}</td>
-                  <td>{r[type].sold} of {r[type].offered}</td>
-                </tr>
-              ))}
+              {rows.map((r) => {
+                const lots = (r.lots || [])
+                  .filter((l) => !typeMatch || typeMatch.includes(l.type))
+                  .sort((a, b) => (b.status === "sold") - (a.status === "sold") || (b.price || 0) - (a.price || 0));
+                const isOpen = openRow === r.broodmare_sire;
+                return (
+                  <Fragment key={r.broodmare_sire}>
+                    <tr
+                      className={lots.length ? "bms-row" : undefined}
+                      onClick={lots.length ? () => setOpenRow(isOpen ? null : r.broodmare_sire) : undefined}
+                      aria-expanded={lots.length ? isOpen : undefined}
+                    >
+                      <td>
+                        {lots.length ? <span className="bms-caret">{isOpen ? "▾" : "▸"}</span> : null}
+                        {r.broodmare_sire}
+                      </td>
+                      <td className="money">{money(r[type].average)}</td>
+                      <td className="money">{r[type].median != null ? money(r[type].median) : "—"}</td>
+                      <td className="money">{r[type].high != null ? money(r[type].high) : "—"}</td>
+                      <td>{r[type].sold} of {r[type].offered}</td>
+                    </tr>
+                    {isOpen ? (
+                      <tr className="bms-horses">
+                        <td colSpan={5}>
+                          {lots.map((l, i) => (
+                            <div key={`${l.sale}-${l.hip}-${i}`} className="bms-horse cross-lot">
+                              <span className="cross-lot-name">{l.name || "Unnamed"}</span>
+                              <span className="bms-horse-meta">
+                                {[l.type, l.sex, `${l.sale} ${l.year}`, l.hip ? `Hip ${l.hip}` : null].filter(Boolean).join(" · ")}
+                              </span>
+                              <span className={`cross-lot-price${l.status === "sold" ? "" : " unsold"}`}>
+                                {l.status === "sold" ? money(l.price) : l.status === "not sold" ? `RNA${l.price ? ` ${money(l.price)}` : ""}` : l.status}
+                              </span>
+                            </div>
+                          ))}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
