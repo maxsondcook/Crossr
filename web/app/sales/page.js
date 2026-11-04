@@ -13,6 +13,7 @@ import {
 import PedigreeChart from "../../components/PedigreeChart";
 import FemaleFamily from "../../components/FemaleFamily";
 import ProjectedValue from "../../components/ProjectedValue";
+import VoiceNoteButton from "../../components/VoiceNoteButton";
 
 function money(n) {
   if (n == null || n === "") return "—";
@@ -858,6 +859,18 @@ function SalesPage() {
                 onBlur={saveNotes}
                 placeholder="Add a note"
                 disabled={!current}
+              />
+              <VoiceNoteButton
+                disabled={!current}
+                onText={(chunk) => {
+                  // Append each dictated phrase; draftRef keeps saveNotes in step.
+                  const prev = draftRef.current;
+                  const next = prev && !/\s$/.test(prev) ? `${prev} ${chunk}` : `${prev}${chunk}`;
+                  draftRef.current = next;
+                  setNoteDraft(next);
+                  setNoteState("");
+                }}
+                onStop={saveNotes}
               />
               {noteState ? <p className="note-state">{noteState}</p> : null}
             </div>
