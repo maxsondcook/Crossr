@@ -15,42 +15,95 @@ function money(n) {
   return `$${Math.round(n).toLocaleString()}`;
 }
 
+/** Weighted average over completed-or-not years [from, to] from the by-year rows. */
+function rangeSummary(rows, cat, from, to) {
+  let sold = 0;
+  let gross = 0;
+  for (const r of rows || []) {
+    if (r.year < from || r.year > to) continue;
+    const n = Number(r[`${cat}_sold`]) || 0;
+    const avg = Number(r[`${cat}_avg`]);
+    if (n && Number.isFinite(avg)) {
+      sold += n;
+      gross += avg * n;
+    }
+  }
+  return { sold, average: sold ? gross / sold : null };
+}
+
 function SummaryTable({ data }) {
+  const latest = data.latest_completed_year;
+  const years = (data.by_year || []).map((r) => r.year).sort((a, b) => a - b);
+  const [range, setRange] = useState({ from: latest - 2, to: latest });
+  useEffect(() => { setRange({ from: latest - 2, to: latest }); }, [latest]);
+  const isDefault = range.from === latest - 2 && range.to === latest;
+  const rangeLabel = range.from === range.to ? `${range.from}` : `${range.from}–${range.to}`;
   const periods = [
     ["current", `${data.current_year} (to date)`],
-    ["latest", `${data.latest_completed_year}`],
-    ["last3", `${data.latest_completed_year - 2}–${data.latest_completed_year}`],
+    ["latest", `${latest}`],
     ["lifetime", "Lifetime"],
   ];
+  const setFrom = (v) => setRange((r) => ({ from: v, to: Math.max(v, r.to) }));
+  const setTo = (v) => setRange((r) => ({ from: Math.min(v, r.from), to: v }));
   return (
     <div className="history-wrap">
+      {years.length ? (
+        <div className="range-picker">
+          <span>Range</span>
+          <select value={range.from} onChange={(e) => setFrom(Number(e.target.value))} aria-label="From year">
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <span>to</span>
+          <select value={range.to} onChange={(e) => setTo(Number(e.target.value))} aria-label="To year">
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+          {!isDefault ? (
+            <button className="ghost" type="button" onClick={() => setRange({ from: latest - 2, to: latest })}>
+              Last 3 years
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <table>
         <thead>
           <tr>
             <th>Average price</th>
+            <th className="range-col">{rangeLabel}</th>
             {periods.map(([k, label]) => <th key={k}>{label}</th>)}
           </tr>
         </thead>
         <tbody>
-          {CATS.map(([cat, label]) => (
-            <tr key={cat}>
-              <td>{label}</td>
-              {periods.map(([p]) => {
-                const s = data.summary?.[cat]?.[p];
-                return (
-                  <td key={p} className="money" title={s ? `${s.sold} sold of ${s.offered} offered · median ${money(s.median)}` : ""}>
-                    {s && s.average != null ? money(s.average) : "—"}
-                    {s && s.sold ? <span className="muted" style={{ fontSize: 12 }}> · {s.sold}</span> : null}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
+          {CATS.map(([cat, label]) => {
+            // The default range uses the API's exact last-3-years figures (with median).
+            const exact = isDefault ? data.summary?.[cat]?.last3 : null;
+            const r = exact || rangeSummary(data.by_year, cat, range.from, range.to);
+            return (
+              <tr key={cat}>
+                <td>{label}</td>
+                <td
+                  className="money range-col"
+                  title={exact ? `${exact.sold} sold of ${exact.offered} offered · median ${money(exact.median)}` : `${r.sold} sold`}
+                >
+                  {r.average != null ? money(r.average) : "—"}
+                  {r.sold ? <span className="muted" style={{ fontSize: 12 }}> · {r.sold}</span> : null}
+                </td>
+                {periods.map(([p]) => {
+                  const s = data.summary?.[cat]?.[p];
+                  return (
+                    <td key={p} className="money" title={s ? `${s.sold} sold of ${s.offered} offered · median ${money(s.median)}` : ""}>
+                      {s && s.average != null ? money(s.average) : "—"}
+                      {s && s.sold ? <span className="muted" style={{ fontSize: 12 }}> · {s.sold}</span> : null}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       <p className="sub" style={{ fontSize: 12, marginTop: 6 }}>
         Sold lots only (RNAs not counted as sales, outs excluded); small number = horses sold.
-        {` ${data.current_year} is incomplete, so annual averages use ${data.latest_completed_year}.`}
+        {` ${data.current_year} is incomplete, so annual averages use ${latest}.`}
       </p>
     </div>
   );
@@ -62,7 +115,6 @@ function shortMoney(v) {
 
 function YearChart({ rows }) {
   const [hidden, setHidden] = useState({});
-  const [showValues, setShowValues] = useState(false);
   const [active, setActive] = useState(null); // hovered / tapped year index
   const W = 640, H = 220, P = { l: 56, r: 12, t: 12, b: 28 };
   const shown = CATS.filter(([cat]) => !hidden[cat]);
@@ -83,12 +135,14 @@ function YearChart({ rows }) {
             {label}
           </label>
         ))}
-        <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", fontSize: 13, marginLeft: "auto" }}>
-          <input type="checkbox" checked={showValues} onChange={() => setShowValues((v) => !v)} />
-          Show values
-        </label>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }} role="img" aria-label="Average sale price by year">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: "100%", height: "auto" }}
+        role="img"
+        aria-label="Average sale price by year"
+        onMouseLeave={() => setActive(null)}
+      >
         {ticks.map((t) => (
           <g key={t}>
             <line x1={P.l} x2={W - P.r} y1={y(t)} y2={y(t)} stroke="currentColor" opacity="0.12" />
@@ -124,8 +178,8 @@ function YearChart({ rows }) {
                   <circle cx={a} cy={b} r={active != null && rows[active] === r ? 5 : 3} fill={color}>
                     <title>{`${label} ${r.year}: ${money(v)} (${r[`${cat}_sold`]} sold)`}</title>
                   </circle>
-                  {showValues ? (
-                    <text x={a} y={b - 8} fontSize="9" textAnchor="middle" fill={color}>{shortMoney(v)}</text>
+                  {active != null && rows[active] === r ? (
+                    <text x={a} y={b - 9} fontSize="11" fontWeight="700" textAnchor="middle" fill={color}>{shortMoney(v)}</text>
                   ) : null}
                 </g>
               ))}
