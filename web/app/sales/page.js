@@ -199,9 +199,9 @@ function lineageLine(lot) {
   return [sire && dam ? `${sire} x ${dam}` : sire || dam, byDamsire].filter(Boolean).join(" ");
 }
 
-function ClientSetup({ step, clients, onYes, onNo, onSkip, onNames }) {
-  // Start with one client; "+ Add another client" grows the list (no fixed cap).
-  const [names, setNames] = useState([""]);
+function ClientSetup({ step, index, done, onYes, onNo, onSkip, onName, onFinish }) {
+  const [name, setName] = useState("");
+  const first = index === 0;
   return (
     <div className="filter-sheet" role="dialog" aria-label="Sale setup">
       <div className="setup-card">
@@ -217,29 +217,28 @@ function ClientSetup({ step, clients, onYes, onNo, onSkip, onNames }) {
           </>
         ) : (
           <>
-            <h3>YOUR CLIENTS</h3>
-            <div className="setup-names">
-              {names.map((name, i) => (
-                <label key={i}>
-                  Client {i + 1} name
-                  <span className="setup-name-row">
-                    <input
-                      value={name}
-                      placeholder={clients[i]?.name || `Client ${i + 1}`}
-                      autoFocus={i === names.length - 1}
-                      onChange={(e) => setNames((cur) => { const next = [...cur]; next[i] = e.target.value; return next; })}
-                    />
-                    {names.length > 1 ? (
-                      <button type="button" className="ghost" title="Remove" onClick={() => setNames((cur) => cur.filter((_, j) => j !== i))}>✕</button>
-                    ) : null}
-                  </span>
-                </label>
-              ))}
-            </div>
-            <button className="ghost setup-add" type="button" onClick={() => setNames((cur) => [...cur, ""])}>+ Add another client</button>
+            <h3>{first ? "YOUR FIRST CLIENT" : "ADD ANOTHER CLIENT?"}</h3>
+            {done.length ? (
+              <p className="sub">Filters saved for {done.join(", ")}.</p>
+            ) : null}
+            <form
+              className="setup-names"
+              onSubmit={(e) => { e.preventDefault(); onName(name); }}
+            >
+              <label>
+                Client {index + 1} name
+                <span className="setup-name-row">
+                  <input value={name} placeholder={`Client ${index + 1}`} autoFocus onChange={(e) => setName(e.target.value)} />
+                </span>
+              </label>
+            </form>
             <div className="setup-actions">
-              <button className="primary" type="button" onClick={() => onNames(names.length, names)}>Set their filters →</button>
-              <button className="ghost setup-skip" type="button" onClick={onSkip}>Skip</button>
+              <button className="primary" type="button" onClick={() => onName(name)}>Set their filters →</button>
+              {first ? (
+                <button className="ghost setup-skip" type="button" onClick={onSkip}>Skip</button>
+              ) : (
+                <button className="ghost setup-skip" type="button" onClick={onFinish}>No, I&apos;m done</button>
+              )}
             </div>
           </>
         )}
@@ -251,6 +250,50 @@ function ClientSetup({ step, clients, onYes, onNo, onSkip, onNames }) {
 /** Books and sessions read 1, 2, 3… rather than by size. */
 function numericOrder(options) {
   return [...options].sort((a, b) => (Number(a.value) || 0) - (Number(b.value) || 0) || a.value.localeCompare(b.value));
+}
+
+function initials(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+/** True when a lot passes a filter snapshot ({sex, color, maxPrice, height, selectedSires, priceRanges, extra}). */
+function lotMatchesFilters(lot, f = {}) {
+  const { sex = "", color = "", maxPrice = "", height = "", priceRanges = [] } = f;
+  const sires = new Set(f.selectedSires || []);
+  const x = { ...EMPTY_EXTRA, ...(f.extra || {}) };
+  const soldAs = new Set(x.soldAs || []);
+  const letter = (lot.sex_letter || lot.sex || "").toUpperCase().slice(0, 1);
+  if (sex && letter !== sex) return false;
+  if (sires.size) {
+    const sire = blank(lot.sire);
+    if (!sire || !sires.has(sire)) return false;
+  }
+  if (color) {
+    const coat = (lot.color || lot.color_label || "").toLowerCase();
+    if (!coat || !coat.includes(color.trim().toLowerCase())) return false;
+  }
+  if (!priceInRanges(lotFilterPrice(lot), priceRanges)) return false;
+  if (maxPrice) {
+    const price = lotFilterPrice(lot);
+    if (!price || price > Number(maxPrice)) return false;
+  }
+  if (height) {
+    const hands = (lot.height || "").toLowerCase();
+    if (!hands || !hands.includes(height.trim().toLowerCase())) return false;
+  }
+  if (soldAs.size && !soldAs.has(blank(lot.sold_as))) return false;
+  if (x.book && blank(lot.book) !== x.book) return false;
+  if (x.session && blank(lot.session) !== x.session) return false;
+  if (x.consignor && blank(lot.consignor) !== x.consignor) return false;
+  if (x.coveringSire && blank(lot.covering_sire) !== x.coveringSire) return false;
+  if (x.foal) {
+    const status = blank(lot.pregnant).toUpperCase();
+    if (x.foal === "in" && status !== "PR") return false;
+    if (x.foal === "not" && !(status && status !== "PR")) return false;
+  }
+  return true;
 }
 
 function lotFilterPrice(lot) {
@@ -341,18 +384,8 @@ function SalesPage() {
   };
   useEffect(() => { setMarkupEdits([]); setMarkupRedo([]); }, [currentId]);
   // Hip page layout: "tabs" shows one section at a time; "classic" is the column view.
-  const [hipLayout, setHipLayoutState] = useState("tabs");
+  const hipLayout = "tabs";
   const [hipTab, setHipTab] = useState("overview");
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem("crossr-hip-layout");
-      if (saved === "tabs" || saved === "classic") setHipLayoutState(saved);
-    } catch { /* storage blocked: keep default */ }
-  }, []);
-  const setHipLayout = (next) => {
-    setHipLayoutState(next);
-    try { window.localStorage.setItem("crossr-hip-layout", next); } catch { /* ignore */ }
-  };
   const [height, setHeight] = useState("");
   const [onlyDismissed, setOnlyDismissed] = useState(false);
   const [onlyStarred, setOnlyStarred] = useState(false);
@@ -593,38 +626,10 @@ function SalesPage() {
       if (onlyStarred) return isStarred;
       if (onlyDismissed) return dismissed;
       if (dismissed) return false;
-      const letter = (lot.sex_letter || lot.sex || "").toUpperCase().slice(0, 1);
-      if (sex && letter !== sex) return false;
-      if (sireSet.size) {
-        const sire = blank(lot.sire);
-        if (!sire || !sireSet.has(sire)) return false;
-      }
-      if (color) {
-        const coat = (lot.color || lot.color_label || "").toLowerCase();
-        if (!coat || !coat.includes(color.trim().toLowerCase())) return false;
-      }
-      if (!priceInRanges(lotFilterPrice(lot), priceRanges)) return false;
-      if (maxPrice) {
-        const price = lotFilterPrice(lot);
-        if (!price || price > Number(maxPrice)) return false;
-      }
-      if (height) {
-        const hands = (lot.height || "").toLowerCase();
-        if (!hands || !hands.includes(height.trim().toLowerCase())) return false;
-      }
-      if (soldAsSet.size && !soldAsSet.has(blank(lot.sold_as))) return false;
-      if (extra.book && blank(lot.book) !== extra.book) return false;
-      if (extra.session && blank(lot.session) !== extra.session) return false;
-      if (extra.consignor && blank(lot.consignor) !== extra.consignor) return false;
-      if (extra.coveringSire && blank(lot.covering_sire) !== extra.coveringSire) return false;
-      if (extra.foal) {
-        const status = blank(lot.pregnant).toUpperCase();
-        if (extra.foal === "in" && status !== "PR") return false;
-        if (extra.foal === "not" && !(status && status !== "PR")) return false;
-      }
-      return true;
+      return lotMatchesFilters(lot, { sex, color, maxPrice, height, selectedSires, priceRanges, extra });
     });
   }, [lots, mode, dismissedSet, starredSet, onlyDismissed, onlyStarred, sex, color, maxPrice, height, selectedSires, priceRanges, extra]);
+
 
   useEffect(() => {
     if (!catalog || !filtered.length) return;
@@ -800,33 +805,56 @@ function SalesPage() {
   const clientCount = Number.isFinite(desk.clientCount) ? desk.clientCount : (desk.clients || []).length;
   const shownClients = (desk.clients || []).slice(0, clientCount);
 
-  function finishClientNames(count, names) {
-    const base = desk.clients || [];
-    const clients = Array.from({ length: Math.max(count, base.length) }, (_, i) => ({
-      ...(base[i] || { id: `c${i + 1}`, sex: "", color: "", maxPrice: "", height: "" }),
-      name: (names[i] || "").trim() || base[i]?.name || `Client ${i + 1}`,
-    }));
-    setDesk(saveDesk({ ...desk, clients, clientCount: count }));
-    applySnapshot(clients[0].filters || {});
-    setSetup({ step: "client", index: 0 });
+  // Rail: which clients the hip on screen fits.
+  const clientFits = useMemo(() => {
+    if (!current) return {};
+    return Object.fromEntries(shownClients.map((c) => [c.id, lotMatchesFilters(current, c.filters || c)]));
+  }, [current, shownClients]);
+
+  function railSelectClient(client) {
+    if (activeClient === client.id) {
+      setActiveClient("");
+      applySnapshot({});
+      return;
+    }
+    selectClient(client);
+  }
+
+  // Name client #index, then open the filter sheet for them.
+  function startClient(index, name) {
+    const base = (desk.clients || []).slice(0, Math.max(index, 0));
+    const prev = (desk.clients || [])[index];
+    const client = {
+      ...(prev || { id: `c${index + 1}`, sex: "", color: "", maxPrice: "", height: "" }),
+      id: prev?.id || `c${index + 1}`,
+      name: String(name || "").trim() || `Client ${index + 1}`,
+      filters: null,
+    };
+    const clients = [...base, client, ...(desk.clients || []).slice(index + 1)];
+    setDesk(saveDesk({ ...desk, clients, clientCount: index + 1 }));
+    applySnapshot({});
+    setSetup({ step: "client", index });
     setRailOpen(true);
   }
 
+  // Save this client's filters, then ask whether there's another client.
   function nextClientFilters() {
     const index = setup.index;
     const clients = (desk.clients || []).map((c, i) => (i === index ? { ...c, filters: filterSnapshot() } : c));
-    const saved = saveDesk({ ...desk, clients });
-    setDesk(saved);
-    if (index + 1 < clientCount) {
-      applySnapshot(clients[index + 1].filters || {});
-      setSetup({ step: "client", index: index + 1 });
-      return;
-    }
-    // Done: start on the first client's view.
+    setDesk(saveDesk({ ...desk, clients, clientCount: index + 1 }));
+    setRailOpen(false);
+    setSetup({ step: "name", index: index + 1 });
+  }
+
+  // No more clients: start on the first client's view.
+  function finishClients() {
+    const first = (desk.clients || [])[0];
     setSetup(null);
     setRailOpen(false);
-    setActiveClient(clients[0].id);
-    applySnapshot(clients[0].filters || {});
+    if (first && clientCount > 0) {
+      setActiveClient(first.id);
+      applySnapshot(first.filters || {});
+    }
   }
 
   function noClients() {
@@ -1042,9 +1070,6 @@ function SalesPage() {
               ))}
             </nav>
           ) : <span />}
-          <button className="ghost layout-switch" type="button" onClick={() => setHipLayout(hipLayout === "tabs" ? "classic" : "tabs")}>
-            {hipLayout === "tabs" ? "Classic layout" : "Tabbed layout"}
-          </button>
         </div>
       ) : null}
 
@@ -1335,6 +1360,27 @@ function SalesPage() {
               <span className="markup-label">Filter</span>
               {filtered.length !== lots.length ? <span className="filter-dot" aria-label="Filters on" /> : null}
             </button>
+            {shownClients.length ? (
+              <div className="rail-clients" role="group" aria-label="Clients">
+                {shownClients.map((client) => {
+                  const fits = clientFits[client.id];
+                  const on = activeClient === client.id;
+                  return (
+                    <button
+                      key={client.id}
+                      type="button"
+                      className={`rail-client${fits ? " fits" : ""}${on ? " on" : ""}`}
+                      onClick={() => railSelectClient(client)}
+                      title={`${client.name}${fits ? " — this hip fits their filters" : " — outside their filters"}${on ? " (tap to show all hips)" : " (tap to apply their filters)"}`}
+                      aria-pressed={on}
+                    >
+                      <span className="rail-client-initials">{initials(client.name)}</span>
+                      <span className="markup-label">{client.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             <div className="markup-tools" role="group" aria-label="Mark up this hip">
               {MARKUP_TOOLS.map(([id, label, icon]) => (
                 <button
@@ -1362,14 +1408,17 @@ function SalesPage() {
                 <span className="markup-label">Clear</span>
               </button>
             </div>
-            {setup && (setup.step === "ask" || setup.step === "names") ? (
+            {setup && (setup.step === "ask" || setup.step === "name") ? (
               <ClientSetup
+                key={`${setup.step}-${setup.index ?? 0}`}
                 step={setup.step}
-                clients={desk.clients || []}
-                onYes={() => setSetup({ step: "names" })}
+                index={setup.index ?? 0}
+                done={(desk.clients || []).slice(0, setup.index ?? 0).map((c) => c.name)}
+                onYes={() => setSetup({ step: "name", index: 0 })}
                 onNo={noClients}
                 onSkip={() => setSetup(null)}
-                onNames={finishClientNames}
+                onName={(name) => startClient(setup.index ?? 0, name)}
+                onFinish={finishClients}
               />
             ) : null}
             {quickNotes && current ? (
@@ -1409,12 +1458,12 @@ function SalesPage() {
                       : setup?.step === "mine" ? "YOUR FILTERS" : "FILTER HIPS"}
                   </h3>
                   {setup?.step === "client" ? (
-                    <span className="setup-step">Client {setup.index + 1} of {clientCount}</span>
+                    <span className="setup-step">Client {setup.index + 1}</span>
                   ) : null}
                   <span className="filter-count">{filtered.length} / {lots.length} hips</span>
                   {setup?.step === "client" ? (
                     <button className="primary" type="button" onClick={nextClientFilters}>
-                      {setup.index + 1 < clientCount ? "Next client →" : "Done"}
+                      Save {shownClients[setup.index]?.name || "client"}&apos;s filters
                     </button>
                   ) : (
                     <button className="primary" type="button" onClick={() => { setSetup(null); setRailOpen(false); }}>Done</button>
