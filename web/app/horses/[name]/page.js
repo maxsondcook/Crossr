@@ -725,6 +725,20 @@ function HorsePage() {
   const [showAllProgeny, setShowAllProgeny] = useState(false);
   const [breeding, setBreeding] = useState(null);
   const [progenyView, setProgenyView] = useState("top");
+  // Layout trial: "tabs" shows one section at a time; "classic" is the full grid.
+  const [layout, setLayoutState] = useState("tabs");
+  const [tab, setTab] = useState("general");
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("crossr-horse-layout");
+      if (saved === "tabs" || saved === "classic") setLayoutState(saved);
+    } catch { /* storage blocked: keep default */ }
+  }, []);
+  const setLayout = (next) => {
+    setLayoutState(next);
+    try { window.localStorage.setItem("crossr-horse-layout", next); } catch { /* ignore */ }
+  };
+  useEffect(() => { setTab("general"); }, [decoded]);
   const returnTarget = useMemo(() => resolveReturnTarget(searchParams), [searchParams]);
   const salesReturn = returnTarget.sales;
   const hrefFor = useMemo(
@@ -850,8 +864,22 @@ function HorsePage() {
     for (const row of (rankingMeta.rows || {})[id] || []) bookRank[id][row.year] = row.rank;
   }
 
+  const tabbed = layout === "tabs";
+  const TABS = [
+    ["general", "General Info", true],
+    ["pedigree", "Pedigree", true],
+    ["race", "Race Record", true],
+    ["studbook", "Stud Book", (data.stud_book || []).length > 0],
+    ["stats", "Statistics", Boolean(data.stallion && (RANK_LISTS.length || statSummaries.length))],
+    ["stallions", "Stallions", BREEDING_TYPES.has(cls.profile_type)],
+    ["sales", "Sales", isStallion],
+    ["progeny", "Progeny", isStallion],
+  ].filter(([, , has]) => has);
+  const activeTab = TABS.some(([id]) => id === tab) ? tab : "general";
+  const show = (id) => !tabbed || activeTab === id;
+
   return (
-    <div className="dash">
+    <div className={`dash${tabbed ? " dash-tabbed" : ""}`}>
       <div className="sales-return-bar dash-span">
         <button className="primary" type="button" onClick={goBack}>
           {backLabel}
@@ -865,7 +893,26 @@ function HorsePage() {
         >
           {isStarred(data.name) && tick >= 0 ? "★" : "☆"}
         </button>
+        <button className="ghost layout-switch" type="button" onClick={() => setLayout(tabbed ? "classic" : "tabs")}>
+          {tabbed ? "Classic layout" : "Tabbed layout"}
+        </button>
       </div>
+      {tabbed ? (
+        <nav className="horse-tabs dash-span" aria-label="Horse sections">
+          {TABS.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`horse-tab${activeTab === id ? " active" : ""}`}
+              aria-current={activeTab === id ? "page" : undefined}
+              onClick={() => setTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      ) : null}
+      {show("pedigree") ? (
       <div>
         <div className="panel">
           <h4>PEDIGREE</h4>
@@ -876,8 +923,10 @@ function HorsePage() {
           <FemaleFamily family={family} hrefFor={hrefFor} />
         </div>
       </div>
+      ) : null}
 
       <div className="horse-panels">
+        {show("general") ? (
         <div className="panel">
           {data.stallion ? (
             <div className="hero">
@@ -925,7 +974,9 @@ function HorsePage() {
             </div>
           ) : null}
         </div>
+        ) : null}
 
+        {show("race") ? (
         <div className="panel">
           <h4>RACE RECORD</h4>
           <table>
@@ -960,8 +1011,9 @@ function HorsePage() {
           {s.major_wins ? <div className="notes" style={{ marginTop: 12 }}>{s.major_wins}</div> : null}
           <RaceList starts={data.race_starts} wins={data.race_wins} />
         </div>
+        ) : null}
 
-        {(data.stud_book || []).length ? (
+        {show("studbook") && (data.stud_book || []).length ? (
           <div className="panel panel-wide">
             <h4>STUD FEE & MARES BRED</h4>
           <div className="history-wrap">
@@ -995,7 +1047,7 @@ function HorsePage() {
           </div>
         ) : null}
 
-        {data.stallion && (RANK_LISTS.length || statSummaries.length) ? (
+        {show("stats") && data.stallion && (RANK_LISTS.length || statSummaries.length) ? (
           <div className="panel panel-wide">
             <StallionRankingsPanel
               rankingMeta={rankingMeta}
@@ -1006,11 +1058,11 @@ function HorsePage() {
           </div>
         ) : null}
 
-        {BREEDING_TYPES.has(cls.profile_type) ? <BreedingPanel panel={breeding} hrefFor={hrefFor} /> : null}
+        {show("stallions") && BREEDING_TYPES.has(cls.profile_type) ? <BreedingPanel panel={breeding} hrefFor={hrefFor} /> : null}
 
-        {isStallion ? <StallionSalesPanel name={data.name} hrefFor={hrefFor} /> : null}
+        {show("sales") && isStallion ? <StallionSalesPanel name={data.name} hrefFor={hrefFor} /> : null}
 
-        {isStallion ? (
+        {show("progeny") && isStallion ? (
         <div className="panel">
           {(data.bms_crosses || []).length ? (
             <div className="view-toggle" style={{ display: "flex", gap: 8, marginBottom: 10 }}>
