@@ -1195,8 +1195,15 @@ function SalesPage() {
               {starred ? "★" : "☆"}
             </button>
             <button className="rail-btn" type="button" onClick={dismissCurrent} title="Dismiss">✕</button>
-            <button className="rail-btn" type="button" onClick={() => setRailOpen((open) => !open)} title={railOpen ? "Collapse" : "Expand"}>
-              {railOpen ? "»" : "«"}
+            <button
+              className={`rail-btn markup-btn filter-btn${railOpen ? " on" : ""}`}
+              type="button"
+              onClick={() => setRailOpen((open) => !open)}
+              title="Filter hips"
+            >
+              <MarkupIcon d="M4 5h16l-6 8v6l-4-2v-4L4 5z" />
+              <span className="markup-label">Filter</span>
+              {filtered.length !== lots.length ? <span className="filter-dot" aria-label="Filters on" /> : null}
             </button>
             <div className="markup-tools" role="group" aria-label="Mark up this hip">
               {MARKUP_TOOLS.map(([id, label, icon]) => (
@@ -1226,7 +1233,13 @@ function SalesPage() {
               </button>
             </div>
             {railOpen ? (
+              <div className="filter-sheet" role="dialog" aria-label="Filter hips" onClick={(e) => { if (e.target === e.currentTarget) setRailOpen(false); }}>
               <div className="rail-body">
+                <div className="filter-sheet-head">
+                  <h3>FILTER HIPS</h3>
+                  <span className="filter-count">{filtered.length} / {lots.length} hips</span>
+                  <button className="primary" type="button" onClick={() => setRailOpen(false)}>Done</button>
+                </div>
                 <h4>CLIENTS</h4>
                 {(desk.clients || []).map((client) => (
                   <button
@@ -1448,6 +1461,7 @@ function SalesPage() {
                 {onlyStarred && !filtered.length ? (
                   <p className="filter-note">No starred hips in this catalog yet. Tap ★ on a hip to add it.</p>
                 ) : null}
+              </div>
               </div>
             ) : null}
           </aside>

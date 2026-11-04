@@ -874,6 +874,36 @@ td.range-col { background: rgba(212, 175, 55, 0.06); }
 @media (max-width: 900px) {
   .sales-columns.tabbed.tab-pedigree .sales-col-pedigree { grid-template-columns: minmax(0, 1fr); }
 }
+/* Filter sheet: clients + filters, large, over the hip page. */
+.filter-btn { position: relative; }
+.filter-dot { position: absolute; top: 4px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--gold); }
+.filter-sheet { position: fixed; inset: 0; z-index: 90; background: rgba(5, 9, 18, 0.72); display: flex; justify-content: center; align-items: flex-start; padding: 40px 20px; overflow-y: auto; }
+.filter-sheet .rail-body {
+  width: min(1100px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 22px 26px 28px;
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px 20px;
+  align-items: start;
+  font-size: 16px;
+}
+.filter-sheet-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.filter-sheet-head h3 { margin: 0; letter-spacing: 0.1em; white-space: nowrap; }
+.filter-sheet-head .primary { width: auto; flex: 0 0 auto; padding: 10px 22px; margin-left: auto; }
+.filter-sheet .client-prefs { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 16px; }
+.filter-sheet-head .filter-count { margin: 0 auto 0 0; color: var(--muted); font-size: 15px; }
+.filter-sheet .rail-body > h4 { grid-column: 1 / -1; margin: 6px 0 0; font-size: 14px; }
+.filter-sheet .rail-body > .filter-count { display: none; }
+.filter-sheet .filter-sold-as { grid-column: 1 / -1; }
+.filter-sheet .filter-chip { font-size: 14px; padding: 8px 14px; }
+.filter-sheet label { font-size: 14px; }
+.filter-sheet select, .filter-sheet input { font-size: 15px; padding: 10px 12px; }
+.filter-sheet .filter-sire-list { max-height: 260px; }
+.filter-sheet .rail-body > button { font-size: 15px; padding: 12px 14px; }
 .chart-readout { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-top: 4px; font-size: 13px; }
 .chart-readout i { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
 /* Best broodmare sire crosses: click a row to list the horses that cross produced. */
@@ -1242,7 +1272,6 @@ td.range-col { background: rgba(212, 175, 55, 0.06); }
   gap: 8px;
   align-items: center;
 }
-.sales-rail.open { width: 280px; align-items: stretch; }
 .rail-btn {
   width: 40px;
   height: 40px;
