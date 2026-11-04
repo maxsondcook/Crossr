@@ -849,7 +849,19 @@ function SalesPage() {
             />
             <div className="panel">
               <h4>PEDIGREE</h4>
-              {ready ? <PedigreeChart tree={detail.pedigree} showSubject={false} hrefFor={hrefFor} /> : <p className="empty">Loading pedigree…</p>}
+              {ready ? (
+                <PedigreeChart
+                  tree={detail.pedigree}
+                  showSubject={false}
+                  hrefFor={hrefFor}
+                  expandedExtra={(
+                <div className="panel family-panel">
+                  <h4>FEMALE FAMILY</h4>
+                  <FemaleFamily family={detail.female_family || []} hrefFor={hrefFor} />
+                </div>
+              )}
+                />
+              ) : <p className="empty">Loading pedigree…</p>}
             </div>
             <div className="panel family-panel">
               <h4>FEMALE FAMILY</h4>

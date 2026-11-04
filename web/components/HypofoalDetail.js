@@ -79,7 +79,16 @@ export default function HypofoalDetail({ report, onBack = null, loading = false,
           <div className="panel">
             <h4>PEDIGREE</h4>
             {report.pedigree ? (
-              <PedigreeChart tree={report.pedigree} showSubject={false} />
+              <PedigreeChart
+                tree={report.pedigree}
+                showSubject={false}
+                expandedExtra={(
+                <div className="panel family-panel">
+                  <h4>FEMALE FAMILY</h4>
+                  <FemaleFamily family={report.female_family || []} />
+                </div>
+              )}
+              />
             ) : (
               <p className="empty">No pedigree on file for this mating.</p>
             )}

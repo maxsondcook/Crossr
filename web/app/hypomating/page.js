@@ -344,7 +344,16 @@ function HypomatingInner() {
             <div className="panel">
               <h4>BROODMARE · {horseCaps(result.mare)}</h4>
               {result.damsire ? <p className="sub">DAMSIRE: {horseCaps(result.damsire)}</p> : null}
-              <PedigreeChart tree={brood?.pedigree} showSubject={false} />
+              <PedigreeChart
+                tree={brood?.pedigree}
+                showSubject={false}
+                expandedExtra={(
+                <div className="panel family-panel">
+                  <h4>FEMALE FAMILY</h4>
+                  <FemaleFamily family={brood?.female_family || []} />
+                </div>
+              )}
+              />
               <div className="family-panel" style={{ marginTop: 12 }}>
                 <h4>FEMALE FAMILY</h4>
                 <FemaleFamily family={brood?.female_family || []} />
