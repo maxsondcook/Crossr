@@ -851,6 +851,25 @@ td.range-col { background: rgba(212, 175, 55, 0.06); }
 .cross-lot-name { color: var(--text); font-weight: 600; }
 .cross-lot-price { margin-left: auto; color: var(--green); font-variant-numeric: tabular-nums; }
 .cross-lot-price.unsold { color: var(--muted); }
+/* Sales hip tabbed layout: one section at a time; the rail stays on the right. */
+.hip-tabs-bar { display: flex; align-items: flex-end; gap: 12px; margin: 4px 0 8px; }
+.hip-tabs-bar .horse-tabs { flex: 1; margin-bottom: 0; }
+.sales-columns.tabbed { grid-template-columns: minmax(0, 1fr) auto; }
+.sales-columns.tabbed.tab-overview .sales-col-pedigree,
+.sales-columns.tabbed.tab-crosses .sales-col-pedigree,
+.sales-columns.tabbed.tab-pedigree .sales-col-info,
+.sales-columns.tabbed.tab-notes .sales-col-info { display: none; }
+.sales-columns.tabbed .sales-col-info { min-width: 0; }
+.sales-columns.tabbed:not(.tab-overview) [data-sec="overview"],
+.sales-columns.tabbed:not(.tab-pedigree) [data-sec="pedigree"],
+.sales-columns.tabbed:not(.tab-crosses) [data-sec="crosses"],
+.sales-columns.tabbed:not(.tab-notes) [data-sec="notes"] { display: none; }
+/* Pedigree tab: chart and female family side by side. */
+.sales-columns.tabbed.tab-pedigree .sales-col-pedigree { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; align-items: start; }
+.sales-columns.tabbed.tab-pedigree .sales-col-pedigree > .family-panel { contain: none; }
+@media (max-width: 900px) {
+  .sales-columns.tabbed.tab-pedigree .sales-col-pedigree { grid-template-columns: minmax(0, 1fr); }
+}
 .chart-readout { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-top: 4px; font-size: 13px; }
 .chart-readout i { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
 /* Best broodmare sire crosses: click a row to list the horses that cross produced. */

@@ -219,6 +219,19 @@ function SalesPage() {
   // Markup over the hip page: null (off) | "pen" | "highlighter" | "eraser".
   const [markupTool, setMarkupTool] = useState(null);
   const [markupClear, setMarkupClear] = useState(0);
+  // Hip page layout: "tabs" shows one section at a time; "classic" is the column view.
+  const [hipLayout, setHipLayoutState] = useState("tabs");
+  const [hipTab, setHipTab] = useState("overview");
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("crossr-hip-layout");
+      if (saved === "tabs" || saved === "classic") setHipLayoutState(saved);
+    } catch { /* storage blocked: keep default */ }
+  }, []);
+  const setHipLayout = (next) => {
+    setHipLayoutState(next);
+    try { window.localStorage.setItem("crossr-hip-layout", next); } catch { /* ignore */ }
+  };
   const [height, setHeight] = useState("");
   const [onlyDismissed, setOnlyDismissed] = useState(false);
   const [onlyStarred, setOnlyStarred] = useState(false);
@@ -840,14 +853,37 @@ function SalesPage() {
       )}
 
       {catalog ? (
-        <div className="sales-columns">
+        <div className="hip-tabs-bar">
+          {hipLayout === "tabs" ? (
+            <nav className="horse-tabs" aria-label="Hip sections">
+              {[["overview", "Overview"], ["pedigree", "Pedigree"], ["crosses", "Crosses"], ["notes", "Notes"]].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`horse-tab${hipTab === id ? " active" : ""}`}
+                  aria-current={hipTab === id ? "page" : undefined}
+                  onClick={() => setHipTab(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+          ) : <span />}
+          <button className="ghost layout-switch" type="button" onClick={() => setHipLayout(hipLayout === "tabs" ? "classic" : "tabs")}>
+            {hipLayout === "tabs" ? "Classic layout" : "Tabbed layout"}
+          </button>
+        </div>
+      ) : null}
+
+      {catalog ? (
+        <div className={`sales-columns${hipLayout === "tabs" ? ` tabbed tab-${hipTab}` : ""}`}>
           <div className="sales-col sales-col-pedigree">
             <MarkupLayer
               storageKey={current ? `crossr-markup:${mode}:${catalog?.id}:${currentId}:pedigree` : ""}
               tool={markupTool}
               clearSignal={markupClear}
             />
-            <div className="panel">
+            <div className="panel" data-sec="pedigree">
               <h4>PEDIGREE</h4>
               {ready ? (
                 <PedigreeChart
@@ -863,15 +899,15 @@ function SalesPage() {
                 />
               ) : <p className="empty">Loading pedigree…</p>}
             </div>
-            <div className="panel family-panel">
+            <div className="panel family-panel" data-sec="pedigree">
               <h4>FEMALE FAMILY</h4>
               {ready ? <FemaleFamily family={detail.female_family} hrefFor={hrefFor} /> : <p className="empty">Loading female family…</p>}
             </div>
-            <div className="panel">
+            <div className="panel" data-sec="notes">
               <h4>PHYSICAL</h4>
               <div className="blank-value" aria-label="Physical" />
             </div>
-            <div className="panel">
+            <div className="panel" data-sec="notes">
               <h4>NOTES</h4>
               <textarea
                 className="note-box"
@@ -908,7 +944,7 @@ function SalesPage() {
             {!loadingList && !current ? <p className="empty">No hips match this list.</p> : null}
             {current ? (
               <>
-                <div className="panel sale-identity">
+                <div className="panel sale-identity" data-sec="overview">
                   <h2>
                     <Link href={hrefFor(current.name)}>{current.name || current.raw_name || "Unnamed"}</Link>
                   </h2>
@@ -960,7 +996,7 @@ function SalesPage() {
                 </div>
 
                 {(!ready || projectionPanels(detail, current).showValue || projectionPanels(detail, current).showPrice) ? (
-                  <div className="panel" data-panel="projected-value">
+                  <div className="panel" data-panel="projected-value" data-sec="overview">
                     <h4>MARKET PROJECTION</h4>
                     {(!ready || projectionPanels(detail, current).showPrice) ? (
                       <div className="pv-price" data-meta="projected-price">
@@ -995,7 +1031,7 @@ function SalesPage() {
                   </div>
                 ) : null}
 
-                <div className="panel">
+                <div className="panel" data-sec="crosses">
                   <h4>SUCCESSFUL SIMILAR CROSSES</h4>
                   {detailError ? <p className="error">{detailError}</p> : null}
                   {loadingDetail && !ready ? <p className="empty">Loading crosses…</p> : null}
@@ -1027,7 +1063,7 @@ function SalesPage() {
                   ) : null}
                 </div>
 
-                <div className="panel">
+                <div className="panel" data-sec="crosses">
                   <h4>SIMILAR CROSSES AUCTION HISTORY</h4>
                   {ready && !splitCrosses(detail.similar_crosses).sales.length && !(detail.auction_history || []).length ? (
                     <p className="empty">No auction history on file for these crosses yet.</p>
