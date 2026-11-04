@@ -818,6 +818,13 @@ td.range-col { background: rgba(212, 175, 55, 0.06); }
 .race-list tr.race-win td { color: var(--gold-2); }
 .race-list a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .race-class { color: var(--gold); font-weight: 700; font-size: 11px; }
+/* Hip markup: a drawing layer inside each scrolling column. */
+.sales-col-pedigree, .sales-col-info { position: relative; }
+.markup-layer { position: absolute; top: 0; left: 0; z-index: 5; pointer-events: none; overflow: visible; }
+.markup-layer.active { pointer-events: auto; touch-action: none; cursor: crosshair; }
+.markup-layer.tool-eraser { cursor: cell; }
+.markup-tools { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.markup-btn.on { border-color: var(--gold); color: var(--gold); background: rgba(212, 175, 55, 0.12); }
 .chart-readout { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-top: 4px; font-size: 13px; }
 .chart-readout i { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
 /* Best broodmare sire crosses: click a row to list the horses that cross produced. */

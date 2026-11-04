@@ -14,6 +14,7 @@ import PedigreeChart from "../../components/PedigreeChart";
 import FemaleFamily from "../../components/FemaleFamily";
 import ProjectedValue from "../../components/ProjectedValue";
 import VoiceNoteButton from "../../components/VoiceNoteButton";
+import MarkupLayer from "../../components/MarkupLayer";
 
 function money(n) {
   if (n == null || n === "") return "—";
@@ -215,6 +216,9 @@ function SalesPage() {
   const [priceRanges, setPriceRanges] = useState([]);
   // Catalog filters: sold as, session, consignor, covering sire, in-foal status.
   const [extra, setExtra] = useState(EMPTY_EXTRA);
+  // Markup over the hip page: null (off) | "pen" | "highlighter" | "eraser".
+  const [markupTool, setMarkupTool] = useState(null);
+  const [markupClear, setMarkupClear] = useState(0);
   const [height, setHeight] = useState("");
   const [onlyDismissed, setOnlyDismissed] = useState(false);
   const [onlyStarred, setOnlyStarred] = useState(false);
@@ -838,6 +842,11 @@ function SalesPage() {
       {catalog ? (
         <div className="sales-columns">
           <div className="sales-col sales-col-pedigree">
+            <MarkupLayer
+              storageKey={current ? `crossr-markup:${mode}:${catalog?.id}:${currentId}:pedigree` : ""}
+              tool={markupTool}
+              clearSignal={markupClear}
+            />
             <div className="panel">
               <h4>PEDIGREE</h4>
               {ready ? <PedigreeChart tree={detail.pedigree} showSubject={false} hrefFor={hrefFor} /> : <p className="empty">Loading pedigree…</p>}
@@ -877,6 +886,11 @@ function SalesPage() {
           </div>
 
           <div className="sales-col sales-col-info">
+            <MarkupLayer
+              storageKey={current ? `crossr-markup:${mode}:${catalog?.id}:${currentId}:info` : ""}
+              tool={markupTool}
+              clearSignal={markupClear}
+            />
             {listError ? <p className="error">{listError}</p> : null}
             {loadingList ? <p className="empty">Loading catalog…</p> : null}
             {!loadingList && !current ? <p className="empty">No hips match this list.</p> : null}
@@ -1072,6 +1086,28 @@ function SalesPage() {
             <button className="rail-btn" type="button" onClick={() => setRailOpen((open) => !open)} title={railOpen ? "Collapse" : "Expand"}>
               {railOpen ? "»" : "«"}
             </button>
+            <div className="markup-tools" role="group" aria-label="Mark up this hip">
+              {[["pen", "✎", "Pen"], ["highlighter", "▮", "Highlighter"], ["eraser", "⌫", "Eraser"]].map(([id, icon, label]) => (
+                <button
+                  key={id}
+                  className={`rail-btn markup-btn${markupTool === id ? " on" : ""}`}
+                  type="button"
+                  title={markupTool === id ? `${label} (tap to stop drawing)` : label}
+                  aria-pressed={markupTool === id}
+                  onClick={() => setMarkupTool((cur) => (cur === id ? null : id))}
+                >
+                  {icon}
+                </button>
+              ))}
+              <button
+                className="rail-btn markup-btn"
+                type="button"
+                title="Clear this hip's markup"
+                onClick={() => setMarkupClear((n) => n + 1)}
+              >
+                🗑
+              </button>
+            </div>
             {railOpen ? (
               <div className="rail-body">
                 <h4>CLIENTS</h4>
