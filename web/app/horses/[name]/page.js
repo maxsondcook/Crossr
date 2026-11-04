@@ -108,6 +108,45 @@ function withBroodmareSireList(meta, rows, countLabel) {
   };
 }
 
+function ordinal(place) {
+  const n = parseInt(place, 10);
+  if (!Number.isFinite(n)) return place || "—";
+  const tail = n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" })[n % 10] || "th";
+  return `${n}${tail}`;
+}
+
+/** Every start, oldest first (falls back to wins only when starts aren't available). */
+function RaceList({ starts, wins }) {
+  const all = (starts || []).length ? starts : (wins || []).map((w) => ({ ...w, place: "1" }));
+  if (!all.length) return null;
+  const winsOnly = !(starts || []).length;
+  return (
+    <div className="race-list">
+      <h5>{winsOnly ? `Wins · ${all.length}` : `Races · ${all.length}`}</h5>
+      <div className="history-wrap">
+        <table>
+          <thead>
+            <tr><th>Date</th><th>Track</th><th>Race</th><th>Finish</th></tr>
+          </thead>
+          <tbody>
+            {all.map((r, i) => (
+              <tr key={`${r.date}-${r.race_number || i}`} className={String(r.place) === "1" ? "race-win" : undefined}>
+                <td>{r.date || "—"}</td>
+                <td>{r.track || "—"}</td>
+                <td>
+                  {r.chart_url ? <a href={r.chart_url} target="_blank" rel="noopener noreferrer">{r.race_name || "Race"}</a> : (r.race_name || "—")}
+                  {r.class ? <span className="race-class"> {r.class}</span> : null}
+                </td>
+                <td>{ordinal(r.place)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 const CAREER_VIEW = "__career";
 const SEASON_VIEW = "__season";
 
@@ -882,7 +921,7 @@ function HorsePage() {
         </div>
 
         <div className="panel">
-          <h4>RACE RECORD & MAJOR WINS</h4>
+          <h4>RACE RECORD</h4>
           <table>
             <thead>
               <tr>
@@ -913,6 +952,7 @@ function HorsePage() {
             </tbody>
           </table>
           {s.major_wins ? <div className="notes" style={{ marginTop: 12 }}>{s.major_wins}</div> : null}
+          <RaceList starts={data.race_starts} wins={data.race_wins} />
         </div>
 
         {(data.stud_book || []).length ? (
