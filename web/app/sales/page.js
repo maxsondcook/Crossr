@@ -264,6 +264,7 @@ function SalesPage() {
   // Markup over the hip page: null (off) | "pen" | "highlighter" | "eraser".
   const [markupTool, setMarkupTool] = useState(null);
   const [markupClear, setMarkupClear] = useState(0);
+  const [quickNotes, setQuickNotes] = useState(false);
   // Undo / redo across both markup layers: which layer changed, in order.
   const [markupCommand, setMarkupCommand] = useState(null);
   const [markupEdits, setMarkupEdits] = useState([]);
@@ -1198,14 +1199,28 @@ function SalesPage() {
 
           <aside className={`sales-rail${railOpen ? " open" : ""}`}>
             <button
-              className={`rail-btn${starred ? " on" : ""}`}
+              className={`rail-btn markup-btn${starred ? " on" : ""}`}
               type="button"
               onClick={toggleStar}
               title={starred ? "Unstar this hip" : "Star this hip"}
             >
-              {starred ? "★" : "☆"}
+              <span className="rail-glyph">{starred ? "★" : "☆"}</span>
+              <span className="markup-label">{starred ? "Starred" : "Star"}</span>
             </button>
-            <button className="rail-btn" type="button" onClick={dismissCurrent} title="Dismiss">✕</button>
+            <button className="rail-btn markup-btn" type="button" onClick={dismissCurrent} title="Dismiss this hip (X'd list)">
+              <span className="rail-glyph">✕</span>
+              <span className="markup-label">Dismiss</span>
+            </button>
+            <button
+              className={`rail-btn markup-btn${quickNotes ? " on" : ""}`}
+              type="button"
+              onClick={() => setQuickNotes((v) => !v)}
+              title="Take notes on this hip"
+            >
+              <MarkupIcon d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h5" />
+              <span className="markup-label">Notes</span>
+              {noteDraft ? <span className="filter-dot" aria-label="Has notes" /> : null}
+            </button>
             <button
               className={`rail-btn markup-btn filter-btn${railOpen ? " on" : ""}`}
               type="button"
@@ -1243,6 +1258,33 @@ function SalesPage() {
                 <span className="markup-label">Clear</span>
               </button>
             </div>
+            {quickNotes && current ? (
+              <div className="quick-notes" role="dialog" aria-label="Notes for this hip">
+                <div className="quick-notes-head">
+                  <h4>NOTES · HIP {current.hip}</h4>
+                  <button className="ghost" type="button" onClick={() => { saveNotes(); setQuickNotes(false); }}>Close</button>
+                </div>
+                <textarea
+                  className="note-box"
+                  value={noteDraft}
+                  onChange={(e) => { setNoteDraft(e.target.value); setNoteState(""); }}
+                  onBlur={saveNotes}
+                  placeholder="Add a note"
+                  autoFocus
+                />
+                <VoiceNoteButton
+                  onText={(chunk) => {
+                    const prev = draftRef.current;
+                    const next = prev && !/\s$/.test(prev) ? `${prev} ${chunk}` : `${prev}${chunk}`;
+                    draftRef.current = next;
+                    setNoteDraft(next);
+                    setNoteState("");
+                  }}
+                  onStop={saveNotes}
+                />
+                {noteState ? <p className="note-state">{noteState}</p> : null}
+              </div>
+            ) : null}
             {railOpen ? (
               <div className="filter-sheet" role="dialog" aria-label="Filter hips" onClick={(e) => { if (e.target === e.currentTarget) setRailOpen(false); }}>
               <div className="rail-body">

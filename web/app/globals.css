@@ -904,6 +904,19 @@ td.range-col { background: rgba(212, 175, 55, 0.06); }
 .filter-sheet select, .filter-sheet input { font-size: 15px; padding: 10px 12px; }
 .filter-sheet .filter-sire-list { max-height: 260px; }
 .filter-sheet .rail-body > button { font-size: 15px; padding: 12px 14px; }
+.rail-glyph { font-size: 18px; line-height: 1; }
+/* Quick notes popover beside the rail: works on any hip tab. */
+.sales-rail { position: relative; }
+.quick-notes {
+  position: fixed; right: 96px; top: 200px; z-index: 80;
+  width: min(420px, calc(100vw - 120px));
+  background: var(--panel); border: 1px solid var(--gold); border-radius: 14px;
+  padding: 12px 14px; box-shadow: var(--shadow);
+}
+.quick-notes-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.quick-notes-head h4 { margin: 0; }
+.quick-notes-head .ghost { padding: 6px 12px; font-size: 12px; }
+.quick-notes .note-box { min-height: 140px; }
 .chart-readout { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-top: 4px; font-size: 13px; }
 .chart-readout i { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
 /* Best broodmare sire crosses: click a row to list the horses that cross produced. */
