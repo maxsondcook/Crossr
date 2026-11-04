@@ -56,8 +56,14 @@ function SummaryTable({ data }) {
   );
 }
 
+function shortMoney(v) {
+  return v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Math.round(v / 1000)}k`;
+}
+
 function YearChart({ rows }) {
   const [hidden, setHidden] = useState({});
+  const [showValues, setShowValues] = useState(false);
+  const [active, setActive] = useState(null); // hovered / tapped year index
   const W = 640, H = 220, P = { l: 56, r: 12, t: 12, b: 28 };
   const shown = CATS.filter(([cat]) => !hidden[cat]);
   const values = rows.flatMap((r) => shown.map(([cat]) => r[`${cat}_avg`]).filter((v) => v != null));
@@ -77,6 +83,10 @@ function YearChart({ rows }) {
             {label}
           </label>
         ))}
+        <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", fontSize: 13, marginLeft: "auto" }}>
+          <input type="checkbox" checked={showValues} onChange={() => setShowValues((v) => !v)} />
+          Show values
+        </label>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }} role="img" aria-label="Average sale price by year">
         {ticks.map((t) => (
@@ -92,6 +102,9 @@ function YearChart({ rows }) {
             {r.year}{r.complete ? "" : "*"}
           </text>
         ) : null)}
+        {active != null && rows[active] ? (
+          <line x1={x(active)} x2={x(active)} y1={P.t} y2={H - P.b} stroke="currentColor" opacity="0.35" strokeDasharray="3 3" />
+        ) : null}
         {shown.map(([cat, label, color]) => {
           // Break the line at years with no sales instead of drawing through them.
           const segs = [];
@@ -107,14 +120,52 @@ function YearChart({ rows }) {
                 <polyline key={k} fill="none" stroke={color} strokeWidth="2" points={seg.map(([a, b]) => `${a},${b}`).join(" ")} />
               ))}
               {segs.flat().map(([a, b, r, v]) => (
-                <circle key={`${cat}-${r.year}`} cx={a} cy={b} r="3" fill={color}>
-                  <title>{`${label} ${r.year}: ${money(v)} (${r[`${cat}_sold`]} sold)`}</title>
-                </circle>
+                <g key={`${cat}-${r.year}`}>
+                  <circle cx={a} cy={b} r={active != null && rows[active] === r ? 5 : 3} fill={color}>
+                    <title>{`${label} ${r.year}: ${money(v)} (${r[`${cat}_sold`]} sold)`}</title>
+                  </circle>
+                  {showValues ? (
+                    <text x={a} y={b - 8} fontSize="9" textAnchor="middle" fill={color}>{shortMoney(v)}</text>
+                  ) : null}
+                </g>
               ))}
             </g>
           );
         })}
+        {/* Invisible year columns: hover or tap one to read its numbers below. */}
+        {rows.map((r, i) => {
+          const half = rows.length === 1 ? (W - P.l - P.r) / 2 : (W - P.l - P.r) / (rows.length - 1) / 2;
+          return (
+            <rect
+              key={`hit-${r.year}`}
+              x={x(i) - half}
+              y={P.t}
+              width={half * 2}
+              height={H - P.t - P.b}
+              fill="transparent"
+              style={{ cursor: "pointer" }}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => setActive((cur) => (cur === i ? null : i))}
+            />
+          );
+        })}
       </svg>
+      {active != null && rows[active] ? (
+        <div className="chart-readout">
+          <b>{rows[active].year}{rows[active].complete ? "" : " (to date)"}</b>
+          {shown.map(([cat, label, color]) => {
+            const v = rows[active][`${cat}_avg`];
+            return (
+              <span key={cat}>
+                <i style={{ background: color }} />
+                {label}: {v != null ? `${money(v)} avg · ${rows[active][`${cat}_sold`] ?? 0} sold` : "no sales"}
+              </span>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="sub" style={{ fontSize: 12, margin: "4px 0 0" }}>Hover or tap a year to see its numbers.</p>
+      )}
       <p className="sub" style={{ fontSize: 12 }}>* year in progress. Gaps are years with no sales in that category.</p>
     </div>
   );

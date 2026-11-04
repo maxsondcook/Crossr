@@ -796,6 +796,16 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .horse-inline-link:hover { color: var(--gold); }
 
 .family-panel { overflow: auto; }
+.chart-readout { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-top: 4px; font-size: 13px; }
+.chart-readout i { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
+/* Best broodmare sire crosses: click a row to list the horses that cross produced. */
+.bms-row { cursor: pointer; }
+.bms-row:hover td { background: rgba(255, 255, 255, 0.03); }
+.bms-caret { display: inline-block; width: 14px; color: var(--muted); }
+.bms-horses td { padding: 4px 0 10px 18px; }
+.bms-horse { display: flex; flex-wrap: wrap; gap: 0 8px; font-size: 13px; line-height: 1.6; }
+.bms-horse a { color: var(--teal); }
+.bms-horse-meta { color: var(--muted); }
 /* Hypomating LOGIC: one block per successful cross, wins indented beneath. */
 .cross-success { margin: 12px 0; }
 .cross-head { margin: 0; color: var(--text); line-height: 1.45; }

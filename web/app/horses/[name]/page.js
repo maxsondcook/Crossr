@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { apiGet, horseHref } from "../../../lib/api";
@@ -533,9 +533,32 @@ const BMS_COLUMNS = [
   ["sw", "#SWs", "Ungraded / listed stakes winners"],
 ];
 
-function BmsCrossesTable({ rows }) {
+const CLASS_ORDER = ["MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW"];
+
+function BmsCrossesTable({ rows, progeny = [], hrefFor }) {
   // Hide columns that are zero for every broodmare sire of this stallion.
   const cols = BMS_COLUMNS.filter(([key]) => rows.some((r) => r[key] > 0));
+  const [open, setOpen] = useState(() => new Set());
+  // The horses behind each cross come from Top Progeny (same sire, matched on broodmare sire).
+  const byBms = useMemo(() => {
+    const map = new Map();
+    for (const p of progeny) {
+      const key = String(p.broodmare_sire || "").trim().toUpperCase();
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(p);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => (CLASS_ORDER.indexOf(a.class) + 99) % 99 - (CLASS_ORDER.indexOf(b.class) + 99) % 99
+        || (Number(b.earnings) || 0) - (Number(a.earnings) || 0));
+    }
+    return map;
+  }, [progeny]);
+  const toggle = (key) => setOpen((cur) => {
+    const next = new Set(cur);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
   return (
     <>
       <h4>BEST BROODMARE SIRE CROSSES · {rows.length}</h4>
@@ -548,12 +571,44 @@ function BmsCrossesTable({ rows }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.broodmare_sire}>
-                <td>{r.broodmare_sire}</td>
-                {cols.map(([key]) => <td key={key}>{r[key] || "—"}</td>)}
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const key = String(r.broodmare_sire || "").trim().toUpperCase();
+              const horses = byBms.get(key) || [];
+              const isOpen = open.has(key);
+              return (
+                <Fragment key={r.broodmare_sire}>
+                  <tr
+                    className={horses.length ? "bms-row" : undefined}
+                    onClick={horses.length ? () => toggle(key) : undefined}
+                    aria-expanded={horses.length ? isOpen : undefined}
+                  >
+                    <td>
+                      {horses.length ? <span className="bms-caret">{isOpen ? "▾" : "▸"}</span> : null}
+                      {r.broodmare_sire}
+                    </td>
+                    {cols.map(([col]) => <td key={col}>{r[col] || "—"}</td>)}
+                  </tr>
+                  {isOpen ? (
+                    <tr className="bms-horses">
+                      <td colSpan={cols.length + 1}>
+                        {horses.map((h) => (
+                          <div key={h.name} className="bms-horse">
+                            <Link href={hrefFor ? hrefFor(h.name) : `/horses/${encodeURIComponent(h.name)}`} onClick={(e) => e.stopPropagation()}>
+                              {h.name}
+                            </Link>
+                            <span className="bms-horse-meta">
+                              {h.class || ""}
+                              {h.dam ? ` · out of ${String(h.dam).toUpperCase()}` : ""}
+                              {h.earnings ? ` · ${money(h.earnings)}` : ""}
+                            </span>
+                          </div>
+                        ))}
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -930,7 +985,7 @@ function HorsePage() {
             </div>
           ) : null}
           {progenyView === "bms" && (data.bms_crosses || []).length ? (
-            <BmsCrossesTable rows={data.bms_crosses} />
+            <BmsCrossesTable rows={data.bms_crosses} progeny={data.top_progeny || []} hrefFor={hrefFor} />
           ) : (
           <>
           <h4>TOP PROGENY{(data.top_progeny || []).length ? ` · ${data.top_progeny.length}` : ""}</h4>
