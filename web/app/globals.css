@@ -925,7 +925,8 @@ td.range-col { background: rgba(212, 175, 55, 0.06); }
 .setup-skip { margin-left: auto; }
 .setup-names { display: grid; gap: 10px; margin-top: 12px; }
 .setup-name-row { display: flex; gap: 8px; margin-top: 4px; }
-.setup-names input { flex: 1; padding: 10px 12px; font-size: 15px; }
+.setup-names input { flex: 1; padding: 10px 12px; font-size: 15px; background: #fff; color: #111; border: 1px solid var(--line); border-radius: 8px; }
+.setup-names input::placeholder { color: #8a8f99; }
 .setup-add { margin-top: 10px; }
 .setup-step { color: var(--gold); font-size: 13px; letter-spacing: 0.06em; }
 .chart-readout { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-top: 4px; font-size: 13px; }
