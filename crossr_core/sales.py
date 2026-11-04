@@ -590,8 +590,14 @@ def sire_sales_summary(sire_name, entered_stud=None, catalog_id=None, today=None
         by_damsire.setdefault(name.upper(), {"broodmare_sire": name, "pool": []})["pool"].append(l)
     damsire_rows = []
     for entry in by_damsire.values():
-        cats = by_category(entry.pop("pool"))
+        pool = entry.pop("pool")
+        cats = by_category(pool)
         if any(c["sold"] for c in cats.values()):
+            # The horses behind the figures, newest sale first (outs dropped, like the stats).
+            entry["lots"] = [{
+                "name": l["name"], "year": l["year"], "sale": l["sale"], "hip": l["hip"],
+                "type": l["type"], "sex": l["sex"], "status": l["status"], "price": l["price"],
+            } for l in pool if l["status"] != "out"]
             damsire_rows.append({**entry, **cats})
     damsire_rows.sort(key=lambda r: -(r["all"]["average"] or 0))
 
