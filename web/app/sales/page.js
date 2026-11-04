@@ -199,6 +199,55 @@ function lineageLine(lot) {
   return [sire && dam ? `${sire} x ${dam}` : sire || dam, byDamsire].filter(Boolean).join(" ");
 }
 
+function ClientSetup({ step, clients, onYes, onNo, onSkip, onNames }) {
+  // Start with one client; "+ Add another client" grows the list (no fixed cap).
+  const [names, setNames] = useState([""]);
+  return (
+    <div className="filter-sheet" role="dialog" aria-label="Sale setup">
+      <div className="setup-card">
+        {step === "ask" ? (
+          <>
+            <h3>DO YOU HAVE ANY CLIENTS?</h3>
+            <p className="sub">If you&apos;re buying for clients, we&apos;ll set up a filter for each one.</p>
+            <div className="setup-actions">
+              <button className="primary" type="button" onClick={onYes}>Yes</button>
+              <button className="ghost" type="button" onClick={onNo}>No, just me</button>
+              <button className="ghost setup-skip" type="button" onClick={onSkip}>Skip</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h3>YOUR CLIENTS</h3>
+            <div className="setup-names">
+              {names.map((name, i) => (
+                <label key={i}>
+                  Client {i + 1} name
+                  <span className="setup-name-row">
+                    <input
+                      value={name}
+                      placeholder={clients[i]?.name || `Client ${i + 1}`}
+                      autoFocus={i === names.length - 1}
+                      onChange={(e) => setNames((cur) => { const next = [...cur]; next[i] = e.target.value; return next; })}
+                    />
+                    {names.length > 1 ? (
+                      <button type="button" className="ghost" title="Remove" onClick={() => setNames((cur) => cur.filter((_, j) => j !== i))}>✕</button>
+                    ) : null}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <button className="ghost setup-add" type="button" onClick={() => setNames((cur) => [...cur, ""])}>+ Add another client</button>
+            <div className="setup-actions">
+              <button className="primary" type="button" onClick={() => onNames(names.length, names)}>Set their filters →</button>
+              <button className="ghost setup-skip" type="button" onClick={onSkip}>Skip</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Books and sessions read 1, 2, 3… rather than by size. */
 function numericOrder(options) {
   return [...options].sort((a, b) => (Number(a.value) || 0) - (Number(b.value) || 0) || a.value.localeCompare(b.value));
@@ -265,6 +314,9 @@ function SalesPage() {
   const [markupTool, setMarkupTool] = useState(null);
   const [markupClear, setMarkupClear] = useState(0);
   const [quickNotes, setQuickNotes] = useState(false);
+  // Opening a sale: "Do you have any clients?" → names → each client's filters.
+  // null | { step: "ask" } | { step: "names", count } | { step: "client", index } | { step: "mine" }
+  const [setup, setSetup] = useState(null);
   // Undo / redo across both markup layers: which layer changed, in order.
   const [markupCommand, setMarkupCommand] = useState(null);
   const [markupEdits, setMarkupEdits] = useState([]);
@@ -669,6 +721,7 @@ function SalesPage() {
 
   function openCatalog(item, nextMode) {
     restoreRef.current = null;
+    setSetup({ step: "ask" });
     setMode(nextMode);
     setCatalog(item);
     setCatalogs(nextMode === "upcoming" ? upcomingCatalogs : pastCatalogs);
@@ -718,6 +771,21 @@ function SalesPage() {
     ));
   }
 
+  // Full filter state, so each client can keep their own.
+  function filterSnapshot() {
+    return { sex, color, maxPrice, height, selectedSires, priceRanges, extra };
+  }
+
+  function applySnapshot(f = {}) {
+    setSex(f.sex || "");
+    setColor(f.color || "");
+    setMaxPrice(f.maxPrice || "");
+    setHeight(f.height || "");
+    setSelectedSires(f.selectedSires || []);
+    setPriceRanges(f.priceRanges || []);
+    setExtra({ ...EMPTY_EXTRA, ...(f.extra || {}) });
+  }
+
   function selectClient(client) {
     if (activeClient === client.id) {
       setActiveClient("");
@@ -726,10 +794,46 @@ function SalesPage() {
     setActiveClient(client.id);
     setOnlyDismissed(false);
     setOnlyStarred(false);
-    setSex(client.sex || "");
-    setColor(client.color || "");
-    setMaxPrice(client.maxPrice || "");
-    setHeight(client.height || "");
+    applySnapshot(client.filters || client);
+  }
+
+  const clientCount = Number.isFinite(desk.clientCount) ? desk.clientCount : (desk.clients || []).length;
+  const shownClients = (desk.clients || []).slice(0, clientCount);
+
+  function finishClientNames(count, names) {
+    const base = desk.clients || [];
+    const clients = Array.from({ length: Math.max(count, base.length) }, (_, i) => ({
+      ...(base[i] || { id: `c${i + 1}`, sex: "", color: "", maxPrice: "", height: "" }),
+      name: (names[i] || "").trim() || base[i]?.name || `Client ${i + 1}`,
+    }));
+    setDesk(saveDesk({ ...desk, clients, clientCount: count }));
+    applySnapshot(clients[0].filters || {});
+    setSetup({ step: "client", index: 0 });
+    setRailOpen(true);
+  }
+
+  function nextClientFilters() {
+    const index = setup.index;
+    const clients = (desk.clients || []).map((c, i) => (i === index ? { ...c, filters: filterSnapshot() } : c));
+    const saved = saveDesk({ ...desk, clients });
+    setDesk(saved);
+    if (index + 1 < clientCount) {
+      applySnapshot(clients[index + 1].filters || {});
+      setSetup({ step: "client", index: index + 1 });
+      return;
+    }
+    // Done: start on the first client's view.
+    setSetup(null);
+    setRailOpen(false);
+    setActiveClient(clients[0].id);
+    applySnapshot(clients[0].filters || {});
+  }
+
+  function noClients() {
+    setDesk(saveDesk({ ...desk, clientCount: 0 }));
+    setActiveClient("");
+    setSetup({ step: "mine" });
+    setRailOpen(true);
   }
 
   function viewFull() {
@@ -1258,6 +1362,16 @@ function SalesPage() {
                 <span className="markup-label">Clear</span>
               </button>
             </div>
+            {setup && (setup.step === "ask" || setup.step === "names") ? (
+              <ClientSetup
+                step={setup.step}
+                clients={desk.clients || []}
+                onYes={() => setSetup({ step: "names" })}
+                onNo={noClients}
+                onSkip={() => setSetup(null)}
+                onNames={finishClientNames}
+              />
+            ) : null}
             {quickNotes && current ? (
               <div className="quick-notes" role="dialog" aria-label="Notes for this hip">
                 <div className="quick-notes-head">
@@ -1289,12 +1403,25 @@ function SalesPage() {
               <div className="filter-sheet" role="dialog" aria-label="Filter hips" onClick={(e) => { if (e.target === e.currentTarget) setRailOpen(false); }}>
               <div className="rail-body">
                 <div className="filter-sheet-head">
-                  <h3>FILTER HIPS</h3>
+                  <h3>
+                    {setup?.step === "client"
+                      ? `${shownClients[setup.index]?.name || `Client ${setup.index + 1}`}'S FILTERS`
+                      : setup?.step === "mine" ? "YOUR FILTERS" : "FILTER HIPS"}
+                  </h3>
+                  {setup?.step === "client" ? (
+                    <span className="setup-step">Client {setup.index + 1} of {clientCount}</span>
+                  ) : null}
                   <span className="filter-count">{filtered.length} / {lots.length} hips</span>
-                  <button className="primary" type="button" onClick={() => setRailOpen(false)}>Done</button>
+                  {setup?.step === "client" ? (
+                    <button className="primary" type="button" onClick={nextClientFilters}>
+                      {setup.index + 1 < clientCount ? "Next client →" : "Done"}
+                    </button>
+                  ) : (
+                    <button className="primary" type="button" onClick={() => { setSetup(null); setRailOpen(false); }}>Done</button>
+                  )}
                 </div>
-                <h4>CLIENTS</h4>
-                {(desk.clients || []).map((client) => (
+                {!setup && shownClients.length ? <h4>CLIENTS</h4> : null}
+                {(setup ? [] : shownClients).map((client) => (
                   <button
                     key={client.id}
                     className={activeClient === client.id ? "primary" : "ghost"}
@@ -1304,7 +1431,7 @@ function SalesPage() {
                     {client.name}
                   </button>
                 ))}
-                {active ? (
+                {!setup && active ? (
                   <div className="client-prefs">
                     <label>
                       Name
