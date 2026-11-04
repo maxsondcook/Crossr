@@ -336,6 +336,27 @@ WHERE horse_id = %s AND place = '1'
 ORDER BY race_date
 """
 
+_RACE_STARTS_SQL = """
+SELECT race_date, track, country, race_number, race_name, grade, place, chart_url
+FROM race_starts
+WHERE horse_id = %s
+ORDER BY race_date, race_number
+"""
+
+
+def _start_row(race_date, track, country, race_number, race_name, grade, place, chart_url):
+    return {
+        "date": str(race_date or "")[:10] or None,
+        "track": track or None,
+        "country": country or None,
+        "race_number": race_number or None,
+        "race_name": race_name or None,
+        "grade": grade or None,
+        "class": _win_class(grade, race_name, country) if str(place or "").strip() == "1" else None,
+        "place": str(place).strip() if place not in (None, "") else None,
+        "chart_url": chart_url or None,
+    }
+
 
 def _season_row(year, born, row):
     earnings = _intish(row.get("earnings"))
@@ -368,13 +389,14 @@ def _win_class(grade, race_name, country):
 def _race_results_pg(pg, names, born):
     keys = _race_name_keys(names)
     if not keys:
-        return [], []
+        return [], [], []
     with pg.connect() as conn:
         hit = conn.execute(_RACE_HORSE_SQL, (keys, str(born))).fetchone()
         if not hit:
-            return [], []
+            return [], [], []
         seasons = conn.execute(_RACE_SEASONS_SQL, (hit[0],)).fetchall()
         starts = conn.execute(_RACE_WINS_SQL, (hit[0],)).fetchall()
+        every_start = conn.execute(_RACE_STARTS_SQL, (hit[0],)).fetchall()
     rows = []
     for year, starts_n, firsts, seconds, thirds, earnings in seasons:
         year = int(year)
@@ -393,34 +415,43 @@ def _race_results_pg(pg, names, born):
         "grade": grade,
         "class": _win_class(grade, race_name, country),
     } for race_date, track, country, race_name, grade in starts]
-    return rows, wins
+    return rows, wins, [_start_row(*row) for row in every_start]
 
 
 def race_results_for(name, foal_year=None, aliases=()):
-    """(season rows, wins) for a horse from race_horses / race_seasons / race_starts.
+    """(season rows, wins, starts) for a horse from race_horses / race_seasons / race_starts.
 
     Names are reused across generations, so a record only counts when its foaling year
     matches the horse's; with no known foaling year there is no safe match. Seasons skip
-    the career row; wins are the horse's 1st-place starts, oldest first.
+    the career row; wins are the horse's 1st-place starts and starts every run, oldest first.
     """
     from crossr_core import sample_db
 
     born = foal_year or _pedigree_foal_year(name)
     if not born:
-        return [], []
+        return [], [], []
     pg = sample_db._pg()
     if pg:
-        rows, wins = _race_results_pg(pg, [name, *aliases], born)
+        rows, wins, starts = _race_results_pg(pg, [name, *aliases], born)
     else:
         horses, seasons = _race_index()
         matches = [m for m in horses.get(main.clean_horse_name(name or ""), []) if m[1] == born]
-        rows, wins = [], []
+        rows, wins, starts = [], [], []
         for row in seasons.get(matches[0][0], []) if matches else []:
             year = _intish(row.get("year"))
             if year and year >= born + 2:
                 rows.append(_season_row(year, born, row))
+        if matches:
+            horse_id = matches[0][0]
+            for r in sample_db.load_table("race_starts"):
+                if r.get("horse_id") == horse_id:
+                    starts.append(_start_row(
+                        r.get("race_date"), r.get("track"), r.get("country"), r.get("race_number"),
+                        r.get("race_name"), r.get("grade"), r.get("place"), r.get("chart_url"),
+                    ))
+            starts.sort(key=lambda r: (r["date"] or "", str(r["race_number"] or "")))
     rows.sort(key=lambda r: r["season"])
-    return rows, wins
+    return rows, wins, starts
 
 
 
@@ -2412,7 +2443,7 @@ def get_horse_profile(search_name, profiles=None):
     # for horses Equibase hasn't been scraped for yet.
     year_in_name = re.search(r"\((\d{4})\)", f"{search_name} {horse_name}")
     birth_hint = (int(year_in_name.group(1)) if year_in_name else None) or _intish((data or {}).get("Year Born")) or None
-    race_rows, race_wins = race_results_for(clean_search, foal_year=birth_hint, aliases=(search_name, horse_name))
+    race_rows, race_wins, race_starts = race_results_for(clean_search, foal_year=birth_hint, aliases=(search_name, horse_name))
     for season in race_rows:
         for field in race_totals:
             race_totals[field] += season[field]
@@ -2558,6 +2589,7 @@ def get_horse_profile(search_name, profiles=None):
         "race_record": race_rows,
         "race_totals": race_totals,
         "race_wins": race_wins,
+        "race_starts": race_starts,
         "pedigree": tree,
         "inbreeding": inbreeding,
         "top_progeny": payload_top,
