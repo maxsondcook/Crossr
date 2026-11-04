@@ -108,6 +108,12 @@ function withBroodmareSireList(meta, rows, countLabel) {
   };
 }
 
+/** Race name without its "(Gr. 3)" / "(G1)" suffix when the class tag already shows the grade. */
+function raceTitle(r) {
+  const name = String(r.race_name || "");
+  return r.class ? name.replace(/\s*\((?:Gr\.?|Grade|G)\s*[1-3]\)\s*/i, " ").trim() : name;
+}
+
 function ordinal(place) {
   const n = parseInt(place, 10);
   if (!Number.isFinite(n)) return place || "—";
@@ -134,7 +140,7 @@ function RaceList({ starts, wins }) {
                 <td>{r.date || "—"}</td>
                 <td>{r.track || "—"}</td>
                 <td>
-                  {r.chart_url ? <a href={r.chart_url} target="_blank" rel="noopener noreferrer">{r.race_name || "Race"}</a> : (r.race_name || "—")}
+                  {r.chart_url ? <a href={r.chart_url} target="_blank" rel="noopener noreferrer">{raceTitle(r) || "Race"}</a> : (raceTitle(r) || "—")}
                   {r.class ? <span className="race-class"> {r.class}</span> : null}
                 </td>
                 <td>{ordinal(r.place)}</td>
