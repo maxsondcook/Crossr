@@ -554,17 +554,22 @@ function SalesPage() {
     return new Set(starredIds(desk, mode, catalog.id));
   }, [desk, catalog, mode]);
 
+  // Stallions with hips that fit every other filter (sold as, sex, book…),
+  // so picking Weanling lists only sires with weanlings in the sale.
   const sireOptions = useMemo(() => {
+    const others = { sex, color, maxPrice, height, selectedSires: [], priceRanges, extra };
     const counts = new Map();
     for (const lot of lots) {
       const name = blank(lot.sire);
-      if (!name) continue;
+      if (!name || !lotMatchesFilters(lot, others)) continue;
       counts.set(name, (counts.get(name) || 0) + 1);
     }
+    // Keep ticked sires listed (count 0) so they can still be unticked.
+    for (const name of selectedSires) if (!counts.has(name)) counts.set(name, 0);
     return [...counts.entries()]
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [lots]);
+  }, [lots, sex, color, maxPrice, height, priceRanges, extra, selectedSires]);
 
   const visibleSireOptions = useMemo(() => {
     const q = sireQuery.trim().toLowerCase();
