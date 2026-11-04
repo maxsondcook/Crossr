@@ -136,6 +136,22 @@ function countOptions(lots, pick) {
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
 }
 
+/** Similar crosses split: stakes winners vs the sire's own cross already sold at auction. */
+function splitCrosses(rows) {
+  const winners = [];
+  const sales = [];
+  for (const row of rows || []) {
+    if (row.source === "cross_sale") {
+      // relation reads "Sold: SIRE x DAMSIRE mare · SALE TITLE YEAR · $PRICE".
+      const parts = String(row.relation || "").split(" · ");
+      sales.push({ ...row, sale: parts[1] || "", price_raw: parts[2] || "" });
+    } else {
+      winners.push(row);
+    }
+  }
+  return { winners, sales };
+}
+
 /** Books and sessions read 1, 2, 3… rather than by size. */
 function numericOrder(options) {
   return [...options].sort((a, b) => (Number(a.value) || 0) - (Number(b.value) || 0) || a.value.localeCompare(b.value));
@@ -944,10 +960,10 @@ function SalesPage() {
                   <h4>SUCCESSFUL SIMILAR CROSSES</h4>
                   {detailError ? <p className="error">{detailError}</p> : null}
                   {loadingDetail && !ready ? <p className="empty">Loading crosses…</p> : null}
-                  {ready && !(detail.similar_crosses || []).length ? (
+                  {ready && !splitCrosses(detail.similar_crosses).winners.length ? (
                     <p className="empty">No similar successful crosses on file for this sire yet.</p>
                   ) : null}
-                  {ready && (detail.similar_crosses || []).length ? (
+                  {ready && splitCrosses(detail.similar_crosses).winners.length ? (
                     <table>
                       <thead>
                         <tr>
@@ -957,7 +973,7 @@ function SalesPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {detail.similar_crosses.map((row, index) => (
+                        {splitCrosses(detail.similar_crosses).winners.map((row, index) => (
                           <tr key={`${row.name}-${row.class}-${index}`}>
                             <td>
                               <Link href={hrefFor(row.name)}>{row.name}</Link>
@@ -974,10 +990,10 @@ function SalesPage() {
 
                 <div className="panel">
                   <h4>SIMILAR CROSSES AUCTION HISTORY</h4>
-                  {ready && !(detail.auction_history || []).length ? (
+                  {ready && !splitCrosses(detail.similar_crosses).sales.length && !(detail.auction_history || []).length ? (
                     <p className="empty">No auction history on file for these crosses yet.</p>
                   ) : null}
-                  {ready && (detail.auction_history || []).length ? (
+                  {ready && (splitCrosses(detail.similar_crosses).sales.length || (detail.auction_history || []).length) ? (
                     <table>
                       <thead>
                         <tr>
@@ -988,7 +1004,18 @@ function SalesPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {detail.auction_history.map((row, index) => {
+                        {splitCrosses(detail.similar_crosses).sales.map((row, index) => (
+                          <tr key={`cross-sale-${row.name}-${index}`}>
+                            <td>
+                              <Link href={hrefFor(row.name)}>{row.name}</Link>
+                              <div className="parents">Same cross</div>
+                            </td>
+                            <td>—</td>
+                            <td>{row.sale || "—"}</td>
+                            <td className="money">{row.price_raw || "—"}</td>
+                          </tr>
+                        ))}
+                        {(detail.auction_history || []).map((row, index) => {
                           const key = `${row.name}-${row.sale}-${row.hip}-${index}`;
                           const open = openAuction === key;
                           return (
