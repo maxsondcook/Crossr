@@ -154,6 +154,41 @@ function splitCrosses(rows) {
   return { winners, sales };
 }
 
+function MarkupIcon({ d, children }) {
+  return (
+    <svg className="markup-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {d ? <path d={d} /> : null}
+      {children}
+    </svg>
+  );
+}
+
+const MARKUP_TOOLS = [
+  ["pen", "Pencil", (
+    <MarkupIcon key="pen">
+      <path d="M15 4l5 5L9 20H4v-5L15 4z" fill="#f2c94c" stroke="#3a2f12" />
+      <path d="M4 15l5 5" stroke="#3a2f12" />
+      <path d="M4 20l2-2" stroke="#ef6b73" strokeWidth="2.6" />
+      <path d="M13 6l5 5" stroke="#3a2f12" />
+    </MarkupIcon>
+  )],
+  ["highlighter", "Highlight", (
+    <MarkupIcon key="hl">
+      <path d="M14 3l7 7-8 8-7-7 8-8z" fill="#ffe600" stroke="#5c5200" />
+      <path d="M6 11l7 7-2 2H5v-4z" fill="#fff59a" stroke="#5c5200" />
+      <path d="M3 21h8" stroke="#ffe600" strokeWidth="3" />
+    </MarkupIcon>
+  )],
+  ["eraser", "Eraser", (
+    <MarkupIcon key="er">
+      <path d="M16 3l5 5-10 10H6l-3-3L16 3z" fill="#f4a3b4" stroke="#5a2a35" />
+      <path d="M8 11l5 5" stroke="#5a2a35" />
+      <path d="M6 18h4M12 21h9" stroke="currentColor" />
+    </MarkupIcon>
+  )],
+];
+
 /** Books and sessions read 1, 2, 3… rather than by size. */
 function numericOrder(options) {
   return [...options].sort((a, b) => (Number(a.value) || 0) - (Number(b.value) || 0) || a.value.localeCompare(b.value));
@@ -219,6 +254,29 @@ function SalesPage() {
   // Markup over the hip page: null (off) | "pen" | "highlighter" | "eraser".
   const [markupTool, setMarkupTool] = useState(null);
   const [markupClear, setMarkupClear] = useState(0);
+  // Undo / redo across both markup layers: which layer changed, in order.
+  const [markupCommand, setMarkupCommand] = useState(null);
+  const [markupEdits, setMarkupEdits] = useState([]);
+  const [markupRedo, setMarkupRedo] = useState([]);
+  const onMarkupEdit = (layer) => {
+    setMarkupEdits((cur) => [...cur, layer]);
+    setMarkupRedo([]);
+  };
+  const undoMarkup = () => {
+    const layer = markupEdits[markupEdits.length - 1];
+    if (!layer) return;
+    setMarkupEdits((cur) => cur.slice(0, -1));
+    setMarkupRedo((cur) => [...cur, layer]);
+    setMarkupCommand({ target: layer, kind: "undo", n: Date.now() });
+  };
+  const redoMarkup = () => {
+    const layer = markupRedo[markupRedo.length - 1];
+    if (!layer) return;
+    setMarkupRedo((cur) => cur.slice(0, -1));
+    setMarkupEdits((cur) => [...cur, layer]);
+    setMarkupCommand({ target: layer, kind: "redo", n: Date.now() });
+  };
+  useEffect(() => { setMarkupEdits([]); setMarkupRedo([]); }, [currentId]);
   // Hip page layout: "tabs" shows one section at a time; "classic" is the column view.
   const [hipLayout, setHipLayoutState] = useState("tabs");
   const [hipTab, setHipTab] = useState("overview");
@@ -879,9 +937,12 @@ function SalesPage() {
         <div className={`sales-columns${hipLayout === "tabs" ? ` tabbed tab-${hipTab}` : ""}`}>
           <div className="sales-col sales-col-pedigree">
             <MarkupLayer
+              id="pedigree"
               storageKey={current ? `crossr-markup:${mode}:${catalog?.id}:${currentId}:pedigree` : ""}
               tool={markupTool}
               clearSignal={markupClear}
+              command={markupCommand}
+              onEdit={onMarkupEdit}
             />
             <div className="panel" data-sec="pedigree">
               <h4>PEDIGREE</h4>
@@ -935,9 +996,12 @@ function SalesPage() {
 
           <div className="sales-col sales-col-info">
             <MarkupLayer
+              id="info"
               storageKey={current ? `crossr-markup:${mode}:${catalog?.id}:${currentId}:info` : ""}
               tool={markupTool}
               clearSignal={markupClear}
+              command={markupCommand}
+              onEdit={onMarkupEdit}
             />
             {listError ? <p className="error">{listError}</p> : null}
             {loadingList ? <p className="empty">Loading catalog…</p> : null}
@@ -1135,25 +1199,30 @@ function SalesPage() {
               {railOpen ? "»" : "«"}
             </button>
             <div className="markup-tools" role="group" aria-label="Mark up this hip">
-              {[["pen", "✎", "Pen"], ["highlighter", "▮", "Highlighter"], ["eraser", "⌫", "Eraser"]].map(([id, icon, label]) => (
+              {MARKUP_TOOLS.map(([id, label, icon]) => (
                 <button
                   key={id}
                   className={`rail-btn markup-btn${markupTool === id ? " on" : ""}`}
                   type="button"
-                  title={markupTool === id ? `${label} (tap to stop drawing)` : label}
+                  title={markupTool === id ? `${label} (tap again to stop drawing)` : label}
                   aria-pressed={markupTool === id}
                   onClick={() => setMarkupTool((cur) => (cur === id ? null : id))}
                 >
                   {icon}
+                  <span className="markup-label">{label}</span>
                 </button>
               ))}
-              <button
-                className="rail-btn markup-btn"
-                type="button"
-                title="Clear this hip's markup"
-                onClick={() => setMarkupClear((n) => n + 1)}
-              >
-                🗑
+              <button className="rail-btn markup-btn" type="button" title="Undo" onClick={undoMarkup} disabled={!markupEdits.length}>
+                <MarkupIcon d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" />
+                <span className="markup-label">Undo</span>
+              </button>
+              <button className="rail-btn markup-btn" type="button" title="Redo" onClick={redoMarkup} disabled={!markupRedo.length}>
+                <MarkupIcon d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3" />
+                <span className="markup-label">Redo</span>
+              </button>
+              <button className="rail-btn markup-btn" type="button" title="Clear this hip's markup" onClick={() => setMarkupClear((n) => n + 1)}>
+                <MarkupIcon d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />
+                <span className="markup-label">Clear</span>
               </button>
             </div>
             {railOpen ? (

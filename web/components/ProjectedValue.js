@@ -127,8 +127,8 @@ export default function ProjectedValue({ valueProjector, lot, showSold }) {
           </div>
         ) : null}
         {!showBreeding && !showRace && !showTotal && !showSold ? (
+          // The section is already titled "Projected Value"; just show there's no figure.
           <div className="pv-item">
-            <span className="pv-label">Projected value</span>
             <b>—</b>
           </div>
         ) : null}
