@@ -272,18 +272,30 @@ function SaleHorses({ lots, hrefFor }) {
           <option value="price_desc">Price ↓</option>
           <option value="price_asc">Price ↑</option>
         </select>
-        <select
-          multiple
-          value={bms}
-          onChange={(e) => setBms([...e.target.selectedOptions].map((o) => o.value))}
-          aria-label="Broodmare sires"
-          title="Broodmare sires (Ctrl/Cmd-click for several)"
-          style={{ minWidth: 180, height: 72 }}
-        >
-          {damsires.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
-        {bms.length ? <button type="button" className="ghost" onClick={() => setBms([])}>Clear sires</button> : null}
       </div>
+      {damsires.length ? (
+        <div className="bms-filter">
+          <span className="filter-label">
+            Broodmare sires{bms.length ? ` · ${bms.length} selected` : " · tick any number"}
+          </span>
+          <div className="filter-sire-list" role="group" aria-label="Broodmare sires">
+            {damsires.map((d) => (
+              <label key={d} className="filter-check">
+                <input
+                  type="checkbox"
+                  checked={bms.includes(d)}
+                  onChange={() => setBms((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]))}
+                />
+                <span>{d}</span>
+                <em>{lots.filter((l) => l.damsire === d).length}</em>
+              </label>
+            ))}
+          </div>
+          {bms.length ? (
+            <button type="button" className="ghost filter-clear" onClick={() => setBms([])}>Clear broodmare sires</button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="history-wrap" style={{ marginTop: 8 }}>
         <table>
           <thead>

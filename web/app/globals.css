@@ -801,6 +801,8 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .range-picker .ghost { padding: 4px 10px; font-size: 12px; }
 th.range-col { color: var(--gold); }
 td.range-col { background: rgba(212, 175, 55, 0.06); }
+.bms-filter { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.bms-filter .filter-sire-list { max-height: 180px; }
 .chart-readout { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-top: 4px; font-size: 13px; }
 .chart-readout i { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
 /* Best broodmare sire crosses: click a row to list the horses that cross produced. */
