@@ -189,6 +189,16 @@ const MARKUP_TOOLS = [
   )],
 ];
 
+/** "Sire x Dam by Damsire" — or just "by Damsire" when the name is already "Sire x Dam 'YY". */
+function lineageLine(lot) {
+  const sire = blank(lot?.sire);
+  const dam = blank(lot?.dam);
+  const damsire = blank(lot?.damsire);
+  const byDamsire = damsire ? `by ${damsire}` : "";
+  if (/\sx\s/i.test(String(lot?.name || ""))) return byDamsire;
+  return [sire && dam ? `${sire} x ${dam}` : sire || dam, byDamsire].filter(Boolean).join(" ");
+}
+
 /** Books and sessions read 1, 2, 3… rather than by size. */
 function numericOrder(options) {
   return [...options].sort((a, b) => (Number(a.value) || 0) - (Number(b.value) || 0) || a.value.localeCompare(b.value));
@@ -1011,6 +1021,7 @@ function SalesPage() {
                 <div className="panel sale-identity" data-sec="overview">
                   <h2>
                     <Link href={hrefFor(current.name)}>{current.name || current.raw_name || "Unnamed"}</Link>
+                    {lineageLine(current) ? <span className="sale-lineage"> ({lineageLine(current)})</span> : null}
                   </h2>
                   {current.supplement || blank(current.pedigree_pdf) ? (
                     <p className="sale-links">
