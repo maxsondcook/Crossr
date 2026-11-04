@@ -26,6 +26,11 @@ body {
     var(--bg);
   color: var(--text);
 }
+/* House style: all lettering uppercase. What people type (search, notes, sign-in) stays as typed. */
+body { text-transform: uppercase; }
+input, textarea { text-transform: none; }
+select, option, button { text-transform: uppercase; }
+input::placeholder, textarea::placeholder { text-transform: uppercase; }
 
 a { color: inherit; text-decoration: none; }
 button, input, select { font: inherit; color: inherit; }
