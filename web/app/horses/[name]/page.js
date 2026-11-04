@@ -591,7 +591,79 @@ const BMS_COLUMNS = [
   ["sw", "#SWs", "Ungraded / listed stakes winners"],
 ];
 
+const SALE_TYPES = [["yearlings", "Yearlings"], ["weanlings", "Weanlings"], ["all", "All ages"]];
+
+/** Which broodmare-sire cross brings the most at auction, by sale type. */
+function CrossSalesTable({ name }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [type, setType] = useState("yearlings");
+  const [minSold, setMinSold] = useState(2);
+  useEffect(() => {
+    setData(null);
+    setError("");
+    apiGet(`/api/sales/sire/${encodeURIComponent(name)}/summary`).then(setData).catch((e) => setError(e.message));
+  }, [name]);
+  if (error) return <p className="error">{error}</p>;
+  if (!data) return <p className="catalog-empty">Loading sales…</p>;
+  if (!data.by_damsire) return <p className="catalog-empty">Sales by cross isn&apos;t available on this server yet.</p>;
+  const rows = data.by_damsire
+    .filter((r) => (r[type]?.sold || 0) >= minSold && r[type]?.average != null)
+    .sort((a, b) => b[type].average - a[type].average);
+  return (
+    <>
+      <h4>SALES BY CROSS · {rows.length}</h4>
+      <div className="cross-sales-tools">
+        <div className="view-toggle" style={{ display: "flex", gap: 6 }}>
+          {SALE_TYPES.map(([id, label]) => (
+            <button key={id} type="button" className={type === id ? "primary" : "ghost"} onClick={() => setType(id)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <label>
+          At least
+          <select value={minSold} onChange={(e) => setMinSold(Number(e.target.value))}>
+            {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} sold</option>)}
+          </select>
+        </label>
+      </div>
+      {rows.length ? (
+        <div className="history-wrap">
+          <table>
+            <thead>
+              <tr><th>Broodmare Sire</th><th>Average</th><th>Median</th><th>Top price</th><th>Sold</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.broodmare_sire}>
+                  <td>{r.broodmare_sire}</td>
+                  <td className="money">{money(r[type].average)}</td>
+                  <td className="money">{r[type].median != null ? money(r[type].median) : "—"}</td>
+                  <td className="money">{r[type].high != null ? money(r[type].high) : "—"}</td>
+                  <td>{r[type].sold} of {r[type].offered}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="catalog-empty">No crosses with {minSold}+ sold in this category.</p>
+      )}
+      <p className="sub" style={{ fontSize: 12, marginTop: 6 }}>
+        Sold lots only (RNAs and outs excluded), all years. Lower &quot;at least&quot; to include one-off sales.
+      </p>
+    </>
+  );
+}
+
 const CLASS_ORDER = ["MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW"];
+
+// "Tapit Gr/R", "Tapit (2001)" and "TAPIT" are the same broodmare sire.
+const COAT_SUFFIX = /\s+(?:gr\/?ro?|gr\/r|dk\s*b\/?br?|b\/?br|ch|blk|bl|br|b|gr|ro)\.?$/i;
+function bmsKey(name) {
+  return String(name || "").replace(/\s*\(\d{4}\)\s*$/, "").trim().replace(COAT_SUFFIX, "").trim().toUpperCase();
+}
 
 function BmsCrossesTable({ rows, progeny = [], hrefFor }) {
   // Hide columns that are zero for every broodmare sire of this stallion.
@@ -601,7 +673,7 @@ function BmsCrossesTable({ rows, progeny = [], hrefFor }) {
   const byBms = useMemo(() => {
     const map = new Map();
     for (const p of progeny) {
-      const key = String(p.broodmare_sire || "").trim().toUpperCase();
+      const key = bmsKey(p.broodmare_sire);
       if (!key) continue;
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(p);
@@ -630,7 +702,7 @@ function BmsCrossesTable({ rows, progeny = [], hrefFor }) {
           </thead>
           <tbody>
             {rows.map((r) => {
-              const key = String(r.broodmare_sire || "").trim().toUpperCase();
+              const key = bmsKey(r.broodmare_sire);
               const horses = byBms.get(key) || [];
               const isOpen = open.has(key);
               return (
@@ -1087,8 +1159,8 @@ function HorsePage() {
 
         {show("progeny") && isStallion ? (
         <div className="panel">
-          {(data.bms_crosses || []).length ? (
-            <div className="view-toggle" style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          {isStallion ? (
+            <div className="view-toggle" style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
               <button
                 type="button"
                 className={progenyView === "top" ? "primary" : "ghost"}
@@ -1103,9 +1175,18 @@ function HorsePage() {
               >
                 BEST BROODMARE SIRE CROSSES
               </button>
+              <button
+                type="button"
+                className={progenyView === "sales" ? "primary" : "ghost"}
+                onClick={() => setProgenyView("sales")}
+              >
+                SALES BY CROSS
+              </button>
             </div>
           ) : null}
-          {progenyView === "bms" && (data.bms_crosses || []).length ? (
+          {progenyView === "sales" ? (
+            <CrossSalesTable name={data.name} />
+          ) : progenyView === "bms" && (data.bms_crosses || []).length ? (
             <BmsCrossesTable rows={data.bms_crosses} progeny={data.top_progeny || []} hrefFor={hrefFor} />
           ) : (
           <>

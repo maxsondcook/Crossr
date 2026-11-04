@@ -843,6 +843,10 @@ td.range-col { background: rgba(212, 175, 55, 0.06); }
 @media (max-width: 900px) {
   .dash.dash-tabbed .ped-col { grid-template-columns: minmax(0, 1fr); }
 }
+.cross-sales-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.cross-sales-tools .view-toggle button { padding: 6px 12px; font-size: 12px; }
+.cross-sales-tools label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.cross-sales-tools select { width: auto; margin: 0; padding: 4px 8px; }
 .chart-readout { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-top: 4px; font-size: 13px; }
 .chart-readout i { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
 /* Best broodmare sire crosses: click a row to list the horses that cross produced. */
