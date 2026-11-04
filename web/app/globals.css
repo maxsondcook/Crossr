@@ -757,10 +757,13 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   gap: 12px;
   padding: 16px 20px 20px;
   background: var(--bg);
+  overflow-y: auto;
 }
 .ped-overlay-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ped-overlay-bar h4 { margin: 0; letter-spacing: 0.12em; }
-.ped-overlay-stage { flex: 1; min-height: 0; overflow: hidden; }
+/* The chart still fills one screen; anything extra sits below and scrolls into view. */
+.ped-overlay-stage { flex: 0 0 auto; height: calc(100vh - 84px); min-height: 320px; overflow: hidden; }
+.ped-overlay-extra { flex: 0 0 auto; }
 .ped-overlay-chart { transform-origin: top left; }
 .ped-overlay .pedigree-fit,
 .ped-overlay .catalog-ped { width: 100%; max-width: none; }
@@ -834,6 +837,12 @@ td.range-col { background: rgba(212, 175, 55, 0.06); }
 .dash.dash-tabbed { grid-template-columns: minmax(0, 1fr); }
 .dash.dash-tabbed .horse-panels { grid-template-columns: minmax(0, 1fr); }
 .dash.dash-tabbed .horse-panels:empty { display: none; }
+/* Pedigree tab: chart and female family side by side. */
+.dash.dash-tabbed .ped-col { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 12px; align-items: start; }
+.dash.dash-tabbed .ped-col > .family-panel { margin-top: 0 !important; contain: none; }
+@media (max-width: 900px) {
+  .dash.dash-tabbed .ped-col { grid-template-columns: minmax(0, 1fr); }
+}
 .chart-readout { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-top: 4px; font-size: 13px; }
 .chart-readout i { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
 /* Best broodmare sire crosses: click a row to list the horses that cross produced. */

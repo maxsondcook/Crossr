@@ -111,7 +111,20 @@ function withBroodmareSireList(meta, rows, countLabel) {
 /** Race name without its "(Gr. 3)" / "(G1)" suffix when the class tag already shows the grade. */
 function raceTitle(r) {
   const name = String(r.race_name || "");
-  return r.class ? name.replace(/\s*\((?:Gr\.?|Grade|G)\s*[1-3]\)\s*/i, " ").trim() : name;
+  return raceGrade(r) ? name.replace(/\s*\((?:Gr\.?|Grade|G)\s*[1-3]\)\s*/i, " ").trim() : name;
+}
+
+/** Grade tag for any graded start (win or not): G1 / G2 / G3. */
+function raceGrade(r) {
+  if (r.class && /^G[1-3]$/.test(r.class)) return r.class;
+  const g = String(r.grade || "").match(/[1-3]/) || String(r.race_name || "").match(/\((?:Gr\.?|Grade|G)\s*([1-3])\)/i);
+  return g ? `G${g[1] || g[0]}` : null;
+}
+
+/** 2016-06-30 → 06-30-2016 (month-day-year). */
+function mdy(date) {
+  const m = String(date || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[2]}-${m[3]}-${m[1]}` : (date || "—");
 }
 
 function ordinal(place) {
@@ -137,11 +150,11 @@ function RaceList({ starts, wins }) {
           <tbody>
             {all.map((r, i) => (
               <tr key={`${r.date}-${r.race_number || i}`} className={String(r.place) === "1" ? "race-win" : undefined}>
-                <td>{r.date || "—"}</td>
+                <td>{mdy(r.date)}</td>
                 <td>{r.track || "—"}</td>
                 <td>
                   {r.chart_url ? <a href={r.chart_url} target="_blank" rel="noopener noreferrer">{raceTitle(r) || "Race"}</a> : (raceTitle(r) || "—")}
-                  {r.class ? <span className="race-class"> {r.class}</span> : null}
+                  {raceGrade(r) ? <span className="race-class"> {raceGrade(r)}</span> : null}
                 </td>
                 <td>{ordinal(r.place)}</td>
               </tr>
@@ -913,10 +926,20 @@ function HorsePage() {
         </nav>
       ) : null}
       {show("pedigree") ? (
-      <div>
+      <div className="ped-col">
         <div className="panel">
           <h4>PEDIGREE</h4>
-          <PedigreeChart tree={data.pedigree} showSubject={false} hrefFor={hrefFor} />
+          <PedigreeChart
+            tree={data.pedigree}
+            showSubject={false}
+            hrefFor={hrefFor}
+            expandedExtra={(
+              <div className="panel family-panel">
+                <h4>FEMALE FAMILY</h4>
+                <FemaleFamily family={family} hrefFor={hrefFor} />
+              </div>
+            )}
+          />
         </div>
         <div className="panel family-panel" style={{ marginTop: 12 }}>
           <h4>FEMALE FAMILY</h4>
