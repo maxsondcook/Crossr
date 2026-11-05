@@ -84,6 +84,29 @@ def load_parents(conn) -> list[dict]:
     return items
 
 
+def directory_stallions(conn, year: int) -> list[dict]:
+    """Stallions that covered mares in ``year`` (breeding_seasons, from The
+    Jockey Club's Report of Mares Bred), as sire items. Most mares first.
+    Their trees fill the sire side of every hip by them."""
+    rows = conn.execute(
+        """
+        SELECT btrim(stallion) AS name, MAX(CASE WHEN mares_bred ~ '^[0-9]+$' THEN mares_bred::int END) AS lots
+        FROM breeding_seasons WHERE breeding_year = %s AND COALESCE(btrim(stallion), '') <> ''
+        GROUP BY 1
+        """,
+        (str(year),),
+    ).fetchall()
+    items = []
+    for row in rows:
+        item = _item("sire", {"name": row["name"], "latest": year, "lots": row["lots"] or 0,
+                              "first_foal": None, "last_foal": None}, "")
+        # Covering in ``year``: foaled 3-30 years before.
+        item["yob_range"] = (year - AGE_LIMITS["sire"][1], year - AGE_LIMITS["sire"][0])
+        items.append(item)
+    items.sort(key=lambda it: (-it["lots"], it["name_key"]))
+    return items
+
+
 def _item(role: str, row: dict, sire: str) -> dict:
     name = (row["name"] or "").strip()
     name_key = clean_name(name)

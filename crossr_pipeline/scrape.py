@@ -7,10 +7,13 @@ Each batch (about BATCH_MINUTES):
   1. Upcoming catalogs first (catalog_priority): their results are pushed at
      least every 30 min, so hips on the site turn complete as data lands.
   2. races-refresh, when the last finished one is over a week old: re-open
-     the profile of every ok horse with a start in the last 60 days.
-  3. damsire-dams: dams whose sale lots have no broodmare sire, one search
+     the profile of every ok horse active this year (a start since Jan 1, or
+     in the last 60 days, or an entry in race_entries).
+  3. pedigrees-stallions: this year's stallions (breeding_seasons) without
+     a full tree, so every hip by them has its sire side.
+  4. damsire-dams: dams whose sale lots have no broodmare sire, one search
      each (see damsire_dams); the push fills those lots.
-  4. pedigrees-sales: the sire and dam of every sale lot, to a full 5-gen
+  5. pedigrees-sales: the sire and dam of every sale lot, to a full 5-gen
      tree (see sales_parents).
 Everything is read from and written to the local stage (state/stage.sqlite);
 the daily ``push`` job sends race records and pedigrees to Postgres.
@@ -160,22 +163,33 @@ def refresh_due(conn) -> bool:
     return datetime.now(timezone.utc) - last["started_at"] >= timedelta(days=REFRESH_EVERY_DAYS)
 
 
+def refresh_since(now: datetime | None = None) -> str:
+    """Start of the refresh window: Jan 1 this year, or 60 days back in January/February."""
+    now = now or datetime.now(timezone.utc)
+    return min(now.date().replace(month=1, day=1), (now - timedelta(days=REFRESH_WINDOW_DAYS)).date()).isoformat()
+
+
 def refresh_candidates(conn, cap: int | None, local=None) -> list[dict]:
-    """Ok horses with a recent start (Postgres, which has the starts), minus
-    those the stage re-fetched since (not pushed yet)."""
-    since = (datetime.now(timezone.utc) - timedelta(days=REFRESH_WINDOW_DAYS)).date().isoformat()
+    """Ok horses active this year: a start since refresh_since() (Postgres has
+    the starts) or an entry in race_entries. Minus those the stage re-fetched
+    in the last week (not pushed yet)."""
+    since = refresh_since()
     fetched_before = (datetime.now(timezone.utc) - timedelta(days=REFRESH_EVERY_DAYS - 1)).isoformat()
     sql = """
         SELECT h.*, s.last_start FROM race_horses h
         JOIN (
-            SELECT horse_id, MAX(race_date) AS last_start FROM race_starts
-            WHERE race_date >= %s GROUP BY horse_id
+            SELECT horse_id, MAX(race_date) AS last_start FROM (
+                SELECT horse_id, race_date FROM race_starts WHERE race_date >= %s
+                UNION ALL
+                SELECT horse_id, race_date::text FROM race_entries
+                WHERE race_date >= %s::date AND COALESCE(horse_id, '') <> ''
+            ) a GROUP BY horse_id
         ) s ON s.horse_id = h.id
         WHERE h.status = 'ok' AND COALESCE(h.profile_url, '') <> ''
           AND COALESCE(h.fetched_at, '') < %s
         ORDER BY s.last_start DESC
     """
-    rows = [dict(r) for r in conn.execute(sql, (since, fetched_before)).fetchall()]
+    rows = [dict(r) for r in conn.execute(sql, (since, since, fetched_before)).fetchall()]
     if local is not None and rows:
         fetched = stage.fetched_at_by_id(local, [r["id"] for r in rows])
         rows = [r for r in rows if fetched.get(str(r["id"]), "") < fetched_before]
@@ -203,7 +217,7 @@ def run_refresh(eb, page, pg, local, delay: float, cap: int | None, deadline: fl
     """Returns True when every candidate is done (the refresh is finished)."""
     horses = refresh_candidates(pg, cap, local)
     run = state.Run(pg, REFRESH_JOB)
-    print(f"races-refresh: {len(horses)} horse(s) with a start in the last {REFRESH_WINDOW_DAYS} days", flush=True)
+    print(f"races-refresh: {len(horses)} horse(s) active since {refresh_since()}", flush=True)
     done = 0
     try:
         for index, horse in enumerate(horses, start=1):
@@ -284,15 +298,31 @@ def sale_parents(pg, local) -> list[dict]:
     return stage.cached(local, "sale_parents", version, lambda: sales_parents.load_parents(pg))
 
 
+def directory_stallions(pg, local) -> list[dict]:
+    """sales_parents.directory_stallions for this year, re-read only when breeding_seasons changes."""
+    from crossr_core import pg_push as push
+
+    year = datetime.now(timezone.utc).year
+    version = push.table_versions(pg, ("breeding_seasons",)).get("breeding_seasons", "")
+    return stage.cached(local, f"directory_stallions:{year}", version,
+                        lambda: sales_parents.directory_stallions(pg, year))
+
+
 def run_pedigrees(eb, page, pg, local, book, delay: float, limit: int | None, deadline: float,
-                  role: str | None = None, hook=None) -> int:
-    """Work the queue until it is empty or the batch is out of time. Returns items left."""
+                  role: str | None = None, hook=None, parents: list[dict] | None = None,
+                  label: str = sales_parents.JOB) -> int:
+    """Work the queue (sale parents, or ``parents``) until it is empty or the
+    batch is out of time. Returns items left. Queue states are shared, so a
+    horse done under one list is skipped in the other."""
     states = stage.queue_states(local, sales_parents.JOB)
-    todo, skipped = sales_parents.build_queue(sale_parents(pg, local), book.index, states, time.time(), limit, role)
-    run = state.Run(pg, sales_parents.JOB)
+    todo, skipped = sales_parents.build_queue(parents if parents is not None else sale_parents(pg, local),
+                                              book.index, states, time.time(), limit, role)
+    if parents is not None and not todo:
+        return 0
+    run = state.Run(pg, sales_parents.JOB if parents is None else label)
     for reason, n in skipped.items():
         run.counts[f"skipped: {reason}"] = n
-    print(f"pedigrees-sales: {len(todo)} to do; skipped {dict(skipped)}", flush=True)
+    print(f"{label}: {len(todo)} to do; skipped {dict(skipped)}", flush=True)
     run.heartbeat("running")
     errors_in_a_row = 0
     done = 0
@@ -494,6 +524,10 @@ def scrape(delay: float = 3.0, limit: int | None = None, refresh_cap: int | None
                     if (not skip_refresh and not dams_only and (refresh_only or refresh_due(pg))
                             and time.monotonic() < deadline):
                         more = more or not run_refresh(eb, page, pg, local, delay, refresh_cap, deadline)
+                    if not refresh_only and not dams_only and time.monotonic() < deadline:
+                        left = run_pedigrees(eb, page, pg, local, book, delay, None, deadline, "sire", hook,
+                                             parents=directory_stallions(pg, local), label="pedigrees-stallions")
+                        more = more or left > 0
                     if not refresh_only and time.monotonic() < deadline:
                         left = run_damsire_dams(eb, page, pg, local, delay, limit if dams_only else None, deadline, hook)
                         more = more or (left > 0 and not (dams_only and limit))
