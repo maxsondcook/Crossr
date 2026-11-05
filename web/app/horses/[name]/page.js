@@ -1095,7 +1095,7 @@ function HorsePage() {
           {s.career_highlight ? (
             <div className="notes" style={{ marginTop: 16 }}>{s.career_highlight}</div>
           ) : null}
-          {isStallion || isFemale ? (
+          {(isStallion && !offDuty) || isFemale ? (
             <div style={{ marginTop: 16, textAlign: "center" }}>
               <Link
                 className="primary"
