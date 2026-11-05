@@ -35,6 +35,7 @@ from crossr_core import sales_model as sm
 DATASET_VERSION = "1"
 MAX_VALID_PRICE = 20_000_000  # highest auction price on record is well under this
 FEE_LOOKBACK = 2  # years a missing conception-year fee may borrow the latest earlier fee
+MISSING_FEE_FILL = 10_000  # placeholder fee (USD) where none is known; flagged by fee_missing
 FEE_RUN_GAP = 4  # years with no listed fee that separate two same-named stallions
 
 # ------------------------------------------------------------------ sources
@@ -344,8 +345,9 @@ def _history_features(yw: pd.DataFrame, sources: Sources) -> pd.DataFrame:
     hist.fees = __import__("collections").defaultdict(dict, hist.fees)
     hist.own = {}  # the dam's own record is an as-of feature in _dam_race_record
     hist.dam_sire = dam_sire
-    lf = np.log(fees.fee)
-    hist.lfee_fill = float(np.median(lf)) if len(lf) else 9.5
+    # Fixed fill for a missing fee (its own "fee_missing" flag carries the signal). A median of the
+    # fee table would include fees announced after the sale.
+    hist.lfee_fill = math.log(MISSING_FEE_FILL)
 
     yw = yw.copy()
     yw["kind"] = np.where(yw.age == 1, "Y", "W")
