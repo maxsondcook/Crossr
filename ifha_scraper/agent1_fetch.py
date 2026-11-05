@@ -19,13 +19,23 @@ both of which yield (metadata_dict, raw_html) pairs.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+if __name__ == "__main__":
+    # Intentionally off, before the HTTP client loads. See collection.py.
+    _root = Path(__file__).resolve().parents[1]
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("IFHA graded stakes fetch")
+
 import argparse
 import asyncio
 import hashlib
 import json
 import random
 import re
-import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -191,6 +201,15 @@ class IfhaFetcher:
             return cached
 
         assert self._client is not None, "use IfhaFetcher as an async context manager"
+        # Intentionally off. A cached page above still returns. See collection.py.
+        import sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from crossr_pipeline.collection import refuse_if_off
+        refuse_if_off("IFHA graded stakes fetch")
+
         async with self._sem:
             last_err: Exception | None = None
             for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -351,6 +370,15 @@ def parse_years(spec: str) -> list[int]:
 
 
 async def amain() -> int:
+    # Intentionally off. See crossr_pipeline/collection.py.
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("IFHA graded stakes fetch")
+
     ap = argparse.ArgumentParser(description="Fetch IFHA graded stakes pages.")
     ap.add_argument("--years", default="2015", help="e.g. 2015 or 2003-2026 or 2015,2020")
     ap.add_argument(

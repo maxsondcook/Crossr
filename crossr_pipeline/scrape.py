@@ -569,6 +569,10 @@ def scrape(delay: float = 3.0, limit: int | None = None, refresh_cap: int | None
            catalogs_only: bool = False, minutes: float = BATCH_MINUTES, light: bool = True,
            dams_only: bool = False) -> int:
     """One batch. Returns 0 (nothing left) or EXIT_MORE (run again soon)."""
+    # Intentionally off: Equibase, dam backlog, and pedigree batches. See collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Equibase scrape")
+
     global _LIGHT
     from playwright.sync_api import sync_playwright
 

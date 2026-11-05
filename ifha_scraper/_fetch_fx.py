@@ -23,6 +23,15 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fx_rates.json")
 
 def _get(url: str) -> dict:
     """GET JSON, falling back to curl when Python has no usable CA bundle."""
+    # Intentionally off. See crossr_pipeline/collection.py.
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("IFHA exchange-rate fetch")
+
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "ifha-normalize/1.0"})
         with urllib.request.urlopen(req, timeout=60) as resp:
@@ -79,4 +88,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Intentionally off. See crossr_pipeline/collection.py.
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("IFHA exchange-rate fetch")
     main()

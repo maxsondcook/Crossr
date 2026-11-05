@@ -6,18 +6,27 @@ Does not import or touch the Pedigrees / pq_scraper codebase.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+if __name__ == "__main__":
+    # Intentionally off, before the HTTP libraries load. See collection.py.
+    _root = Path(__file__).resolve().parents[2]
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("BloodHorse sire-list scrape")
+
 import argparse
 import csv
 import json
 import random
 import re
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from html import unescape
-from pathlib import Path
 from typing import Iterable
 from urllib.parse import urlencode
 
@@ -459,6 +468,7 @@ def download_aei_pdf(year: int) -> Path | None:
     if dest.exists() and dest.stat().st_size > 2000:
         return dest
     url = AEI_PDF_URL.format(year=year)
+    _refuse("BloodHorse sire-list scrape")
     try:
         resp = requests.get(url, timeout=45, headers={"User-Agent": UA})
     except requests.RequestException:
@@ -761,6 +771,7 @@ class Scraper:
                 dest.unlink(missing_ok=True)
 
         last_err = "empty"
+        _refuse("BloodHorse sire-list scrape")
         for attempt in range(1, retries + 1):
             self.limiter.wait()
             try:
@@ -884,7 +895,17 @@ def verify_2004_general() -> None:
         print(f"  {must}: {'FOUND' if must in blob else 'MISSING'}")
 
 
+def _refuse(job: str) -> None:
+    # Intentionally off. See crossr_pipeline/collection.py.
+    root = Path(__file__).resolve().parents[2]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off(job)
+
+
 def main() -> int:
+    _refuse("BloodHorse sire-list scrape")
     parser = argparse.ArgumentParser()
     parser.add_argument("--years", default="2004-2026")
     parser.add_argument("--concurrency", type=int, default=2)

@@ -29,6 +29,11 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+if __name__ == "__main__":
+    # Intentionally off, before the database imports. See collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Pedigree Query live fetch")
+
 from main import clean_horse_name  # noqa: E402
 from pq_scraper.client import (  # noqa: E402
     HOMONYM_MAX,
@@ -200,6 +205,10 @@ def browser_closed(exc: BaseException | str) -> bool:
 
 
 def launch_chrome(profile_name: str):
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Pedigree Query live fetch")
+
     from playwright.sync_api import sync_playwright
 
     profile = PROFILE_BASE / profile_name
@@ -770,6 +779,10 @@ def import_reverse(args, reuse_browser: tuple | None = None) -> int:
 
 
 def main() -> int:
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Pedigree Query live fetch")
+
     p = argparse.ArgumentParser(description="Live headed-Chrome PQ importer (reverse queue)")
     p.add_argument("--smoke", action="store_true", help="Only smoke-test Frammento + 2 live pages")
     p.add_argument("--limit", type=int, default=0, help="Max horses to attempt from the reverse queue")

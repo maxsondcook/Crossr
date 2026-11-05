@@ -396,6 +396,10 @@ def gap_sires(conn, have: dict[str, set[int]]) -> list[dict]:
 def run_racing_post(conn, delay: float = 3.0, limit: int | None = None, gaps: bool = False) -> int:
     """One pass over the sires due a lookup. Results are staged on the Mac and
     pushed once at the end (one stud_fees version bump, one API reload)."""
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Racing Post fee lookup")
+
     from playwright.sync_api import sync_playwright
 
     from crossr_pipeline import stage

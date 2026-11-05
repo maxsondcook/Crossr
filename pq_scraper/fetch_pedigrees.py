@@ -22,6 +22,11 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+if __name__ == "__main__":
+    # Intentionally off, before the database imports. See collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Pedigree Query fetch")
+
 from main import clean_horse_name  # noqa: E402
 from graded_stakes import load_stakes_data  # noqa: E402
 
@@ -1076,6 +1081,10 @@ def seed_cache_from_fixtures() -> None:
 
 
 def main() -> int:
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Pedigree Query fetch")
+
     p = argparse.ArgumentParser(description="Import PQ 5-generation pedigrees for GSW winners")
     p.add_argument("--smoke", action="store_true", help="Parser smoke-test vs fixtures/DB")
     p.add_argument("--limit", type=int, default=0, help="Max new horses to attempt this run")

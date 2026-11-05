@@ -1,11 +1,14 @@
 """Crossr data pipeline. Needs DATABASE_URL (see scripts/pipeline/railway_env.sh).
 
-    python -m crossr_pipeline scrape [--minutes 45] [--limit N] [--delay 3]   # one batch
-    python -m crossr_pipeline scrape --refresh-only [--refresh-cap N]
-    python -m crossr_pipeline push                    # staged rows -> Postgres (daily)
+Automated collection is intentionally off (crossr_pipeline/collection.py,
+COLLECTION_ENABLED = False). scrape, racing-post, entries, and a Keeneland
+catalog download exit without fetching. Collected rows are left in place.
+
+    python -m crossr_pipeline scrape [--minutes 45] [--limit N] [--delay 3]   # off
+    python -m crossr_pipeline push                    # staged rows already on this Mac -> Postgres
     python -m crossr_pipeline sales-import [--dry-run] [--force FILE ...]
-    python -m crossr_pipeline racing-post [--limit N] [--delay 3]
-    python -m crossr_pipeline entries [--apply] [--days 7]   # NYRA entries -> race_entries (daily)
+    python -m crossr_pipeline racing-post [--limit N] [--delay 3]   # off
+    python -m crossr_pipeline entries [--apply] [--days 7]   # off
     python -m crossr_pipeline status
     python -m crossr_pipeline install-launchd [--db railway|crossr_dev]
 
@@ -43,6 +46,9 @@ def _db_name() -> str:
 
 def cmd_scrape(args) -> int:
     import traceback
+
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Equibase scrape")
 
     from crossr_pipeline.scrape import scrape
 
@@ -142,6 +148,9 @@ def _print_counts(before: dict, after: dict) -> None:
 
 
 def cmd_racing_post(args) -> int:
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Racing Post fee lookup")
+
     from crossr_pipeline.racing_post import run_racing_post
 
     print(f"Database: {_db_name()}", flush=True)
@@ -185,6 +194,8 @@ def cmd_catalog_enrich(args) -> int:
 
     export = Path(args.export) if args.export else REPO / "logs" / "pipeline" / f"{args.catalog}.keeneland.csv"
     if args.url:
+        from crossr_pipeline.collection import refuse_if_off
+        refuse_if_off("Keeneland catalog export")
         keeneland.export_catalog(args.url, export, REPO / "crossr_pipeline" / "chrome_profile_keeneland")
     csv_path = REPO / "Upcoming Sales" / f"{args.catalog}.csv"
     conn = _conn()
@@ -239,6 +250,9 @@ def _age(ts) -> str:
 
 
 def cmd_entries(args) -> int:
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("NYRA entries")
+
     from crossr_pipeline import nyra_entries
 
     print(f"Database: {_db_name()}  ({datetime.now():%Y-%m-%d %H:%M})", flush=True)
@@ -295,16 +309,23 @@ def cmd_status(args) -> int:
 
 def cmd_install_launchd(args) -> int:
     from crossr_pipeline import launchd
+    from crossr_pipeline.collection import LAUNCHD_COLLECTION_LABELS, MAC_ONLY_COLLECTION_LABELS
 
     paths = launchd.write_plists(db=args.db, python=args.python or sys.executable)
     for path in paths:
         print(f"wrote {path}")
-    print("\nNothing is loaded yet. To start:")
+    print("\nNothing is loaded yet. To start the jobs above:")
     for path in paths:
         print(f"  launchctl bootstrap gui/$(id -u) {path}")
     print("To stop:")
     for path in paths:
         print(f"  launchctl bootout gui/$(id -u) {path}")
+    print("\nCollection is intentionally off (crossr_pipeline/collection.py).")
+    print("install-launchd does not write these agents. If they are already")
+    print("loaded from ~/Crossr-pipeline, this repo cannot stop them. Unload:")
+    home = Path.home() / "Library" / "LaunchAgents"
+    for label in (*LAUNCHD_COLLECTION_LABELS, *MAC_ONLY_COLLECTION_LABELS):
+        print(f"  launchctl bootout gui/$(id -u) {home / (label + '.plist')}")
     return 0
 
 

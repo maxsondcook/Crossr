@@ -1,25 +1,24 @@
 """launchd agents for the pipeline (written, never loaded, by install-launchd).
 
-    com.crossr.pipeline.scrape        one 45-min Equibase batch an hour; when work is
-                                      waiting (exit 75) the next batch starts a minute later
-    com.crossr.pipeline.push          daily at 03:00: staged race records and pedigrees -> Postgres
-    com.crossr.pipeline.sales-import  daily at 07:00 (run at wake if the Mac slept)
-    com.crossr.pipeline.racing-post   weekly, Sunday 04:00: sires due a fee lookup, one push at the end
-    com.crossr.pipeline.mares-bred    weekly, Saturday 05:00: The Jockey Club's Report of Mares Bred
-                                      -> breeding_seasons (one page; scripts/jockeyclub_mares_bred.py)
-    com.crossr.pipeline.precompute    nightly 02:30: sales-model hip pages for upcoming catalogs
-    com.crossr.pipeline.weekly        Monday 08:00 (run at wake if the Mac slept): weekly entries /
-                                      results lists and starred-horse emails (crossr_core.weekly);
-                                      the SMTP settings come from the api service's Railway variables
-    com.crossr.pipeline.entries       daily 06:15 (run at wake if the Mac slept): NYRA's published entries
-                                      -> race_entries, then this week's entries list is refreshed
-    com.crossr.pipeline.audit         daily 05:30 (after the 03:00 push): read-only data audit
-                                      (scripts/data_audit.py) -> logs/audit/<date>.md, data_audit_runs
-    com.crossr.pipeline.stallion-news daily 06:00: Thoroughbred Daily News headlines about stallions
-                                      pensioned or dying -> suggestions to review (scripts/stallion_status.py)
+Collection agents are intentionally not written. See crossr_pipeline/collection.py
+(COLLECTION_ENABLED = False). This file cannot unload a job already running
+from ~/Crossr-pipeline. Those labels:
 
-The two Chrome jobs (scrape, racing-post) share logs/pipeline/chrome.lock, so
-only one browser is open at a time.
+    com.crossr.pipeline.scrape        Equibase hourly batch (off)
+    com.crossr.pipeline.racing-post   Racing Post fee pages (off)
+    com.crossr.pipeline.mares-bred    Jockey Club Report of Mares Bred (off)
+    com.crossr.pipeline.entries       NYRA published entries (off)
+    com.crossr.pipeline.stallion-news Thoroughbred Daily News crawl (off)
+
+Still written, because they do not fetch from those sites:
+
+    com.crossr.pipeline.push          daily at 03:00: staged rows already on this Mac -> Postgres
+    com.crossr.pipeline.sales-import  daily at 07:00: local sales_data/*.csv (run at wake if the Mac slept)
+    com.crossr.pipeline.precompute    nightly 02:30: sales-model hip pages from data already stored
+    com.crossr.pipeline.weekly        Monday 08:00 (run at wake if the Mac slept): weekly lists and emails
+    com.crossr.pipeline.audit         daily 05:30: read-only data audit
+
+The Chrome lock (logs/pipeline/chrome.lock) is unused while collection is off.
 
 All of them run through scripts/pipeline/railway_env.sh, so DATABASE_URL is built
 from the Railway CLI at start and no password is written to disk. The scrapers
@@ -30,6 +29,8 @@ from __future__ import annotations
 
 import plistlib
 from pathlib import Path
+
+from crossr_pipeline.collection import LAUNCHD_COLLECTION_LABELS
 
 REPO = Path(__file__).resolve().parents[1]
 AGENTS = Path.home() / "Library" / "LaunchAgents"
@@ -56,7 +57,9 @@ def plists(db: str, python: str) -> dict[str, dict]:
         },
         "ProcessType": "Interactive",
     }
-    return {
+    # Collection jobs stay in this dict so the definitions are visible, then
+    # they are dropped. install-launchd does not write them.
+    defined = {
         SCRAPE: {
             "Label": SCRAPE,
             "ProgramArguments": [env, db, "/usr/bin/caffeinate", "-i", python, "-m", "crossr_pipeline", "scrape"],
@@ -146,6 +149,7 @@ def plists(db: str, python: str) -> dict[str, dict]:
             **common,
         },
     }
+    return {label: body for label, body in defined.items() if label not in LAUNCHD_COLLECTION_LABELS}
 
 
 def write_plists(db: str, python: str) -> list[Path]:

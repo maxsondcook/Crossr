@@ -384,6 +384,10 @@ def main() -> int:
         return 0
 
     if args.dump_batch:
+        # Intentionally off. --self-test and --import-file do not fetch.
+        from crossr_pipeline.collection import refuse_if_off
+        refuse_if_off("Pedigree Query IDE batch")
+
         payload = dump_batch(args.dump_batch)
         print(
             f"DUMP n={len(payload['items'])} remaining_est={payload['remaining_est']} "

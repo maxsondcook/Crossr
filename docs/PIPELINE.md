@@ -241,6 +241,29 @@ minute.
 
 ## Scheduling (launchd)
 
+**Collection is off.** `crossr_pipeline/collection.py` sets `COLLECTION_ENABLED`
+to `False`. Equibase (including the dam backlog and pedigree batches), the
+Jockey Club Report of Mares Bred, Racing Post fees, NYRA entries, and the
+stallion-news crawl exit without fetching. `install-launchd` does not write
+those agents. Rows already stored are left in place.
+
+This repository cannot unload a job already running from `~/Crossr-pipeline`.
+On the Mac, unload these if they are loaded. Do not treat them as off until
+that `bootout` has been run:
+
+```bash
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.scrape.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.racing-post.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.mares-bred.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.entries.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.stallion-news.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.maxsoncook.pq.fetch-gsw.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.maxsoncook.pq.fetch-watchdog.plist
+```
+
+`com.crossr.stallion-registry` is not defined in this repo. A handover note
+said it was not loaded. If that plist is on the Mac, unload it the same way.
+
 launchd jobs can't read `~/Desktop` (macOS privacy rules), so the jobs run
 from a separate clone at `~/Crossr-pipeline` with its own `.venv`, linked to
 Railway once with `railway link` inside it. After merging new pipeline code
@@ -255,35 +278,28 @@ A running batch keeps the old code until it ends (at most 45 minutes).
 Install the agents from the clone:
 
 ```bash
-.venv/bin/python -m crossr_pipeline install-launchd --db railway   # writes the plists, loads nothing
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.scrape.plist
+.venv/bin/python -m crossr_pipeline install-launchd --db railway   # writes non-collection plists, loads nothing
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.push.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.sales-import.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.racing-post.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.mares-bred.plist
 ```
 
 Stop with `launchctl bootout gui/$(id -u) <plist>`.
 
-- **`com.crossr.pipeline.scrape`** starts at login and then every hour, under
-  `caffeinate -i`, so the Mac doesn't idle-sleep mid-batch. When a batch exits
-  75 (more work), the next starts a minute later.
-- **`com.crossr.pipeline.push`** runs daily at 03:00.
-- **`com.crossr.pipeline.racing-post`** runs Sundays at 04:00.
-- **`com.crossr.pipeline.mares-bred`** runs Saturdays at 05:00:
-  `scripts/jockeyclub_mares_bred.py --apply` reads The Jockey Club's Report of
-  Mares Bred (one page) into `breeding_seasons`. The report fills in through
-  the year, so new stallions join the directory each week.
+- **`com.crossr.pipeline.scrape`**, **`com.crossr.pipeline.racing-post`**, and
+  **`com.crossr.pipeline.mares-bred`** are not installed. The commands they
+  used to run exit immediately. See the unload list above.
+- **`com.crossr.pipeline.push`** runs daily at 03:00. It sends rows already
+  staged on the Mac. It does not fetch.
 - **`com.crossr.pipeline.sales-import`** runs daily at 07:00. If the Mac was
-  asleep at 07:00, it runs on wake.
+  asleep at 07:00, it runs on wake. It loads local `sales_data/*.csv` files.
 - **Logs** go to `logs/pipeline/<job>.log`.
 - **No password on disk:** the plists call `railway_env.sh`, which asks the
   Railway CLI for the database URL each time a job starts.
 - **Location:** install from the checkout the jobs should run from
   (`~/Desktop/Crossr` on `unified`), because the plists point at that folder.
 
-The old `com.maxsoncook.pq.fetch-gsw` / `fetch-watchdog` agents (pedigreequery)
-are separate; leave them unloaded.
+The old `com.maxsoncook.pq.fetch-gsw` / `fetch-watchdog` agents (Pedigree Query)
+stay unloaded. The commands they used to start now exit without fetching.
 
 ## Monitoring
 

@@ -10,13 +10,22 @@ the Pedigrees repo.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+if __name__ == "__main__":
+    # Intentionally off, before Chrome starts. See collection.py.
+    _root = Path(__file__).resolve().parents[2]
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("BloodHorse sire-list browser fetch")
+
 import argparse
 import random
-import sys
 import threading
 import time
 from multiprocessing import Process
-from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
@@ -99,6 +108,13 @@ def write_outputs(year: int, spec: PageSpec, html: str, url: str, misses: MissLo
 
 
 def fetch_with_page(page, url: str, dest: Path) -> tuple[str, str]:
+    # Intentionally off. See crossr_pipeline/collection.py.
+    root = Path(__file__).resolve().parents[2]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("BloodHorse sire-list browser fetch")
+
     dest.parent.mkdir(parents=True, exist_ok=True)
     last = "empty"
     for attempt in range(1, 6):
@@ -151,6 +167,13 @@ def warmup(page) -> None:
 
 def worker(thread_jobs: list[tuple[int, PageSpec]], delay: float, profile_name: str) -> None:
     """Each process launches its own headed Chrome — sync API is not thread-safe."""
+    # Intentionally off. See crossr_pipeline/collection.py.
+    root = Path(__file__).resolve().parents[2]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("BloodHorse sire-list browser fetch")
+
     misses = MissLog()
     profile = PROFILE_BASE / profile_name
     profile.mkdir(parents=True, exist_ok=True)
@@ -194,6 +217,13 @@ def worker(thread_jobs: list[tuple[int, PageSpec]], delay: float, profile_name: 
 
 
 def main() -> int:
+    # Intentionally off. See crossr_pipeline/collection.py.
+    root = Path(__file__).resolve().parents[2]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("BloodHorse sire-list browser fetch")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--years", default="2004-2026")
     parser.add_argument("--concurrency", type=int, default=1)

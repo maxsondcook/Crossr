@@ -36,6 +36,10 @@ SOURCE = "The Jockey Club Report of Mares Bred"
 
 
 def fetch(url: str = URL) -> str:
+    # Intentionally off. See crossr_pipeline/collection.py. A saved --file still parses.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Jockey Club Report of Mares Bred")
+
     req = urllib.request.Request(url, headers={"User-Agent": "Crossr/1.0 (weekly mares-bred update)"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         return resp.read().decode("utf-8", "replace")
