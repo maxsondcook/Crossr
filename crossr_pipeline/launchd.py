@@ -11,6 +11,8 @@
     com.crossr.pipeline.weekly        Monday 08:00 (run at wake if the Mac slept): weekly entries /
                                       results lists and starred-horse emails (crossr_core.weekly);
                                       the SMTP settings come from the api service's Railway variables
+    com.crossr.pipeline.audit         daily 05:30 (after the 03:00 push): read-only data audit
+                                      (scripts/data_audit.py) -> logs/audit/<date>.md, data_audit_runs
 
 The two Chrome jobs (scrape, racing-post) share logs/pipeline/chrome.lock, so
 only one browser is open at a time.
@@ -35,6 +37,7 @@ PUSH = "com.crossr.pipeline.push"
 MARES_BRED = "com.crossr.pipeline.mares-bred"
 PRECOMPUTE = "com.crossr.pipeline.precompute"
 WEEKLY = "com.crossr.pipeline.weekly"
+AUDIT = "com.crossr.pipeline.audit"
 
 
 def plists(db: str, python: str) -> dict[str, dict]:
@@ -109,6 +112,14 @@ def plists(db: str, python: str) -> dict[str, dict]:
             "StartCalendarInterval": {"Weekday": 1, "Hour": 8, "Minute": 0},
             "StandardOutPath": str(LOG_DIR / "weekly.log"),
             "StandardErrorPath": str(LOG_DIR / "weekly.log"),
+            **common,
+        },
+        AUDIT: {
+            "Label": AUDIT,
+            "ProgramArguments": [env, db, python, str(REPO / "scripts" / "data_audit.py")],
+            "StartCalendarInterval": {"Hour": 5, "Minute": 30},
+            "StandardOutPath": str(LOG_DIR / "audit.log"),
+            "StandardErrorPath": str(LOG_DIR / "audit.log"),
             **common,
         },
     }
