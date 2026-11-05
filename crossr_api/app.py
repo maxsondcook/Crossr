@@ -699,6 +699,8 @@ def sales_upcoming_lot(catalog_id: str, hip: str):
     """Precomputed hip page (crossr_core/hip_cache.py); computed live and stored when missing."""
     from crossr_core import hip_cache
 
+    # "50" finds hip "0050" (and the reverse): cache and compute under the catalog's own spelling.
+    hip = upcoming_svc.canonical_hip(catalog_id, hip) or hip
     # Stars / notes and the pedigree-scrape status are read live on top of the stored page.
     payload = hip_cache.get(catalog_id, hip, _compute_upcoming_lot)
     if payload is None:

@@ -295,6 +295,17 @@ def list_lots(catalog_id):
     return lots
 
 
+def hip_key(hip):
+    """'0050', '050' and '50' are one hip (catalogs differ on zero-padding); '50a' == '0050A'."""
+    return re.sub(r"^0+(?=\d)", "", str(hip or "").strip().upper())
+
+
+def canonical_hip(catalog_id, hip):
+    """The hip as this catalog writes it, for any padding of the number; None when absent."""
+    lot = get_lot(catalog_id, hip)
+    return lot["hip"] if lot else None
+
+
 def get_lot(catalog_id, hip):
     lots = list_lots(catalog_id)
     if lots is None:
@@ -303,7 +314,8 @@ def get_lot(catalog_id, hip):
     for lot in lots:
         if lot["hip"] == want:
             return lot
-    return None
+    want = hip_key(want)
+    return next((lot for lot in lots if hip_key(lot["hip"]) == want), None)
 
 
 def update_lot(catalog_id, hip, starred=None, notes=None):
@@ -311,7 +323,7 @@ def update_lot(catalog_id, hip, starred=None, notes=None):
     if catalog is None:
         return None
     _, rows = catalog
-    want = str(hip).strip()
+    want = canonical_hip(catalog_id, hip) or str(hip).strip()
     found = next((row for row in rows if _blank(_col(row, "HIP", "HIP NUMBER", "LOT")) == want), None)
     if found is None:
         return None

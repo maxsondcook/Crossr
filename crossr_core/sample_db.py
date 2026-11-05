@@ -675,6 +675,7 @@ def _stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
             "Stud Fee Display": format_fee(row.get("Stud Fee")) or "",
             "Stud Fee Currency": currency or "",
             "Status": "active",
+            "Notes": row.get("Notes") or "",
             "Surface": "",
             "Height": "N/A",
             "Conformation & Physical Profile": "",
