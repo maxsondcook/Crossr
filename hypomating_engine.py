@@ -8,7 +8,15 @@ import placeholder_store
 from graded_stakes import graded_level, is_black_type, load_stakes_data
 
 # Broodmare sire ranks from data/stallion_rankings.csv (Broodmare list).
-BROODMARE_DATABASE = placeholder_store.load_broodmare_database()
+# A missing database (fixture tests, scrapers off) is an empty book, not a crash.
+try:
+    BROODMARE_DATABASE = placeholder_store.load_broodmare_database()
+except Exception as exc:
+    from crossr_core.railway_db import DatabaseNotConfigured
+
+    if not isinstance(exc, DatabaseNotConfigured):
+        raise
+    BROODMARE_DATABASE = {}
 clean_horse_name = placeholder_store.broodmare_clean_horse_name
 
 RAW_RANKING_ORDER = [
@@ -624,7 +632,7 @@ def check_inbreeding_failsafe(stallion_ped, mare_ped, max_generation=3):
     return not ancestor_set(stallion_ped, max_generation).isdisjoint(mare_anc)
 
 _RANK_BY_NAME = None
-_PROFILE_INDEX = (None, 0, {})
+_PROFILE_INDEX = (None, 0, {})  # (book, size, index). The book is kept so a recycled id cannot reuse a previous index.
 
 
 def _rank_by_name():
@@ -643,13 +651,23 @@ def _profiles_by_name(all_profiles):
     every card each time was most of a 60s request.
     """
     global _PROFILE_INDEX
-    book_id, size, index = _PROFILE_INDEX
-    if book_id != id(all_profiles) or size != len(all_profiles):
+    book, size, index = _PROFILE_INDEX
+    if book is not all_profiles or size != len(all_profiles):
         index = {}
         for k, v in all_profiles.items():
             index.setdefault(main.clean_horse_name(k), v)
-        _PROFILE_INDEX = (id(all_profiles), len(all_profiles), index)
+        _PROFILE_INDEX = (all_profiles, len(all_profiles), index)
     return index
+
+
+# Same words the stallion directory uses (crossr_core.horses._OFF_DUTY_RE). A card
+# that says "Died 2025" or "Pensioned" is not standing, even when Status is "active".
+_CARD_OFF_DUTY = re.compile(r"\b(pensioned|retired|died|dead|deceased|euthani[sz]ed)\b", re.I)
+
+
+def _card_says_off_duty(profile) -> bool:
+    text = " ".join(str((profile or {}).get(k) or "") for k in ("Status", "Stud Fee Display", "Notes"))
+    return bool(_CARD_OFF_DUTY.search(text))
 
 
 def get_profile_meta(name, all_profiles):
@@ -667,8 +685,6 @@ def get_profile_meta(name, all_profiles):
         
     has_progeny = profile.get("HasProgeny", profile.get("Has Progeny", True))
     
-    # SIMPLIFICATION RULE: Check if horse is in profiles AND status is not pensioned
-    is_pensioned = str(profile.get("Status", "")).strip().lower() == "pensioned"
     # Only suggest stallions standing now: a published fee and a recent stud season.
     # Dead or retired sires keep "active" status but lose their fee / latest season.
     try:
@@ -681,8 +697,10 @@ def get_profile_meta(name, all_profiles):
 
     from crossr_core import stallion_status
 
-    is_dead_or_retired = stallion_status.off_duty(name, profile.get("Year Born"))
-    is_active = (len(profile) > 0) and not is_pensioned and not is_dead_or_retired and is_standing \
+    # Stud cards keep saying "active" after a death or pensioning. The recorded
+    # override wins, and so does the same card text the directory already hides.
+    is_dead_or_retired = stallion_status.off_duty(name, profile.get("Year Born")) or _card_says_off_duty(profile)
+    is_active = (len(profile) > 0) and not is_dead_or_retired and is_standing \
         and stands_in_north_america(profile)
 
     return {"rank": rank_val, "fee_str": fee_str, "fee_num": fee_num, "has_progeny": has_progeny, "is_active": is_active}
@@ -888,6 +906,8 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
 
     unfiltered_structural_hits = []
     for st_name, p_data in all_profiles.items():
+        if not get_profile_meta(st_name, all_profiles)["is_active"]:
+            continue  # dead, pensioned or retired: not an alternative to breed to
         clean_st = main.clean_horse_name(st_name)
         st_pedigree = pedigree_db.get(clean_st, {"Horse": st_name})
         if check_inbreeding_failsafe(st_pedigree, mare_pedigree, max_generation=3):
