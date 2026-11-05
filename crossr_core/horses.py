@@ -161,17 +161,15 @@ def _off_duty(card):
 
 
 def _on_current_card(card, year=None):
-    """On the current register: standing in North America with a card for this or last season (fee may be private)."""
-    from crossr_core.identity import stands_in_north_america
-
+    """On the current register, anywhere in the world: a card for this or last season (fee may be private)."""
     year = year or datetime.date.today().year
     latest = _intish(str((card or {}).get("Latest Season") or "")[:4])
-    return bool(card) and bool(latest) and latest >= year - 1 and stands_in_north_america(card) and not _off_duty(card)
+    return bool(card) and bool(latest) and latest >= year - 1 and not _off_duty(card)
 
 
 def build_stallion_roster(profiles=None):
-    """The stallion registry: every stallion standing in North America on a current stud card,
-    plus every stallion reported bred to mares in 2026 that isn't pensioned, retired or dead.
+    """The stallion registry (worldwide): every stallion on a current stud card, plus every
+    stallion reported bred to mares in 2026 that isn't pensioned, retired or dead.
     Profile/CSV parents only; no pedigree scans."""
     global _STALLION_ROSTER
     from crossr_core import sample_db as _sdb
@@ -187,8 +185,8 @@ def build_stallion_roster(profiles=None):
     roster = []
     mares_bred = _load_mares_bred_2026()
     bred_keys = {row["key"] for row in mares_bred}
-    # Current stud cards (a fee for this or last season, standing in North America) that
-    # no 2026 mares-bred report lists yet: new stallions, late reports, private books.
+    # Current stud cards anywhere (a card for this or last season) that no 2026 mares-bred
+    # report lists: overseas stallions, new stallions, late reports, private books.
     for name in profiles:
         key = main.clean_horse_name(name)
         if key and key not in bred_keys and _on_current_card(profiles[name]):
