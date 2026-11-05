@@ -112,6 +112,13 @@ timing.instrument(
 )
 timing.instrument(hypomating_engine, "build_hypo_report", "suggest_matings", "top_crosses_payload",
                   "build_horse_summaries")
+timing.instrument(horse_svc, "stud_book_history", "stallion_ranking_history", "broodmare_sire_history",
+                  "progeny_stats_from_rankings", "load_book_stats",
+                  "dam_produce_index", "_career_earnings_table", "_active_stallions")
+timing.instrument(main, "compute_inbreeding", "lookup_pedigree")
+from crossr_core import identity as _identity  # noqa: E402
+
+timing.instrument(_identity, "horse_facts", "card_matches", "classify", "card_identities")
 
 
 @app.on_event("startup")
@@ -154,6 +161,13 @@ def _warm_caches():
         lambda: __import__("crossr_core.breeding_value", fromlist=["x"]).sons_at_stud(),
         lambda: __import__("crossr_core.breeding_value", fromlist=["x"]).added_value_tables(),
         lambda: __import__("crossr_core.breeding_value", fromlist=["x"]).bms_fee_relationship(),
+        # first-hip / first-profile costs that used to land on a visitor (female family, earnings, parents)
+        horse_svc.dam_produce_index,
+        horse_svc._career_earnings_table,
+        horse_svc._parent_lookup,
+        horse_svc._race_horse_progeny,
+        lambda: horse_svc._active_stallions(profiles()),
+        lambda: [upcoming_svc._base_lots(c["id"]) for c in upcoming_svc.list_catalogs() or []],
     )
     for step in steps:
         try:

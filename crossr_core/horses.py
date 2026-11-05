@@ -343,6 +343,34 @@ GROUP BY h.id, h.name_key, h.sire, h.foal_year
 """
 
 
+_CAREER_TABLE = None
+
+
+def _career_earnings_table():
+    """name_key -> [(sire, foal_year, career earnings)] for every fetched horse, loaded once per
+    race-table version (one query; a per-request query cost about 0.45 s on each report and hip)."""
+    global _CAREER_TABLE
+    from crossr_core import sample_db
+
+    version = (sample_db.table_version("race_horses"), sample_db.table_version("race_seasons"))
+    if _CAREER_TABLE is not None and _CAREER_TABLE[0] == version:
+        return _CAREER_TABLE[1]
+    pg = sample_db._pg()
+    if not pg:
+        return {}
+    sql = _CAREER_EARNINGS_SQL.replace("WHERE h.name_key = ANY(%s) AND h.status = 'ok'", "WHERE h.status = 'ok'")
+    table = {}
+    try:
+        with pg.connect() as conn:
+            for name_key, sire, foal_year, earnings in conn.execute(sql).fetchall():
+                if earnings:
+                    table.setdefault(name_key, []).append((sire, foal_year, earnings))
+    except Exception:
+        return (_CAREER_TABLE or (None, {}))[1]
+    _CAREER_TABLE = (version, table)
+    return table
+
+
 def career_earnings(names, sire_name=None):
     """cleaned name -> career earnings (sum of race_seasons) for these horses.
 
@@ -353,18 +381,14 @@ def career_earnings(names, sire_name=None):
     from crossr_core import sample_db
 
     names = [n for n in dict.fromkeys(names or []) if n]
-    pg = sample_db._pg() if names else None
-    if not pg:
+    if not names:
         return {}
     key_to_clean = {}
     for name in names:
         for key in _race_name_keys([name]):
             key_to_clean.setdefault(key, main.clean_horse_name(name))
-    try:
-        with pg.connect() as conn:
-            rows = conn.execute(_CAREER_EARNINGS_SQL, (list(key_to_clean),)).fetchall()
-    except Exception:
-        return {}
+    table = _career_earnings_table()
+    rows = [(key, *rec) for key in key_to_clean for rec in table.get(key, ())]
     sire_clean = main.clean_horse_name(re.sub(r"\s*\(\d{4}\)", "", sire_name or ""))
     by_name = {}
     for name_key, sire, foal_year, earnings in rows:
@@ -1159,6 +1183,31 @@ def similar_cross_rows(
     return rows[:limit]
 
 
+_ACTIVE_STALLIONS = (None, [])
+
+
+def _active_stallions(profiles):
+    """[(name, clean name, profile meta)] for stallions standing now; rebuilt when the stud cards,
+    rankings or status corrections change (checking all 5,758 cards cost about 0.3 s a request)."""
+    global _ACTIVE_STALLIONS
+    from crossr_core import sample_db, stallion_status
+
+    key = (id(profiles), len(profiles), datetime.date.today(),
+           tuple(sample_db.table_version(t) for t in ("stud_fees", "stallion_rankings", stallion_status.TABLE)))
+    if _ACTIVE_STALLIONS[0] == key:
+        return _ACTIVE_STALLIONS[1]
+    out = []
+    for name in profiles.keys():
+        clean = main.clean_horse_name(name)
+        if not clean:
+            continue
+        meta = hypomating_engine.get_profile_meta(name, profiles)
+        if meta.get("is_active"):
+            out.append((name, clean, meta))
+    _ACTIVE_STALLIONS = (key, out)
+    return out
+
+
 def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, limit=25):
     """Active stallions from placeholderdatabase/stallion_stats.csv ranked by pedigree similarity.
 
@@ -1170,12 +1219,8 @@ def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, 
     if not reference_tree or not _horse_id(reference_tree):
         return []
     rows = []
-    for name in profiles.keys():
-        clean = main.clean_horse_name(name)
-        if not clean or clean in exclude:
-            continue
-        meta = hypomating_engine.get_profile_meta(name, profiles)
-        if not meta.get("is_active"):
+    for name, clean, meta in _active_stallions(profiles):
+        if clean in exclude:
             continue
         sim = pedigree_similarity(a_tree=reference_tree, b=name)
         percent = (sim or {}).get("percent")
