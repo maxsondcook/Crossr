@@ -211,11 +211,10 @@ function HypomatingInner() {
   // Lineage groups already shown on a suggestion card open there; only list the rest separately.
   const suggestionNames = new Set((result?.suggestions || []).map((s) => s.name));
   const suggestionKeys = new Set([...suggestionNames].map((n) => String(n).toUpperCase()));
-  // Alternatives skip stallions already suggested above.
+  // Alternatives: every standing relative in the stallion registry (ranked or not),
+  // minus stallions already suggested above. The API sorts ranked sires first.
   const lineageOptions = (lineageData?.options || []).filter(
-    (o) => o.rank != null
-      && String(o.rank).toUpperCase() !== "N/A"
-      && !suggestionKeys.has(String(o.name).toUpperCase()),
+    (o) => !suggestionKeys.has(String(o.name).toUpperCase()),
   );
   const extraLineageGroups = (result?.lineage_groups || []).filter((g) => !suggestionNames.has(g.anchor));
 
@@ -344,7 +343,16 @@ function HypomatingInner() {
             <div className="panel">
               <h4>BROODMARE · {horseCaps(result.mare)}</h4>
               {result.damsire ? <p className="sub">DAMSIRE: {horseCaps(result.damsire)}</p> : null}
-              <PedigreeChart tree={brood?.pedigree} showSubject={false} />
+              <PedigreeChart
+                tree={brood?.pedigree}
+                showSubject={false}
+                expandedExtra={(
+                <div className="panel family-panel">
+                  <h4>FEMALE FAMILY</h4>
+                  <FemaleFamily family={brood?.female_family || []} />
+                </div>
+              )}
+              />
               <div className="family-panel" style={{ marginTop: 12 }}>
                 <h4>FEMALE FAMILY</h4>
                 <FemaleFamily family={brood?.female_family || []} />

@@ -13,6 +13,8 @@ import {
 import PedigreeChart from "../../components/PedigreeChart";
 import FemaleFamily from "../../components/FemaleFamily";
 import ProjectedValue from "../../components/ProjectedValue";
+import VoiceNoteButton from "../../components/VoiceNoteButton";
+import MarkupLayer from "../../components/MarkupLayer";
 
 function money(n) {
   if (n == null || n === "") return "—";
@@ -136,9 +138,162 @@ function countOptions(lots, pick) {
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
 }
 
+/** Similar crosses split: stakes winners vs the sire's own cross already sold at auction. */
+function splitCrosses(rows) {
+  const winners = [];
+  const sales = [];
+  for (const row of rows || []) {
+    if (row.source === "cross_sale") {
+      // relation reads "Sold: SIRE x DAMSIRE mare · SALE TITLE YEAR · $PRICE".
+      const parts = String(row.relation || "").split(" · ");
+      sales.push({ ...row, sale: parts[1] || "", price_raw: parts[2] || "" });
+    } else {
+      winners.push(row);
+    }
+  }
+  return { winners, sales };
+}
+
+function MarkupIcon({ d, children }) {
+  return (
+    <svg className="markup-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {d ? <path d={d} /> : null}
+      {children}
+    </svg>
+  );
+}
+
+const MARKUP_TOOLS = [
+  ["pen", "Pencil", (
+    <MarkupIcon key="pen">
+      <path d="M15 4l5 5L9 20H4v-5L15 4z" fill="#f2c94c" stroke="#3a2f12" />
+      <path d="M4 15l5 5" stroke="#3a2f12" />
+      <path d="M4 20l2-2" stroke="#ef6b73" strokeWidth="2.6" />
+      <path d="M13 6l5 5" stroke="#3a2f12" />
+    </MarkupIcon>
+  )],
+  ["highlighter", "Highlight", (
+    <MarkupIcon key="hl">
+      <path d="M14 3l7 7-8 8-7-7 8-8z" fill="#ffe600" stroke="#5c5200" />
+      <path d="M6 11l7 7-2 2H5v-4z" fill="#fff59a" stroke="#5c5200" />
+      <path d="M3 21h8" stroke="#ffe600" strokeWidth="3" />
+    </MarkupIcon>
+  )],
+  ["eraser", "Eraser", (
+    <MarkupIcon key="er">
+      <path d="M16 3l5 5-10 10H6l-3-3L16 3z" fill="#f4a3b4" stroke="#5a2a35" />
+      <path d="M8 11l5 5" stroke="#5a2a35" />
+      <path d="M6 18h4M12 21h9" stroke="currentColor" />
+    </MarkupIcon>
+  )],
+];
+
+/** "Sire x Dam by Damsire" — or just "by Damsire" when the name is already "Sire x Dam 'YY". */
+function lineageLine(lot) {
+  const sire = blank(lot?.sire);
+  const dam = blank(lot?.dam);
+  const damsire = blank(lot?.damsire);
+  const byDamsire = damsire ? `by ${damsire}` : "";
+  if (/\sx\s/i.test(String(lot?.name || ""))) return byDamsire;
+  return [sire && dam ? `${sire} x ${dam}` : sire || dam, byDamsire].filter(Boolean).join(" ");
+}
+
+function ClientSetup({ step, index, done, onYes, onNo, onSkip, onName, onFinish }) {
+  const [name, setName] = useState("");
+  const first = index === 0;
+  return (
+    <div className="filter-sheet" role="dialog" aria-label="Sale setup">
+      <div className="setup-card">
+        {step === "ask" ? (
+          <>
+            <h3>DO YOU HAVE ANY CLIENTS?</h3>
+            <p className="sub">If you&apos;re buying for clients, we&apos;ll set up a filter for each one.</p>
+            <div className="setup-actions">
+              <button className="primary" type="button" onClick={onYes}>Yes</button>
+              <button className="ghost" type="button" onClick={onNo}>No, just me</button>
+              <button className="ghost setup-skip" type="button" onClick={onSkip}>Skip</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h3>{first ? "YOUR FIRST CLIENT" : "ADD ANOTHER CLIENT?"}</h3>
+            {done.length ? (
+              <p className="sub">Filters saved for {done.join(", ")}.</p>
+            ) : null}
+            <form
+              className="setup-names"
+              onSubmit={(e) => { e.preventDefault(); onName(name); }}
+            >
+              <label>
+                Client {index + 1} name
+                <span className="setup-name-row">
+                  <input value={name} placeholder={`Client ${index + 1}`} autoFocus onChange={(e) => setName(e.target.value)} />
+                </span>
+              </label>
+            </form>
+            <div className="setup-actions">
+              <button className="primary" type="button" onClick={() => onName(name)}>Set their filters →</button>
+              {first ? (
+                <button className="ghost setup-skip" type="button" onClick={onSkip}>Skip</button>
+              ) : (
+                <button className="ghost setup-skip" type="button" onClick={onFinish}>No, I&apos;m done</button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Books and sessions read 1, 2, 3… rather than by size. */
 function numericOrder(options) {
   return [...options].sort((a, b) => (Number(a.value) || 0) - (Number(b.value) || 0) || a.value.localeCompare(b.value));
+}
+
+function initials(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+/** True when a lot passes a filter snapshot ({sex, color, maxPrice, height, selectedSires, priceRanges, extra}). */
+function lotMatchesFilters(lot, f = {}) {
+  const { sex = "", color = "", maxPrice = "", height = "", priceRanges = [] } = f;
+  const sires = new Set(f.selectedSires || []);
+  const x = { ...EMPTY_EXTRA, ...(f.extra || {}) };
+  const soldAs = new Set(x.soldAs || []);
+  const letter = (lot.sex_letter || lot.sex || "").toUpperCase().slice(0, 1);
+  if (sex && letter !== sex) return false;
+  if (sires.size) {
+    const sire = blank(lot.sire);
+    if (!sire || !sires.has(sire)) return false;
+  }
+  if (color) {
+    const coat = (lot.color || lot.color_label || "").toLowerCase();
+    if (!coat || !coat.includes(color.trim().toLowerCase())) return false;
+  }
+  if (!priceInRanges(lotFilterPrice(lot), priceRanges)) return false;
+  if (maxPrice) {
+    const price = lotFilterPrice(lot);
+    if (!price || price > Number(maxPrice)) return false;
+  }
+  if (height) {
+    const hands = (lot.height || "").toLowerCase();
+    if (!hands || !hands.includes(height.trim().toLowerCase())) return false;
+  }
+  if (soldAs.size && !soldAs.has(blank(lot.sold_as))) return false;
+  if (x.book && blank(lot.book) !== x.book) return false;
+  if (x.session && blank(lot.session) !== x.session) return false;
+  if (x.consignor && blank(lot.consignor) !== x.consignor) return false;
+  if (x.coveringSire && blank(lot.covering_sire) !== x.coveringSire) return false;
+  if (x.foal) {
+    const status = blank(lot.pregnant).toUpperCase();
+    if (x.foal === "in" && status !== "PR") return false;
+    if (x.foal === "not" && !(status && status !== "PR")) return false;
+  }
+  return true;
 }
 
 function lotFilterPrice(lot) {
@@ -198,6 +353,39 @@ function SalesPage() {
   const [priceRanges, setPriceRanges] = useState([]);
   // Catalog filters: sold as, session, consignor, covering sire, in-foal status.
   const [extra, setExtra] = useState(EMPTY_EXTRA);
+  // Markup over the hip page: null (off) | "pen" | "highlighter" | "eraser".
+  const [markupTool, setMarkupTool] = useState(null);
+  const [markupClear, setMarkupClear] = useState(0);
+  const [quickNotes, setQuickNotes] = useState(false);
+  // Opening a sale: "Do you have any clients?" → names → each client's filters.
+  // null | { step: "ask" } | { step: "names", count } | { step: "client", index } | { step: "mine" }
+  const [setup, setSetup] = useState(null);
+  // Undo / redo across both markup layers: which layer changed, in order.
+  const [markupCommand, setMarkupCommand] = useState(null);
+  const [markupEdits, setMarkupEdits] = useState([]);
+  const [markupRedo, setMarkupRedo] = useState([]);
+  const onMarkupEdit = (layer) => {
+    setMarkupEdits((cur) => [...cur, layer]);
+    setMarkupRedo([]);
+  };
+  const undoMarkup = () => {
+    const layer = markupEdits[markupEdits.length - 1];
+    if (!layer) return;
+    setMarkupEdits((cur) => cur.slice(0, -1));
+    setMarkupRedo((cur) => [...cur, layer]);
+    setMarkupCommand({ target: layer, kind: "undo", n: Date.now() });
+  };
+  const redoMarkup = () => {
+    const layer = markupRedo[markupRedo.length - 1];
+    if (!layer) return;
+    setMarkupRedo((cur) => cur.slice(0, -1));
+    setMarkupEdits((cur) => [...cur, layer]);
+    setMarkupCommand({ target: layer, kind: "redo", n: Date.now() });
+  };
+  useEffect(() => { setMarkupEdits([]); setMarkupRedo([]); }, [currentId]);
+  // Hip page layout: "tabs" shows one section at a time; "classic" is the column view.
+  const hipLayout = "tabs";
+  const [hipTab, setHipTab] = useState("overview");
   const [height, setHeight] = useState("");
   const [onlyDismissed, setOnlyDismissed] = useState(false);
   const [onlyStarred, setOnlyStarred] = useState(false);
@@ -366,17 +554,22 @@ function SalesPage() {
     return new Set(starredIds(desk, mode, catalog.id));
   }, [desk, catalog, mode]);
 
+  // Stallions with hips that fit every other filter (sold as, sex, book…),
+  // so picking Weanling lists only sires with weanlings in the sale.
   const sireOptions = useMemo(() => {
+    const others = { sex, color, maxPrice, height, selectedSires: [], priceRanges, extra };
     const counts = new Map();
     for (const lot of lots) {
       const name = blank(lot.sire);
-      if (!name) continue;
+      if (!name || !lotMatchesFilters(lot, others)) continue;
       counts.set(name, (counts.get(name) || 0) + 1);
     }
+    // Keep ticked sires listed (count 0) so they can still be unticked.
+    for (const name of selectedSires) if (!counts.has(name)) counts.set(name, 0);
     return [...counts.entries()]
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [lots]);
+  }, [lots, sex, color, maxPrice, height, priceRanges, extra, selectedSires]);
 
   const visibleSireOptions = useMemo(() => {
     const q = sireQuery.trim().toLowerCase();
@@ -438,38 +631,10 @@ function SalesPage() {
       if (onlyStarred) return isStarred;
       if (onlyDismissed) return dismissed;
       if (dismissed) return false;
-      const letter = (lot.sex_letter || lot.sex || "").toUpperCase().slice(0, 1);
-      if (sex && letter !== sex) return false;
-      if (sireSet.size) {
-        const sire = blank(lot.sire);
-        if (!sire || !sireSet.has(sire)) return false;
-      }
-      if (color) {
-        const coat = (lot.color || lot.color_label || "").toLowerCase();
-        if (!coat || !coat.includes(color.trim().toLowerCase())) return false;
-      }
-      if (!priceInRanges(lotFilterPrice(lot), priceRanges)) return false;
-      if (maxPrice) {
-        const price = lotFilterPrice(lot);
-        if (!price || price > Number(maxPrice)) return false;
-      }
-      if (height) {
-        const hands = (lot.height || "").toLowerCase();
-        if (!hands || !hands.includes(height.trim().toLowerCase())) return false;
-      }
-      if (soldAsSet.size && !soldAsSet.has(blank(lot.sold_as))) return false;
-      if (extra.book && blank(lot.book) !== extra.book) return false;
-      if (extra.session && blank(lot.session) !== extra.session) return false;
-      if (extra.consignor && blank(lot.consignor) !== extra.consignor) return false;
-      if (extra.coveringSire && blank(lot.covering_sire) !== extra.coveringSire) return false;
-      if (extra.foal) {
-        const status = blank(lot.pregnant).toUpperCase();
-        if (extra.foal === "in" && status !== "PR") return false;
-        if (extra.foal === "not" && !(status && status !== "PR")) return false;
-      }
-      return true;
+      return lotMatchesFilters(lot, { sex, color, maxPrice, height, selectedSires, priceRanges, extra });
     });
   }, [lots, mode, dismissedSet, starredSet, onlyDismissed, onlyStarred, sex, color, maxPrice, height, selectedSires, priceRanges, extra]);
+
 
   useEffect(() => {
     if (!catalog || !filtered.length) return;
@@ -566,6 +731,7 @@ function SalesPage() {
 
   function openCatalog(item, nextMode) {
     restoreRef.current = null;
+    setSetup({ step: "ask" });
     setMode(nextMode);
     setCatalog(item);
     setCatalogs(nextMode === "upcoming" ? upcomingCatalogs : pastCatalogs);
@@ -615,6 +781,21 @@ function SalesPage() {
     ));
   }
 
+  // Full filter state, so each client can keep their own.
+  function filterSnapshot() {
+    return { sex, color, maxPrice, height, selectedSires, priceRanges, extra };
+  }
+
+  function applySnapshot(f = {}) {
+    setSex(f.sex || "");
+    setColor(f.color || "");
+    setMaxPrice(f.maxPrice || "");
+    setHeight(f.height || "");
+    setSelectedSires(f.selectedSires || []);
+    setPriceRanges(f.priceRanges || []);
+    setExtra({ ...EMPTY_EXTRA, ...(f.extra || {}) });
+  }
+
   function selectClient(client) {
     if (activeClient === client.id) {
       setActiveClient("");
@@ -623,10 +804,69 @@ function SalesPage() {
     setActiveClient(client.id);
     setOnlyDismissed(false);
     setOnlyStarred(false);
-    setSex(client.sex || "");
-    setColor(client.color || "");
-    setMaxPrice(client.maxPrice || "");
-    setHeight(client.height || "");
+    applySnapshot(client.filters || client);
+  }
+
+  const clientCount = Number.isFinite(desk.clientCount) ? desk.clientCount : (desk.clients || []).length;
+  const shownClients = (desk.clients || []).slice(0, clientCount);
+
+  // Rail: which clients the hip on screen fits.
+  const clientFits = useMemo(() => {
+    if (!current) return {};
+    return Object.fromEntries(shownClients.map((c) => [c.id, lotMatchesFilters(current, c.filters || c)]));
+  }, [current, shownClients]);
+
+  function railSelectClient(client) {
+    if (activeClient === client.id) {
+      setActiveClient("");
+      applySnapshot({});
+      return;
+    }
+    selectClient(client);
+  }
+
+  // Name client #index, then open the filter sheet for them.
+  function startClient(index, name) {
+    const base = (desk.clients || []).slice(0, Math.max(index, 0));
+    const prev = (desk.clients || [])[index];
+    const client = {
+      ...(prev || { id: `c${index + 1}`, sex: "", color: "", maxPrice: "", height: "" }),
+      id: prev?.id || `c${index + 1}`,
+      name: String(name || "").trim() || `Client ${index + 1}`,
+      filters: null,
+    };
+    const clients = [...base, client, ...(desk.clients || []).slice(index + 1)];
+    setDesk(saveDesk({ ...desk, clients, clientCount: index + 1 }));
+    applySnapshot({});
+    setSetup({ step: "client", index });
+    setRailOpen(true);
+  }
+
+  // Save this client's filters, then ask whether there's another client.
+  function nextClientFilters() {
+    const index = setup.index;
+    const clients = (desk.clients || []).map((c, i) => (i === index ? { ...c, filters: filterSnapshot() } : c));
+    setDesk(saveDesk({ ...desk, clients, clientCount: index + 1 }));
+    setRailOpen(false);
+    setSetup({ step: "name", index: index + 1 });
+  }
+
+  // No more clients: start on the first client's view.
+  function finishClients() {
+    const first = (desk.clients || [])[0];
+    setSetup(null);
+    setRailOpen(false);
+    if (first && clientCount > 0) {
+      setActiveClient(first.id);
+      applySnapshot(first.filters || {});
+    }
+  }
+
+  function noClients() {
+    setDesk(saveDesk({ ...desk, clientCount: 0 }));
+    setActiveClient("");
+    setSetup({ step: "mine" });
+    setRailOpen(true);
   }
 
   function viewFull() {
@@ -671,8 +911,10 @@ function SalesPage() {
   }
 
   function jumpToHip(raw) {
-    const hip = String(raw || "").trim();
-    const found = filtered.find((lot) => String(lot.hip) === hip);
+    // "35" finds hip "0035" (and "35a" finds "0035A"): compare without leading zeros or case.
+    const norm = (v) => String(v ?? "").trim().toUpperCase().replace(/^0+(?=\d)/, "");
+    const hip = norm(raw);
+    const found = filtered.find((lot) => norm(lot.hip) === hip);
     if (!found) {
       setJumpError("That hip is not in this list.");
       return;
@@ -817,21 +1059,61 @@ function SalesPage() {
       )}
 
       {catalog ? (
-        <div className="sales-columns">
+        <div className="hip-tabs-bar">
+          {hipLayout === "tabs" ? (
+            <nav className="horse-tabs" aria-label="Hip sections">
+              {[["overview", "Overview"], ["pedigree", "Pedigree"], ["crosses", "Crosses"], ["notes", "Notes"]].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`horse-tab${hipTab === id ? " active" : ""}`}
+                  aria-current={hipTab === id ? "page" : undefined}
+                  onClick={() => setHipTab(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+          ) : <span />}
+        </div>
+      ) : null}
+
+      {catalog ? (
+        <div className={`sales-columns${hipLayout === "tabs" ? ` tabbed tab-${hipTab}` : ""}`}>
           <div className="sales-col sales-col-pedigree">
-            <div className="panel">
+            <MarkupLayer
+              id="pedigree"
+              storageKey={current ? `crossr-markup:${mode}:${catalog?.id}:${currentId}:pedigree` : ""}
+              tool={markupTool}
+              clearSignal={markupClear}
+              command={markupCommand}
+              onEdit={onMarkupEdit}
+            />
+            <div className="panel" data-sec="pedigree">
               <h4>PEDIGREE</h4>
-              {ready ? <PedigreeChart tree={detail.pedigree} showSubject={false} hrefFor={hrefFor} /> : <p className="empty">Loading pedigree…</p>}
+              {ready ? (
+                <PedigreeChart
+                  tree={detail.pedigree}
+                  showSubject={false}
+                  hrefFor={hrefFor}
+                  expandedExtra={(
+                <div className="panel family-panel">
+                  <h4>FEMALE FAMILY</h4>
+                  <FemaleFamily family={detail.female_family || []} hrefFor={hrefFor} />
+                </div>
+              )}
+                />
+              ) : <p className="empty">Loading pedigree…</p>}
             </div>
-            <div className="panel family-panel">
+            <div className="panel family-panel" data-sec="pedigree">
               <h4>FEMALE FAMILY</h4>
               {ready ? <FemaleFamily family={detail.female_family} hrefFor={hrefFor} /> : <p className="empty">Loading female family…</p>}
             </div>
-            <div className="panel">
+            <div className="panel" data-sec="notes">
               <h4>PHYSICAL</h4>
               <div className="blank-value" aria-label="Physical" />
             </div>
-            <div className="panel">
+            <div className="panel" data-sec="notes">
               <h4>NOTES</h4>
               <textarea
                 className="note-box"
@@ -841,19 +1123,40 @@ function SalesPage() {
                 placeholder="Add a note"
                 disabled={!current}
               />
+              <VoiceNoteButton
+                disabled={!current}
+                onText={(chunk) => {
+                  // Append each dictated phrase; draftRef keeps saveNotes in step.
+                  const prev = draftRef.current;
+                  const next = prev && !/\s$/.test(prev) ? `${prev} ${chunk}` : `${prev}${chunk}`;
+                  draftRef.current = next;
+                  setNoteDraft(next);
+                  setNoteState("");
+                }}
+                onStop={saveNotes}
+              />
               {noteState ? <p className="note-state">{noteState}</p> : null}
             </div>
           </div>
 
           <div className="sales-col sales-col-info">
+            <MarkupLayer
+              id="info"
+              storageKey={current ? `crossr-markup:${mode}:${catalog?.id}:${currentId}:info` : ""}
+              tool={markupTool}
+              clearSignal={markupClear}
+              command={markupCommand}
+              onEdit={onMarkupEdit}
+            />
             {listError ? <p className="error">{listError}</p> : null}
             {loadingList ? <p className="empty">Loading catalog…</p> : null}
             {!loadingList && !current ? <p className="empty">No hips match this list.</p> : null}
             {current ? (
               <>
-                <div className="panel sale-identity">
+                <div className="panel sale-identity" data-sec="overview">
                   <h2>
                     <Link href={hrefFor(current.name)}>{current.name || current.raw_name || "Unnamed"}</Link>
+                    {lineageLine(current) ? <span className="sale-lineage"> ({lineageLine(current)})</span> : null}
                   </h2>
                   {current.supplement || blank(current.pedigree_pdf) ? (
                     <p className="sale-links">
@@ -903,7 +1206,7 @@ function SalesPage() {
                 </div>
 
                 {(!ready || projectionPanels(detail, current).showValue || projectionPanels(detail, current).showPrice) ? (
-                  <div className="panel" data-panel="projected-value">
+                  <div className="panel" data-panel="projected-value" data-sec="overview">
                     <h4>MARKET PROJECTION</h4>
                     {(!ready || projectionPanels(detail, current).showPrice) ? (
                       <div className="pv-price" data-meta="projected-price">
@@ -938,14 +1241,14 @@ function SalesPage() {
                   </div>
                 ) : null}
 
-                <div className="panel">
+                <div className="panel" data-sec="crosses">
                   <h4>SUCCESSFUL SIMILAR CROSSES</h4>
                   {detailError ? <p className="error">{detailError}</p> : null}
                   {loadingDetail && !ready ? <p className="empty">Loading crosses…</p> : null}
-                  {ready && !(detail.similar_crosses || []).length ? (
+                  {ready && !splitCrosses(detail.similar_crosses).winners.length ? (
                     <p className="empty">No similar successful crosses on file for this sire yet.</p>
                   ) : null}
-                  {ready && (detail.similar_crosses || []).length ? (
+                  {ready && splitCrosses(detail.similar_crosses).winners.length ? (
                     <table>
                       <thead>
                         <tr>
@@ -955,7 +1258,7 @@ function SalesPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {detail.similar_crosses.map((row, index) => (
+                        {splitCrosses(detail.similar_crosses).winners.map((row, index) => (
                           <tr key={`${row.name}-${row.class}-${index}`}>
                             <td>
                               <Link href={hrefFor(row.name)}>{row.name}</Link>
@@ -970,12 +1273,12 @@ function SalesPage() {
                   ) : null}
                 </div>
 
-                <div className="panel">
+                <div className="panel" data-sec="crosses">
                   <h4>SIMILAR CROSSES AUCTION HISTORY</h4>
-                  {ready && !(detail.auction_history || []).length ? (
+                  {ready && !splitCrosses(detail.similar_crosses).sales.length && !(detail.auction_history || []).length ? (
                     <p className="empty">No auction history on file for these crosses yet.</p>
                   ) : null}
-                  {ready && (detail.auction_history || []).length ? (
+                  {ready && (splitCrosses(detail.similar_crosses).sales.length || (detail.auction_history || []).length) ? (
                     <table>
                       <thead>
                         <tr>
@@ -986,7 +1289,18 @@ function SalesPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {detail.auction_history.map((row, index) => {
+                        {splitCrosses(detail.similar_crosses).sales.map((row, index) => (
+                          <tr key={`cross-sale-${row.name}-${index}`}>
+                            <td>
+                              <Link href={hrefFor(row.name)}>{row.name}</Link>
+                              <div className="parents">Same cross</div>
+                            </td>
+                            <td>—</td>
+                            <td>{row.sale || "—"}</td>
+                            <td className="money">{row.price_raw || "—"}</td>
+                          </tr>
+                        ))}
+                        {(detail.auction_history || []).map((row, index) => {
                           const key = `${row.name}-${row.sale}-${row.hip}-${index}`;
                           const open = openAuction === key;
                           return (
@@ -1019,21 +1333,149 @@ function SalesPage() {
 
           <aside className={`sales-rail${railOpen ? " open" : ""}`}>
             <button
-              className={`rail-btn${starred ? " on" : ""}`}
+              className={`rail-btn markup-btn${starred ? " on" : ""}`}
               type="button"
               onClick={toggleStar}
               title={starred ? "Unstar this hip" : "Star this hip"}
             >
-              {starred ? "★" : "☆"}
+              <span className="rail-glyph">{starred ? "★" : "☆"}</span>
+              <span className="markup-label">{starred ? "Starred" : "Star"}</span>
             </button>
-            <button className="rail-btn" type="button" onClick={dismissCurrent} title="Dismiss">✕</button>
-            <button className="rail-btn" type="button" onClick={() => setRailOpen((open) => !open)} title={railOpen ? "Collapse" : "Expand"}>
-              {railOpen ? "»" : "«"}
+            <button className="rail-btn markup-btn" type="button" onClick={dismissCurrent} title="Dismiss this hip (X'd list)">
+              <span className="rail-glyph">✕</span>
+              <span className="markup-label">Dismiss</span>
             </button>
+            <button
+              className={`rail-btn markup-btn${quickNotes ? " on" : ""}`}
+              type="button"
+              onClick={() => setQuickNotes((v) => !v)}
+              title="Take notes on this hip"
+            >
+              <MarkupIcon d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h5" />
+              <span className="markup-label">Notes</span>
+              {noteDraft ? <span className="filter-dot" aria-label="Has notes" /> : null}
+            </button>
+            <button
+              className={`rail-btn markup-btn filter-btn${railOpen ? " on" : ""}`}
+              type="button"
+              onClick={() => setRailOpen((open) => !open)}
+              title="Filter hips"
+            >
+              <MarkupIcon d="M4 5h16l-6 8v6l-4-2v-4L4 5z" />
+              <span className="markup-label">Filter</span>
+              {filtered.length !== lots.length ? <span className="filter-dot" aria-label="Filters on" /> : null}
+            </button>
+            {shownClients.length ? (
+              <div className="rail-clients" role="group" aria-label="Clients">
+                {shownClients.map((client) => {
+                  const fits = clientFits[client.id];
+                  const on = activeClient === client.id;
+                  return (
+                    <button
+                      key={client.id}
+                      type="button"
+                      className={`rail-client${fits ? " fits" : ""}${on ? " on" : ""}`}
+                      onClick={() => railSelectClient(client)}
+                      title={`${client.name}${fits ? " — this hip fits their filters" : " — outside their filters"}${on ? " (tap to show all hips)" : " (tap to apply their filters)"}`}
+                      aria-pressed={on}
+                    >
+                      <span className="rail-client-initials">{initials(client.name)}</span>
+                      <span className="markup-label">{client.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+            <div className="markup-tools" role="group" aria-label="Mark up this hip">
+              {MARKUP_TOOLS.map(([id, label, icon]) => (
+                <button
+                  key={id}
+                  className={`rail-btn markup-btn${markupTool === id ? " on" : ""}`}
+                  type="button"
+                  title={markupTool === id ? `${label} (tap again to stop drawing)` : label}
+                  aria-pressed={markupTool === id}
+                  onClick={() => setMarkupTool((cur) => (cur === id ? null : id))}
+                >
+                  {icon}
+                  <span className="markup-label">{label}</span>
+                </button>
+              ))}
+              <button className="rail-btn markup-btn" type="button" title="Undo" onClick={undoMarkup} disabled={!markupEdits.length}>
+                <MarkupIcon d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" />
+                <span className="markup-label">Undo</span>
+              </button>
+              <button className="rail-btn markup-btn" type="button" title="Redo" onClick={redoMarkup} disabled={!markupRedo.length}>
+                <MarkupIcon d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3" />
+                <span className="markup-label">Redo</span>
+              </button>
+              <button className="rail-btn markup-btn" type="button" title="Clear this hip's markup" onClick={() => setMarkupClear((n) => n + 1)}>
+                <MarkupIcon d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />
+                <span className="markup-label">Clear</span>
+              </button>
+            </div>
+            {setup && (setup.step === "ask" || setup.step === "name") ? (
+              <ClientSetup
+                key={`${setup.step}-${setup.index ?? 0}`}
+                step={setup.step}
+                index={setup.index ?? 0}
+                done={(desk.clients || []).slice(0, setup.index ?? 0).map((c) => c.name)}
+                onYes={() => setSetup({ step: "name", index: 0 })}
+                onNo={noClients}
+                onSkip={() => setSetup(null)}
+                onName={(name) => startClient(setup.index ?? 0, name)}
+                onFinish={finishClients}
+              />
+            ) : null}
+            {quickNotes && current ? (
+              <div className="quick-notes" role="dialog" aria-label="Notes for this hip">
+                <div className="quick-notes-head">
+                  <h4>NOTES · HIP {current.hip}</h4>
+                  <button className="ghost" type="button" onClick={() => { saveNotes(); setQuickNotes(false); }}>Close</button>
+                </div>
+                <textarea
+                  className="note-box"
+                  value={noteDraft}
+                  onChange={(e) => { setNoteDraft(e.target.value); setNoteState(""); }}
+                  onBlur={saveNotes}
+                  placeholder="Add a note"
+                  autoFocus
+                />
+                <VoiceNoteButton
+                  onText={(chunk) => {
+                    const prev = draftRef.current;
+                    const next = prev && !/\s$/.test(prev) ? `${prev} ${chunk}` : `${prev}${chunk}`;
+                    draftRef.current = next;
+                    setNoteDraft(next);
+                    setNoteState("");
+                  }}
+                  onStop={saveNotes}
+                />
+                {noteState ? <p className="note-state">{noteState}</p> : null}
+              </div>
+            ) : null}
             {railOpen ? (
+              <div className="filter-sheet" role="dialog" aria-label="Filter hips" onClick={(e) => { if (e.target === e.currentTarget) setRailOpen(false); }}>
               <div className="rail-body">
-                <h4>CLIENTS</h4>
-                {(desk.clients || []).map((client) => (
+                <div className="filter-sheet-head">
+                  <h3>
+                    {setup?.step === "client"
+                      ? `${shownClients[setup.index]?.name || `Client ${setup.index + 1}`}'S FILTERS`
+                      : setup?.step === "mine" ? "YOUR FILTERS" : "FILTER HIPS"}
+                  </h3>
+                  {setup?.step === "client" ? (
+                    <span className="setup-step">Client {setup.index + 1}</span>
+                  ) : null}
+                  <span className="filter-count">{filtered.length} / {lots.length} hips</span>
+                  {setup?.step === "client" ? (
+                    <button className="primary" type="button" onClick={nextClientFilters}>
+                      Save {shownClients[setup.index]?.name || "client"}&apos;s filters
+                    </button>
+                  ) : (
+                    <button className="primary" type="button" onClick={() => { setSetup(null); setRailOpen(false); }}>Done</button>
+                  )}
+                </div>
+                {!setup && shownClients.length ? <h4>CLIENTS</h4> : null}
+                {(setup ? [] : shownClients).map((client) => (
                   <button
                     key={client.id}
                     className={activeClient === client.id ? "primary" : "ghost"}
@@ -1043,7 +1485,7 @@ function SalesPage() {
                     {client.name}
                   </button>
                 ))}
-                {active ? (
+                {!setup && active ? (
                   <div className="client-prefs">
                     <label>
                       Name
@@ -1253,6 +1695,7 @@ function SalesPage() {
                 {onlyStarred && !filtered.length ? (
                   <p className="filter-note">No starred hips in this catalog yet. Tap ★ on a hip to add it.</p>
                 ) : null}
+              </div>
               </div>
             ) : null}
           </aside>

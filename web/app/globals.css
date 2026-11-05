@@ -26,6 +26,11 @@ body {
     var(--bg);
   color: var(--text);
 }
+/* House style: all lettering uppercase. What people type (search, notes, sign-in) stays as typed. */
+body { text-transform: uppercase; }
+input, textarea { text-transform: none; }
+select, option, button { text-transform: uppercase; }
+input::placeholder, textarea::placeholder { text-transform: uppercase; }
 
 a { color: inherit; text-decoration: none; }
 button, input, select { font: inherit; color: inherit; }
@@ -752,10 +757,13 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   gap: 12px;
   padding: 16px 20px 20px;
   background: var(--bg);
+  overflow-y: auto;
 }
 .ped-overlay-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ped-overlay-bar h4 { margin: 0; letter-spacing: 0.12em; }
-.ped-overlay-stage { flex: 1; min-height: 0; overflow: hidden; }
+/* The chart still fills one screen; anything extra sits below and scrolls into view. */
+.ped-overlay-stage { flex: 0 0 auto; height: calc(100vh - 84px); min-height: 320px; overflow: hidden; }
+.ped-overlay-extra { flex: 0 0 auto; }
 .ped-overlay-chart { transform-origin: top left; }
 .ped-overlay .pedigree-fit,
 .ped-overlay .catalog-ped { width: 100%; max-width: none; }
@@ -796,6 +804,149 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .horse-inline-link:hover { color: var(--gold); }
 
 .family-panel { overflow: auto; }
+.range-picker { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
+.range-picker select { width: auto; padding: 4px 8px; margin: 0; }
+.range-picker .ghost { padding: 4px 10px; font-size: 12px; }
+th.range-col { color: var(--gold); }
+td.range-col { background: rgba(212, 175, 55, 0.06); }
+.bms-filter { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.bms-filter .filter-sire-list { max-height: 180px; }
+.voice-note { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.voice-btn { padding: 6px 12px; font-size: 13px; }
+.voice-btn.on { animation: voice-pulse 1.2s ease-in-out infinite; }
+@keyframes voice-pulse { 50% { opacity: 0.65; } }
+.race-list { margin-top: 14px; }
+.race-list h5 { margin: 0 0 6px; color: var(--muted); font-size: 12px; letter-spacing: 0.08em; }
+.race-list .history-wrap { max-height: 320px; }
+.race-list tr.race-win td { color: var(--gold-2); }
+.race-list a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.race-class { color: var(--gold); font-weight: 700; font-size: 11px; }
+/* Hip markup: a drawing layer inside each scrolling column. */
+.sales-col-pedigree, .sales-col-info { position: relative; }
+.markup-layer { position: absolute; top: 0; left: 0; z-index: 5; pointer-events: none; overflow: visible; }
+.markup-layer.active { pointer-events: auto; touch-action: none; cursor: crosshair; }
+.markup-layer.tool-eraser { cursor: cell; }
+.markup-tools { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.rail-btn.markup-btn { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 48px; height: auto; min-height: 46px; padding: 5px 0; }
+.markup-btn:disabled { opacity: 0.35; cursor: default; }
+.markup-label { font-size: 8px; letter-spacing: 0.02em; line-height: 1; }
+.markup-icon { display: block; }
+.markup-btn.on { border-color: var(--gold); color: var(--gold); background: rgba(212, 175, 55, 0.12); }
+/* Horse page tabbed layout (trial): one section at a time, full width. */
+.layout-switch { margin-left: auto; padding: 8px 12px; font-size: 12px; }
+.horse-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.horse-tab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 10px 14px; font-weight: 700; letter-spacing: 0.06em; cursor: pointer; }
+.horse-tab:hover { color: var(--text); }
+.horse-tab.active { color: var(--teal); border-bottom-color: var(--teal); }
+.dash.dash-tabbed { grid-template-columns: minmax(0, 1fr); }
+.dash.dash-tabbed .horse-panels { grid-template-columns: minmax(0, 1fr); }
+.dash.dash-tabbed .horse-panels:empty { display: none; }
+/* Pedigree tab: chart and female family side by side. */
+.dash.dash-tabbed .ped-col { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 12px; align-items: start; }
+.dash.dash-tabbed .ped-col > .family-panel { margin-top: 0 !important; contain: none; }
+@media (max-width: 900px) {
+  .dash.dash-tabbed .ped-col { grid-template-columns: minmax(0, 1fr); }
+}
+.cross-sales-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.cross-sales-tools .view-toggle button { padding: 6px 12px; font-size: 12px; }
+.cross-sales-tools label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.cross-sales-tools select { width: auto; margin: 0; padding: 4px 8px; }
+.cross-lot { align-items: baseline; }
+.cross-lot-name { color: var(--text); font-weight: 600; }
+.cross-lot-price { margin-left: auto; color: var(--green); font-variant-numeric: tabular-nums; }
+.cross-lot-price.unsold { color: var(--muted); }
+/* Sales hip tabbed layout: one section at a time; the rail stays on the right. */
+.hip-tabs-bar { display: flex; align-items: flex-end; gap: 12px; margin: 4px 0 8px; }
+.hip-tabs-bar .horse-tabs { flex: 1; margin-bottom: 0; }
+.sales-columns.tabbed { grid-template-columns: minmax(0, 1fr) auto; }
+.sales-columns.tabbed.tab-overview .sales-col-pedigree,
+.sales-columns.tabbed.tab-crosses .sales-col-pedigree,
+.sales-columns.tabbed.tab-pedigree .sales-col-info,
+.sales-columns.tabbed.tab-notes .sales-col-info { display: none; }
+.sales-columns.tabbed .sales-col-info { min-width: 0; }
+.sales-columns.tabbed:not(.tab-overview) [data-sec="overview"],
+.sales-columns.tabbed:not(.tab-pedigree) [data-sec="pedigree"],
+.sales-columns.tabbed:not(.tab-crosses) [data-sec="crosses"],
+.sales-columns.tabbed:not(.tab-notes) [data-sec="notes"] { display: none; }
+/* Pedigree tab: chart and female family side by side. */
+.sales-columns.tabbed.tab-pedigree .sales-col-pedigree { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; align-items: start; }
+.sales-columns.tabbed.tab-pedigree .sales-col-pedigree > .family-panel { contain: none; }
+@media (max-width: 900px) {
+  .sales-columns.tabbed.tab-pedigree .sales-col-pedigree { grid-template-columns: minmax(0, 1fr); }
+}
+/* Filter sheet: clients + filters, large, over the hip page. */
+.filter-btn { position: relative; }
+.filter-dot { position: absolute; top: 4px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--gold); }
+.filter-sheet { position: fixed; inset: 0; z-index: 90; background: rgba(5, 9, 18, 0.72); display: flex; justify-content: center; align-items: flex-start; padding: 40px 20px; overflow-y: auto; }
+.filter-sheet .rail-body {
+  width: min(1100px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 22px 26px 28px;
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px 20px;
+  align-items: start;
+  font-size: 16px;
+}
+.filter-sheet-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.filter-sheet-head h3 { margin: 0; letter-spacing: 0.1em; white-space: nowrap; }
+.filter-sheet-head .primary { width: auto; flex: 0 0 auto; padding: 10px 22px; margin-left: auto; }
+.filter-sheet .client-prefs { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 16px; }
+.filter-sheet-head .filter-count { margin: 0 auto 0 0; color: var(--muted); font-size: 15px; }
+.filter-sheet .rail-body > h4 { grid-column: 1 / -1; margin: 6px 0 0; font-size: 14px; }
+.filter-sheet .rail-body > .filter-count { display: none; }
+.filter-sheet .filter-sold-as { grid-column: 1 / -1; }
+.filter-sheet .filter-chip { font-size: 14px; padding: 8px 14px; }
+.filter-sheet label { font-size: 14px; }
+.filter-sheet select, .filter-sheet input { font-size: 15px; padding: 10px 12px; }
+.filter-sheet .filter-sire-list { max-height: 260px; }
+.filter-sheet .rail-body > button { font-size: 15px; padding: 12px 14px; }
+.rail-glyph { font-size: 18px; line-height: 1; }
+/* Quick notes popover beside the rail: works on any hip tab. */
+.sales-rail { position: relative; }
+.quick-notes {
+  position: fixed; right: 96px; top: 200px; z-index: 80;
+  width: min(420px, calc(100vw - 120px));
+  background: var(--panel); border: 1px solid var(--gold); border-radius: 14px;
+  padding: 12px 14px; box-shadow: var(--shadow);
+}
+.quick-notes-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.quick-notes-head h4 { margin: 0; }
+.quick-notes-head .ghost { padding: 6px 12px; font-size: 12px; }
+.quick-notes .note-box { min-height: 140px; }
+/* Opening-a-sale client setup. */
+.setup-card { width: min(560px, 100%); margin-top: 8vh; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 26px 28px; box-shadow: var(--shadow); }
+.setup-card h3 { margin: 0 0 8px; letter-spacing: 0.08em; }
+.setup-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.setup-actions .primary, .setup-actions .ghost { padding: 12px 20px; font-size: 15px; }
+.setup-skip { margin-left: auto; }
+.setup-names { display: grid; gap: 10px; margin-top: 12px; }
+.setup-name-row { display: flex; gap: 8px; margin-top: 4px; }
+.setup-names input { flex: 1; padding: 10px 12px; font-size: 15px; background: #fff; color: #111; border: 1px solid var(--line); border-radius: 8px; }
+.setup-names input::placeholder { color: #8a8f99; }
+.setup-add { margin-top: 10px; }
+.setup-step { color: var(--gold); font-size: 13px; letter-spacing: 0.06em; }
+/* Rail clients: lit when the hip on screen fits that client's filters. */
+.rail-clients { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 8px 0; margin: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.rail-client { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; padding: 6px 2px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; opacity: 0.55; }
+.rail-client .markup-label { max-width: 100%; text-align: center; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.15; }
+.rail-client-initials { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; border: 1px solid var(--line); }
+.rail-client.fits { opacity: 1; color: var(--text); border-color: #3fb37f; background: rgba(63, 179, 127, 0.12); }
+.rail-client.fits .rail-client-initials { background: #3fb37f; border-color: #3fb37f; color: #0b1420; }
+.rail-client.on { opacity: 1; border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold) inset; }
+.chart-readout { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-top: 4px; font-size: 13px; }
+.chart-readout i { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
+/* Best broodmare sire crosses: click a row to list the horses that cross produced. */
+.bms-row { cursor: pointer; }
+.bms-row:hover td { background: rgba(255, 255, 255, 0.03); }
+.bms-caret { display: inline-block; width: 14px; color: var(--muted); }
+.bms-horses td { padding: 4px 0 10px 18px; }
+.bms-horse { display: flex; flex-wrap: wrap; gap: 0 8px; font-size: 13px; line-height: 1.6; }
+.bms-horse a { color: var(--teal); }
+.bms-horse-meta { color: var(--muted); }
 /* Hypomating LOGIC: one block per successful cross, wins indented beneath. */
 .cross-success { margin: 12px 0; }
 .cross-head { margin: 0; color: var(--text); line-height: 1.45; }
@@ -1023,6 +1174,7 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
 .sale-links { display: flex; align-items: center; gap: 10px; margin: -2px 0 10px; font-size: 13px; }
 .sale-links .pv-badge { margin-left: 0; }
 .sale-links a { color: var(--teal); font-weight: 700; }
+.sale-lineage { font-size: 16px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
 .data-status { margin: -2px 0 10px; color: var(--gold); font-size: 12px; letter-spacing: 0.04em; }
 .sale-identity h2 { margin: 0 0 6px; font-size: 26px; letter-spacing: 0.02em; }
 .sale-sex, .sale-class { color: var(--gold); font-weight: 700; }
@@ -1154,7 +1306,6 @@ td.money { color: var(--green); font-variant-numeric: tabular-nums; }
   gap: 8px;
   align-items: center;
 }
-.sales-rail.open { width: 280px; align-items: stretch; }
 .rail-btn {
   width: 40px;
   height: 40px;

@@ -99,7 +99,7 @@ function Cell({ n, className, style, hrefFor }) {
 }
 
 /** Full-screen pedigree: wide columns, scaled so the whole chart fits the window without scrolling. */
-function ExpandedPedigree({ title, onClose, children }) {
+function ExpandedPedigree({ title, onClose, children, extra = null }) {
   const stageRef = useRef(null);
   const chartRef = useRef(null);
   const [fit, setFit] = useState({ scale: 1, width: null });
@@ -153,11 +153,13 @@ function ExpandedPedigree({ title, onClose, children }) {
           {children}
         </div>
       </div>
+      {/* Optional content below the chart (e.g. female family); the overlay scrolls to it. */}
+      {extra ? <div className="ped-overlay-extra">{extra}</div> : null}
     </div>
   );
 }
 
-export default function PedigreeChart({ tree, showSubject = true, hrefFor = null }) {
+export default function PedigreeChart({ tree, showSubject = true, hrefFor = null, expandedExtra = null }) {
   const [expanded, setExpanded] = useState(false);
   const map = useMemo(() => {
     const m = {};
@@ -255,6 +257,7 @@ export default function PedigreeChart({ tree, showSubject = true, hrefFor = null
         <ExpandedPedigree
           title={tree.name ? `PEDIGREE · ${String(tree.name).toUpperCase()}` : "PEDIGREE"}
           onClose={() => setExpanded(false)}
+          extra={expandedExtra}
         >
           {renderChart(true)}
         </ExpandedPedigree>

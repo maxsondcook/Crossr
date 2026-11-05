@@ -15,49 +15,107 @@ function money(n) {
   return `$${Math.round(n).toLocaleString()}`;
 }
 
+/** Weighted average over completed-or-not years [from, to] from the by-year rows. */
+function rangeSummary(rows, cat, from, to) {
+  let sold = 0;
+  let gross = 0;
+  for (const r of rows || []) {
+    if (r.year < from || r.year > to) continue;
+    const n = Number(r[`${cat}_sold`]) || 0;
+    const avg = Number(r[`${cat}_avg`]);
+    if (n && Number.isFinite(avg)) {
+      sold += n;
+      gross += avg * n;
+    }
+  }
+  return { sold, average: sold ? gross / sold : null };
+}
+
 function SummaryTable({ data }) {
+  const latest = data.latest_completed_year;
+  const years = (data.by_year || []).map((r) => r.year).sort((a, b) => a - b);
+  const [range, setRange] = useState({ from: latest - 2, to: latest });
+  useEffect(() => { setRange({ from: latest - 2, to: latest }); }, [latest]);
+  const isDefault = range.from === latest - 2 && range.to === latest;
+  const rangeLabel = range.from === range.to ? `${range.from}` : `${range.from}–${range.to}`;
   const periods = [
     ["current", `${data.current_year} (to date)`],
-    ["latest", `${data.latest_completed_year}`],
-    ["last3", `${data.latest_completed_year - 2}–${data.latest_completed_year}`],
+    ["latest", `${latest}`],
     ["lifetime", "Lifetime"],
   ];
+  const setFrom = (v) => setRange((r) => ({ from: v, to: Math.max(v, r.to) }));
+  const setTo = (v) => setRange((r) => ({ from: Math.min(v, r.from), to: v }));
   return (
     <div className="history-wrap">
+      {years.length ? (
+        <div className="range-picker">
+          <span>Range</span>
+          <select value={range.from} onChange={(e) => setFrom(Number(e.target.value))} aria-label="From year">
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <span>to</span>
+          <select value={range.to} onChange={(e) => setTo(Number(e.target.value))} aria-label="To year">
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+          {!isDefault ? (
+            <button className="ghost" type="button" onClick={() => setRange({ from: latest - 2, to: latest })}>
+              Last 3 years
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <table>
         <thead>
           <tr>
             <th>Average price</th>
+            <th className="range-col">{rangeLabel}</th>
             {periods.map(([k, label]) => <th key={k}>{label}</th>)}
           </tr>
         </thead>
         <tbody>
-          {CATS.map(([cat, label]) => (
-            <tr key={cat}>
-              <td>{label}</td>
-              {periods.map(([p]) => {
-                const s = data.summary?.[cat]?.[p];
-                return (
-                  <td key={p} className="money" title={s ? `${s.sold} sold of ${s.offered} offered · median ${money(s.median)}` : ""}>
-                    {s && s.average != null ? money(s.average) : "—"}
-                    {s && s.sold ? <span className="muted" style={{ fontSize: 12 }}> · {s.sold}</span> : null}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
+          {CATS.map(([cat, label]) => {
+            // The default range uses the API's exact last-3-years figures (with median).
+            const exact = isDefault ? data.summary?.[cat]?.last3 : null;
+            const r = exact || rangeSummary(data.by_year, cat, range.from, range.to);
+            return (
+              <tr key={cat}>
+                <td>{label}</td>
+                <td
+                  className="money range-col"
+                  title={exact ? `${exact.sold} sold of ${exact.offered} offered · median ${money(exact.median)}` : `${r.sold} sold`}
+                >
+                  {r.average != null ? money(r.average) : "—"}
+                  {r.sold ? <span className="muted" style={{ fontSize: 12 }}> · {r.sold}</span> : null}
+                </td>
+                {periods.map(([p]) => {
+                  const s = data.summary?.[cat]?.[p];
+                  return (
+                    <td key={p} className="money" title={s ? `${s.sold} sold of ${s.offered} offered · median ${money(s.median)}` : ""}>
+                      {s && s.average != null ? money(s.average) : "—"}
+                      {s && s.sold ? <span className="muted" style={{ fontSize: 12 }}> · {s.sold}</span> : null}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       <p className="sub" style={{ fontSize: 12, marginTop: 6 }}>
         Sold lots only (RNAs not counted as sales, outs excluded); small number = horses sold.
-        {` ${data.current_year} is incomplete, so annual averages use ${data.latest_completed_year}.`}
+        {` ${data.current_year} is incomplete, so annual averages use ${latest}.`}
       </p>
     </div>
   );
 }
 
+function shortMoney(v) {
+  return v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Math.round(v / 1000)}k`;
+}
+
 function YearChart({ rows }) {
   const [hidden, setHidden] = useState({});
+  const [active, setActive] = useState(null); // hovered / tapped year index
   const W = 640, H = 220, P = { l: 56, r: 12, t: 12, b: 28 };
   const shown = CATS.filter(([cat]) => !hidden[cat]);
   const values = rows.flatMap((r) => shown.map(([cat]) => r[`${cat}_avg`]).filter((v) => v != null));
@@ -78,7 +136,13 @@ function YearChart({ rows }) {
           </label>
         ))}
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }} role="img" aria-label="Average sale price by year">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: "100%", height: "auto" }}
+        role="img"
+        aria-label="Average sale price by year"
+        onMouseLeave={() => setActive(null)}
+      >
         {ticks.map((t) => (
           <g key={t}>
             <line x1={P.l} x2={W - P.r} y1={y(t)} y2={y(t)} stroke="currentColor" opacity="0.12" />
@@ -92,6 +156,9 @@ function YearChart({ rows }) {
             {r.year}{r.complete ? "" : "*"}
           </text>
         ) : null)}
+        {active != null && rows[active] ? (
+          <line x1={x(active)} x2={x(active)} y1={P.t} y2={H - P.b} stroke="currentColor" opacity="0.35" strokeDasharray="3 3" />
+        ) : null}
         {shown.map(([cat, label, color]) => {
           // Break the line at years with no sales instead of drawing through them.
           const segs = [];
@@ -107,14 +174,52 @@ function YearChart({ rows }) {
                 <polyline key={k} fill="none" stroke={color} strokeWidth="2" points={seg.map(([a, b]) => `${a},${b}`).join(" ")} />
               ))}
               {segs.flat().map(([a, b, r, v]) => (
-                <circle key={`${cat}-${r.year}`} cx={a} cy={b} r="3" fill={color}>
-                  <title>{`${label} ${r.year}: ${money(v)} (${r[`${cat}_sold`]} sold)`}</title>
-                </circle>
+                <g key={`${cat}-${r.year}`}>
+                  <circle cx={a} cy={b} r={active != null && rows[active] === r ? 5 : 3} fill={color}>
+                    <title>{`${label} ${r.year}: ${money(v)} (${r[`${cat}_sold`]} sold)`}</title>
+                  </circle>
+                  {active != null && rows[active] === r ? (
+                    <text x={a} y={b - 9} fontSize="11" fontWeight="700" textAnchor="middle" fill={color}>{shortMoney(v)}</text>
+                  ) : null}
+                </g>
               ))}
             </g>
           );
         })}
+        {/* Invisible year columns: hover or tap one to read its numbers below. */}
+        {rows.map((r, i) => {
+          const half = rows.length === 1 ? (W - P.l - P.r) / 2 : (W - P.l - P.r) / (rows.length - 1) / 2;
+          return (
+            <rect
+              key={`hit-${r.year}`}
+              x={x(i) - half}
+              y={P.t}
+              width={half * 2}
+              height={H - P.t - P.b}
+              fill="transparent"
+              style={{ cursor: "pointer" }}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => setActive((cur) => (cur === i ? null : i))}
+            />
+          );
+        })}
       </svg>
+      {active != null && rows[active] ? (
+        <div className="chart-readout">
+          <b>{rows[active].year}{rows[active].complete ? "" : " (to date)"}</b>
+          {shown.map(([cat, label, color]) => {
+            const v = rows[active][`${cat}_avg`];
+            return (
+              <span key={cat}>
+                <i style={{ background: color }} />
+                {label}: {v != null ? `${money(v)} avg · ${rows[active][`${cat}_sold`] ?? 0} sold` : "no sales"}
+              </span>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="sub" style={{ fontSize: 12, margin: "4px 0 0" }}>Hover or tap a year to see its numbers.</p>
+      )}
       <p className="sub" style={{ fontSize: 12 }}>* year in progress. Gaps are years with no sales in that category.</p>
     </div>
   );
@@ -167,18 +272,30 @@ function SaleHorses({ lots, hrefFor }) {
           <option value="price_desc">Price ↓</option>
           <option value="price_asc">Price ↑</option>
         </select>
-        <select
-          multiple
-          value={bms}
-          onChange={(e) => setBms([...e.target.selectedOptions].map((o) => o.value))}
-          aria-label="Broodmare sires"
-          title="Broodmare sires (Ctrl/Cmd-click for several)"
-          style={{ minWidth: 180, height: 72 }}
-        >
-          {damsires.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
-        {bms.length ? <button type="button" className="ghost" onClick={() => setBms([])}>Clear sires</button> : null}
       </div>
+      {damsires.length ? (
+        <div className="bms-filter">
+          <span className="filter-label">
+            Broodmare sires{bms.length ? ` · ${bms.length} selected` : " · tick any number"}
+          </span>
+          <div className="filter-sire-list" role="group" aria-label="Broodmare sires">
+            {damsires.map((d) => (
+              <label key={d} className="filter-check">
+                <input
+                  type="checkbox"
+                  checked={bms.includes(d)}
+                  onChange={() => setBms((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]))}
+                />
+                <span>{d}</span>
+                <em>{lots.filter((l) => l.damsire === d).length}</em>
+              </label>
+            ))}
+          </div>
+          {bms.length ? (
+            <button type="button" className="ghost filter-clear" onClick={() => setBms([])}>Clear broodmare sires</button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="history-wrap" style={{ marginTop: 8 }}>
         <table>
           <thead>
