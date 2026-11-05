@@ -154,28 +154,43 @@ def _roster_foal_year(name, data, stud_year):
 _OFF_DUTY_RE = re.compile(r"\b(pensioned|retired|died|dead|deceased|euthani[sz]ed)\b", re.I)
 
 
-def _off_duty(card):
-    """Pensioned, retired or dead per the stud card (status, fee text or notes; same rule as identity.classify)."""
+def _off_duty(card, name=None, overrides=None):
+    """Pensioned, retired or dead: a recorded status change (stallion_status_overrides), else the
+    stud card's status, fee text or notes (same rule as identity.classify)."""
+    from crossr_core import stallion_status
+
+    if name and stallion_status.off_duty(name, _intish((card or {}).get("Year Born")), overrides):
+        return True
     text = " ".join(str((card or {}).get(k) or "") for k in ("Status", "Stud Fee Display", "Notes"))
     return bool(_OFF_DUTY_RE.search(text))
 
 
-def _on_current_card(card, year=None):
-    """On the current register, anywhere in the world: a card for this or last season (fee may be private)."""
+def _on_current_card(card, name=None, overrides=None, scope="north_america", year=None):
+    """On the current register: a card for this or last season (fee may be private), standing in
+    North America unless the registry scope is "world"."""
+    from crossr_core.identity import stands_in_north_america
+
     year = year or datetime.date.today().year
     latest = _intish(str((card or {}).get("Latest Season") or "")[:4])
-    return bool(card) and bool(latest) and latest >= year - 1 and not _off_duty(card)
+    if not card or not latest or latest < year - 1 or _off_duty(card, name, overrides):
+        return False
+    return scope == "world" or stands_in_north_america(card)
 
 
 def build_stallion_roster(profiles=None):
-    """The stallion registry (worldwide): every stallion on a current stud card, plus every
-    stallion reported bred to mares in 2026 that isn't pensioned, retired or dead.
+    """The stallion registry: every stallion on a current stud card (North America, or the world
+    with CROSSR_STALLION_SCOPE=world), plus every stallion reported bred to mares in 2026, less
+    any that are pensioned, retired or dead.
     Profile/CSV parents only; no pedigree scans."""
     global _STALLION_ROSTER
     from crossr_core import sample_db as _sdb
 
     # Rebuild when a source table changes (new mares-bred report, fees), not only at startup.
-    version = tuple(_sdb.table_version(t) for t in ("breeding_seasons", "stud_fees", "stallion_rankings"))
+    from crossr_core import stallion_status
+
+    scope = stallion_status.scope()
+    version = tuple(_sdb.table_version(t) for t in ("breeding_seasons", "stud_fees", "stallion_rankings",
+                                                       stallion_status.TABLE)) + (scope,)
     if _STALLION_ROSTER is not None and _STALLION_ROSTER[0] == version:
         return _STALLION_ROSTER[1]
     profiles = profiles if profiles is not None else main.load_master_profiles()
@@ -185,11 +200,12 @@ def build_stallion_roster(profiles=None):
     roster = []
     mares_bred = _load_mares_bred_2026()
     bred_keys = {row["key"] for row in mares_bred}
-    # Current stud cards anywhere (a card for this or last season) that no 2026 mares-bred
-    # report lists: overseas stallions, new stallions, late reports, private books.
+    # Current stud cards (this or last season; overseas too when the scope is "world") that no
+    # 2026 mares-bred report lists: new stallions, late reports, private books.
+    overrides = stallion_status.overrides()
     for name in profiles:
         key = main.clean_horse_name(name)
-        if key and key not in bred_keys and _on_current_card(profiles[name]):
+        if key and key not in bred_keys and _on_current_card(profiles[name], name, overrides, scope):
             bred_keys.add(key)
             mares_bred.append({"name": name, "key": key, "mares_bred": None, "state": None})
     from crossr_core import sample_db
@@ -197,7 +213,7 @@ def build_stallion_roster(profiles=None):
     for row in mares_bred:
         key = row["key"]
         display, data = by_profile.get(key, (row["name"], {}))
-        if _off_duty(data):
+        if _off_duty(data, display or row["name"], overrides):
             continue
         fee = (data or {}).get("Stud Fee", 0)
         fee_n = fee if isinstance(fee, int) else _fee_num(fee)
