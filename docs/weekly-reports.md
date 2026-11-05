@@ -51,21 +51,36 @@ Install the Monday schedule with the other pipeline agents (`python -m crossr_pi
 
 ## Entries source
 
-- **Daily Racing Form:** answers automated requests, including `robots.txt`, with 403. It is not scraped.
-- **Equibase:** its entries pages sit behind bot protection, which we do not get around.
+**NYRA (automatic, daily):** `python -m crossr_pipeline entries --apply` (launchd `com.crossr.pipeline.entries`, every day at 06:15) reads the entries NYRA publishes for Belmont Park, Saratoga and Aqueduct (`crossr_pipeline/nyra_entries.py`).
+- nyra.com has no robots.txt rules and its Terms & Conditions have no clause against automated reading.
+- We read it politely: plain HTTP with an honest User-Agent, one small per-race page at a time, 5 s apart (about 40 requests, 3–4 minutes a day). Any 403/429 stops the run for the day; nothing is retried harder or worked around.
+- Cards are drawn 3–4 days ahead, so the daily run adds new cards as they post. After each run, this week's stored entries list (`weekly_reports`) is refreshed. Emails still go out on Monday only.
+- Every runner carries its Equibase refno, so horses are linked by identity. A runner that drops off a re-read race is marked `scratched`.
 
-Entries therefore come in through `scripts/import_entries.py` from a CSV the project is allowed to use. That could be:
-- a licensed feed export (Equibase or DRF data licensing);
-- a track's published overnight;
-- entries typed in by hand.
+**Other sources, checked 2026-11-04:**
 
-The importer:
-- links each horse by refno, or by a name that is unique;
-- keeps unmatched horses' entries (so a missing pedigree never holds up a list) and re-links them on later imports;
-- updates re-imported races in place.
+| Source | Status |
+|---|---|
+| Equibase entries pages | Terms of Use forbid any robot, spider or scraper and any republishing without written consent. Also behind Imperva bot protection. Not used. |
+| Daily Racing Form | Subscriber Agreement forbids automated access "for any purpose" without written permission, and limits data to personal, non-commercial use. Not used. The permitted route is a written licence (DRF Data Services). |
+| Equibase data licensing | Official feeds (entries, charts). Quote only. |
+| The Racing API | North America add-on is closed to new subscribers. |
+| Goalserve | Lists "USA: racing": $200/month, $1,500/year, free trial. US thoroughbred coverage unverified. |
+| Apify / parse.bot "Equibase scrapers" | Use residential proxies to get past Equibase's bot wall. Rejected. |
 
-Until a source is chosen, weekly emails carry results only.
+Other tracks can still come in through `scripts/import_entries.py`, from a CSV the project is allowed to use. Both paths write through `crossr_core/entries.py`.
+
+**Linking runners to horses:**
+- Each runner is linked by Equibase refno.
+- Failing that, by name, only when exactly one horse has that name. When the entry gives a foal year, that horse must also be a dated record with the same year: an undated placeholder may be an older namesake.
+- A namesake with a different refno is never linked.
+
+Unlinked runners keep their entry and are listed in the view `race_entries_unlinked` (refno, name, foal year). The Equibase pipeline uses that view to scrape them. Every later run re-links them once the horse exists.
+
+**Undo:**
+- `DELETE FROM race_entries WHERE source = 'nyra'` removes everything the adapter wrote.
+- The added columns (`first_seen_at`, `foal_year`) and the view are additive.
 
 ## Active-horse refresh
 
-The existing `races-refresh` step of the hourly scrape job (`crossr_pipeline/scrape.py`) re-opens the Equibase profile of every horse with a start in the last 60 days, at most once every 7 days. That update brings in the horse's new starts, which are what the results list and emails are built from. Horses with an imported entry but no recent start are not refreshed yet.
+The existing `races-refresh` step of the hourly scrape job (`crossr_pipeline/scrape.py`) re-opens the Equibase profile of every horse with a start in the last 60 days, at most once every 7 days. That update brings in the horse's new starts, which are what the results list and emails are built from. Entered horses (`race_entries`) and horses that raced in 2026 should also be refreshed, so their results land within the week. That change is with the data-pipeline chat (see below).
