@@ -81,25 +81,39 @@ def _stud_rank(name):
 
 
 def _parent_lookup():
-    """Sire/dam from data/race_horses.csv — never scans the pedigree DB."""
+    """name key -> [(foal year, sire, dam)] from race_horses rows that name a sire. Never scans the pedigree DB."""
     global _PARENT_BY_KEY
     if _PARENT_BY_KEY is not None:
         return _PARENT_BY_KEY
     out = {}
     from crossr_core import sample_db
     for row in sample_db.load_table("race_horses"):
-        key = main.clean_horse_name(row.get("name_key") or row.get("display_name") or "")
-        if not key or key in out:
+        if (row.get("status") or "") == "merged":
             continue
-        sire = (row.get("sire") or "").strip() or None
-        dam = (row.get("dam") or "").strip() or None
-        if sire:
-            sire = re.sub(r"\s*\(\d{4}\)", "", sire).strip() or None
-        if dam:
-            dam = re.sub(r"\s*\(\d{4}\)", "", dam).strip() or None
-        out[key] = (sire, dam)
+        key = main.clean_horse_name(row.get("name_key") or row.get("display_name") or "")
+        sire = re.sub(r"\s*\(\d{4}\)", "", (row.get("sire") or "").strip()).strip() or None
+        if not key or not sire:
+            continue
+        dam = re.sub(r"\s*\(\d{4}\)", "", (row.get("dam") or "").strip()).strip() or None
+        out.setdefault(key, []).append((_intish(str(row.get("foal_year") or "")[:4]) or None, sire, dam))
     _PARENT_BY_KEY = out
     return out
+
+
+def parents_for(rows, year=None):
+    """(sire, dam) for one horse among same-named race_horses rows, or (None, None).
+
+    Names are reused (Oscar Performance 2014 by Kitten's Joy vs an older namesake),
+    so a row only counts when its foaling year matches; without a year, only when
+    every dated row agrees on one horse. No parents beats a namesake's parents.
+    """
+    rows = rows or []
+    if year:
+        hits = [r for r in rows if r[0] == int(year)]
+    else:
+        years = {r[0] for r in rows if r[0]}
+        hits = rows if len(years) <= 1 and len({r[1].upper() for r in rows}) == 1 else []
+    return (hits[0][1], hits[0][2]) if hits else (None, None)
 
 
 def _load_mares_bred_2026():
@@ -171,7 +185,7 @@ def build_stallion_roster(profiles=None):
         farm_title = _title(str((data or {}).get("Farm", "")).replace("_", " "))
         if not farm_title and row.get("state"):
             farm_title = row["state"]
-        sire, dam = parents.get(key, (None, None))
+        sire, dam = parents_for(parents.get(key), _roster_foal_year(display or row["name"], data, stud_year))
         crop_l = crop_label(stud_year)
         rank = ranks.get(key)
         stallion_meta = {
@@ -951,7 +965,7 @@ def _standing_sons(sire_key, profiles):
         index = {}
         for name in profiles:
             clean = main.clean_horse_name(name)
-            sire = (parents.get(clean) or (None, None))[0]
+            sire = parents_for(parents.get(clean), _intish((profiles.get(name) or {}).get("Year Born")))[0]
             if sire and hypomating_engine.get_profile_meta(name, profiles)["is_active"]:
                 index.setdefault(main.clean_horse_name(sire), []).append(name)
         _SONS_INDEX = (id(profiles), len(profiles), index)
