@@ -34,6 +34,20 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
 )
 """
 
+SUGGESTIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS stallion_status_suggestions (
+    name_key TEXT NOT NULL,
+    foal_year INTEGER,
+    status TEXT NOT NULL,
+    headline TEXT NOT NULL,
+    url TEXT NOT NULL,
+    published TEXT,
+    found_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    decision TEXT,
+    PRIMARY KEY (name_key, url)
+)
+"""
+
 _lock = threading.Lock()
 _cache: tuple = (object(), {})  # (table version, rows); the sentinel never matches
 

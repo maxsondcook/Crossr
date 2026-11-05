@@ -4,6 +4,9 @@ Usage:
     python3 scripts/stallion_status.py set "Wootton Bassett" deceased --year 2008 --note "died 2026" --source user
     python3 scripts/stallion_status.py set "Some Horse" active          # undo: back to what the card says
     python3 scripts/stallion_status.py list
+    python3 scripts/stallion_status.py suggestions             # news matches waiting for review
+    python3 scripts/stallion_status.py approve "War Front"     # accept a news match
+    python3 scripts/stallion_status.py reject "Frosted Over"   # dismiss one
 """
 
 from __future__ import annotations
@@ -28,9 +31,40 @@ def main() -> None:
     s.add_argument("--note")
     s.add_argument("--source", default="manual")
     sub.add_parser("list")
+    sub.add_parser("suggestions")
+    for cmd in ("approve", "reject"):
+        p = sub.add_parser(cmd)
+        p.add_argument("name")
     args = ap.parse_args()
     with railway_db.connect() as conn:
         conn.execute(ss.SCHEMA)
+        conn.execute(ss.SUGGESTIONS_SCHEMA)
+        if args.cmd == "suggestions":
+            rows = conn.execute("""SELECT name_key, status, headline, url, published FROM stallion_status_suggestions
+                                   WHERE decision IS NULL ORDER BY found_at""").fetchall()
+            print(f"{len(rows)} waiting for review")
+            for r in rows:
+                print(f"  {r[0]}: {r[1]} - {r[2]} ({r[4] or ''})\n      {r[3]}")
+            return
+        if args.cmd in ("approve", "reject"):
+            key = ss.name_key(args.name)
+            rows = conn.execute("""SELECT foal_year, status, headline, url FROM stallion_status_suggestions
+                                   WHERE name_key = %s AND decision IS NULL""", (key,)).fetchall()
+            if not rows:
+                raise SystemExit(f"no open suggestion for {key}")
+            conn.execute("UPDATE stallion_status_suggestions SET decision = %s WHERE name_key = %s AND decision IS NULL",
+                         (args.cmd + "d", key))
+            if args.cmd == "approve":
+                year, status, headline, url = rows[0]
+                conn.execute(
+                    f"""INSERT INTO {ss.TABLE} (name_key, foal_year, status, note, source) VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (name_key) DO UPDATE SET foal_year = EXCLUDED.foal_year, status = EXCLUDED.status,
+                            note = EXCLUDED.note, source = EXCLUDED.source, updated_at = now()""",
+                    (key, year, status, headline, url))
+                n = conn.execute(f"SELECT count(*) FROM {ss.TABLE}").fetchone()[0]
+                railway_db._bump(conn, ss.TABLE, int(n))
+            print(f"{key}: {args.cmd}d")
+            return
         if args.cmd == "set":
             key = ss.name_key(args.name)
             if args.status == "active":

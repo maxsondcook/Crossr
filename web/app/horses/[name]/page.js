@@ -942,6 +942,9 @@ function HorsePage() {
 
   const s = data.stallion || {};
   const cls = data.classification || {};
+  // Pensioned / deceased from a recorded status change; stud cards themselves always say "active".
+  const offDuty = ["deceased", "pensioned"].includes(cls.stallion_status) ? cls.stallion_status : null;
+  const studStatus = offDuty || s.status;
   const isStallion = Boolean(data.stallion) || Boolean(cls.is_stallion);
   const isFemale = cls.profile_type === "racing_female" || cls.profile_type === "broodmare";
   const typeLabel = {
@@ -1049,12 +1052,12 @@ function HorsePage() {
               <h1>{data.name.toUpperCase()}</h1>
               <div className="sub">
                 Foaled: {s.year_foaled || data.year || "—"} · Entered Stud: {s.entered_stud || "—"}
-                {s.status && s.status !== "active" ? ` · ${s.status[0].toUpperCase()}${s.status.slice(1)}` : ""}
+                {studStatus && studStatus !== "active" ? ` · ${studStatus[0].toUpperCase()}${studStatus.slice(1)}` : ""}
               </div>
               <div className="kpi-row">
                 <div className="kpi">
                   <span>Stud Fee</span>
-                  <b>{s.stud_fee || "—"}</b>
+                  <b>{offDuty ? offDuty.toUpperCase() : s.stud_fee || "—"}</b>
                 </div>
                 {s.rank && String(s.rank).toUpperCase() !== "N/A" ? (
                   <div className="kpi">
