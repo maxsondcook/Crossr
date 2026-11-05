@@ -299,7 +299,12 @@ def classify(facts: dict, card: dict | None = None) -> dict:
     if is_stallion:
         latest = _year(card.get("Latest Season")) if card else None
         fee_text = " ".join(str(card.get(k) or "") for k in ("Stud Fee Display", "Status", "Notes")).lower() if card else ""
-        if re.search(r"\b(died|dead|deceased|euthani[sz]ed)\b", fee_text):
+        from crossr_core import stallion_status as _status
+
+        override = _status.override_for(facts.get("name") or "", facts.get("year"))
+        if override and override["status"] in _status.OFF_DUTY:
+            stallion_status = "deceased" if override["status"] == "deceased" else "pensioned"
+        elif re.search(r"\b(died|dead|deceased|euthani[sz]ed)\b", fee_text):
             stallion_status = "deceased"
         elif re.search(r"\b(pensioned|retired)\b", fee_text):
             stallion_status = "pensioned"

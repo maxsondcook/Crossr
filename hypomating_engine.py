@@ -679,7 +679,11 @@ def get_profile_meta(name, all_profiles):
     # Suggestions only use stallions standing in North America for now (user's call).
     from crossr_core.identity import stands_in_north_america
 
-    is_active = (len(profile) > 0) and not is_pensioned and is_standing and stands_in_north_america(profile)
+    from crossr_core import stallion_status
+
+    is_dead_or_retired = stallion_status.off_duty(name, profile.get("Year Born"))
+    is_active = (len(profile) > 0) and not is_pensioned and not is_dead_or_retired and is_standing \
+        and stands_in_north_america(profile)
 
     return {"rank": rank_val, "fee_str": fee_str, "fee_num": fee_num, "has_progeny": has_progeny, "is_active": is_active}
 
