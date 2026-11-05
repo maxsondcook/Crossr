@@ -20,6 +20,9 @@ bumped and the tables are compacted.
 
     scripts/pipeline/railway_env.sh crossr_dev .venv/bin/python scripts/pipeline/shrink_dev.py           # counts only
     scripts/pipeline/railway_env.sh crossr_dev .venv/bin/python scripts/pipeline/shrink_dev.py --apply
+    scripts/pipeline/railway_env.sh crossr_dev .venv/bin/python scripts/pipeline/shrink_dev.py --full --apply
+
+--full copies those five tables whole instead (e.g. for model training).
 """
 import os
 import sys
@@ -35,6 +38,7 @@ TARGET = os.environ["DATABASE_URL"]
 assert TARGET.rsplit("/", 1)[-1] == "crossr_dev", "writes crossr_dev only"
 SOURCE = TARGET.rsplit("/", 1)[0] + "/railway"
 APPLY = "--apply" in sys.argv
+FULL = "--full" in sys.argv
 
 SUBJECTS = [
     "AMERICAN PHAROAH", "INTO MISCHIEF", "NOT THIS TIME", "JUSTIFY", "CURLIN", "ESSENTIAL QUALITY", "TAPIT",
@@ -81,6 +85,8 @@ STEPS = [
 ]
 TABLES = [("sales_lots", "k_lots"), ("race_horses", "k_horses"), ("race_seasons", "k_seasons"),
           ("race_starts", "k_starts"), ("pedigrees", "k_peds")]
+if FULL:
+    STEPS, TABLES = [], [(t, t) for t, _ in TABLES]
 COMPACT = ["sales_lot_index", "sales_catalogs", "stallion_rankings", "breeding_seasons", "graded_stakes",
            "upcoming_hip_cache", "stud_fees"]
 
