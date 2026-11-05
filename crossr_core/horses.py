@@ -151,8 +151,28 @@ def _roster_foal_year(name, data, stud_year):
     return year or sample_db.stallion_foal_year(name, stud_year or 2026) or None
 
 
+_OFF_DUTY_RE = re.compile(r"\b(pensioned|retired|died|dead|deceased|euthani[sz]ed)\b", re.I)
+
+
+def _off_duty(card):
+    """Pensioned, retired or dead per the stud card (status, fee text or notes; same rule as identity.classify)."""
+    text = " ".join(str((card or {}).get(k) or "") for k in ("Status", "Stud Fee Display", "Notes"))
+    return bool(_OFF_DUTY_RE.search(text))
+
+
+def _on_current_card(card, year=None):
+    """On the current register: standing in North America with a card for this or last season (fee may be private)."""
+    from crossr_core.identity import stands_in_north_america
+
+    year = year or datetime.date.today().year
+    latest = _intish(str((card or {}).get("Latest Season") or "")[:4])
+    return bool(card) and bool(latest) and latest >= year - 1 and stands_in_north_america(card) and not _off_duty(card)
+
+
 def build_stallion_roster(profiles=None):
-    """Cheap list cache: 2026 mares-bred roster + profile/CSV parents. No pedigree scans."""
+    """The stallion registry: every stallion standing in North America on a current stud card,
+    plus every stallion reported bred to mares in 2026 that isn't pensioned, retired or dead.
+    Profile/CSV parents only; no pedigree scans."""
     global _STALLION_ROSTER
     from crossr_core import sample_db as _sdb
 
@@ -166,13 +186,20 @@ def build_stallion_roster(profiles=None):
     ranks = _rank_map()
     roster = []
     mares_bred = _load_mares_bred_2026()
+    bred_keys = {row["key"] for row in mares_bred}
+    # Current stud cards (a fee for this or last season, standing in North America) that
+    # no 2026 mares-bred report lists yet: new stallions, late reports, private books.
+    for name in profiles:
+        key = main.clean_horse_name(name)
+        if key and key not in bred_keys and _on_current_card(profiles[name]):
+            bred_keys.add(key)
+            mares_bred.append({"name": name, "key": key, "mares_bred": None, "state": None})
     from crossr_core import sample_db
     sample_db._foal_years_for(row["name"] for row in mares_bred)  # one query, not one per sire
     for row in mares_bred:
         key = row["key"]
         display, data = by_profile.get(key, (row["name"], {}))
-        status = str((data or {}).get("Status", "")).strip().lower()
-        if status == "pensioned":
+        if _off_duty(data):
             continue
         fee = (data or {}).get("Stud Fee", 0)
         fee_n = fee if isinstance(fee, int) else _fee_num(fee)
