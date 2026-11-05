@@ -65,7 +65,8 @@ def init_db():
 
 
 def empty_prefs():
-    return {"starred": [], "hypofoals": [], "favorites": [], "analyzed": []}
+    return {"starred": [], "hypofoals": [], "favorites": [], "analyzed": [],
+            "notifications": {"email": False, "entries": True, "results": True}}
 
 
 def hash_password(password: str) -> str:
@@ -218,9 +219,18 @@ def get_preferences(user_id, conn=None):
 
 
 def save_preferences(user_id, payload):
-    prefs = _clean_prefs(payload if isinstance(payload, dict) else empty_prefs())
+    payload = payload if isinstance(payload, dict) else empty_prefs()
     conn = connect()
     try:
+        if not isinstance(payload.get("notifications"), dict):
+            # a client that only syncs stars must not reset the email settings
+            row = conn.execute("SELECT payload FROM preferences WHERE user_id = ?", (user_id,)).fetchone()
+            if row:
+                try:
+                    payload = {**payload, "notifications": json.loads(row["payload"]).get("notifications")}
+                except (ValueError, AttributeError):
+                    pass
+        prefs = _clean_prefs(payload)
         conn.execute(
             "INSERT INTO preferences (user_id, payload, updated_at) VALUES (?, ?, ?) "
             "ON CONFLICT(user_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at",
@@ -251,6 +261,11 @@ def _clean_prefs(raw):
     analyzed = raw.get("analyzed") or []
     base["starred"] = [str(n) for n in starred if n][:80]
     base["favorites"] = [str(n) for n in favorites if n][:40]
+    notes = raw.get("notifications")
+    if isinstance(notes, dict):
+        for k in base["notifications"]:
+            if k in notes:
+                base["notifications"][k] = bool(notes[k])
     if isinstance(hypofoals, list):
         base["hypofoals"] = [h for h in hypofoals if isinstance(h, dict)][:40]
     if isinstance(analyzed, list):
@@ -274,6 +289,7 @@ def _merge_prefs(remote, local):
 
     a["starred"] = uniq(a["starred"] + b["starred"])[:80]
     a["favorites"] = uniq(b["favorites"] + a["favorites"])[:40]
+    # email settings live on the account; the signed-out browser copy never overrides them
     foals = []
     seen_f = set()
     for item in (b["hypofoals"] + a["hypofoals"]):

@@ -140,7 +140,6 @@ export default function StallionsPage() {
 
       <p className="stallion-list-meta">
         {loading ? "Loading 2026 mares-bred stallions…" : `${visible.length} / ${rows.length} stallions`}
-        {listMeta.ms != null ? ` · list API ${listMeta.ms}ms` : ""}
       </p>
 
       {showFilters ? (

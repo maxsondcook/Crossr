@@ -1,4 +1,5 @@
 """Crossr FastAPI — JSON only. Never serves sales_data/ or stakes CSVs."""
+import datetime
 import os
 import threading
 import time
@@ -15,6 +16,7 @@ from pydantic import BaseModel
 os.environ.setdefault("CROSSR_COMPACT_PEDIGREES", "1")
 
 import main
+from crossr_core import timing
 import hypomating_engine
 from crossr_core import horses as horse_svc
 from crossr_core import sales as sales_svc
@@ -93,7 +95,30 @@ async def protect_and_rate_limit(request: Request, call_next):
                     return JSONResponse({"detail": "Too many requests. Please wait a moment."}, status_code=429)
                 bucket.append(now)
             break
-    return await call_next(request)
+    timing.start()
+    started = time.perf_counter()
+    response = await call_next(request)
+    if path.startswith("/api/"):
+        response.headers["Server-Timing"] = timing.header(timing.collected(), (time.perf_counter() - started) * 1000)
+    return response
+
+
+# Step timings for the slow paths (hypomating report, hip pages, profiles): see crossr_core/timing.py.
+timing.instrument(
+    horse_svc, "similar_cross_rows", "similar_active_stallions", "breeding_panel", "enrich_hypofoal_report",
+    "_nick_auctions", "_add_nick_reasons", "_same_dam_stakes_rows", "catalog_pedigree", "sale_workspace",
+    "female_family", "get_horse_profile", "top_progeny_for_sire", "career_earnings", "race_results_for",
+    "resolve_pedigree_tree", "build_stallion_roster",
+)
+timing.instrument(hypomating_engine, "build_hypo_report", "suggest_matings", "top_crosses_payload",
+                  "build_horse_summaries")
+timing.instrument(horse_svc, "stud_book_history", "stallion_ranking_history", "broodmare_sire_history",
+                  "progeny_stats_from_rankings", "load_book_stats",
+                  "dam_produce_index", "_career_earnings_table", "_active_stallions")
+timing.instrument(main, "compute_inbreeding", "lookup_pedigree")
+from crossr_core import identity as _identity  # noqa: E402
+
+timing.instrument(_identity, "horse_facts", "card_matches", "classify", "card_identities")
 
 
 @app.on_event("startup")
@@ -136,6 +161,13 @@ def _warm_caches():
         lambda: __import__("crossr_core.breeding_value", fromlist=["x"]).sons_at_stud(),
         lambda: __import__("crossr_core.breeding_value", fromlist=["x"]).added_value_tables(),
         lambda: __import__("crossr_core.breeding_value", fromlist=["x"]).bms_fee_relationship(),
+        # first-hip / first-profile costs that used to land on a visitor (female family, earnings, parents)
+        horse_svc.dam_produce_index,
+        horse_svc._career_earnings_table,
+        horse_svc._parent_lookup,
+        horse_svc._race_horse_progeny,
+        lambda: horse_svc._active_stallions(profiles()),
+        lambda: [upcoming_svc._base_lots(c["id"]) for c in upcoming_svc.list_catalogs() or []],
     )
     for step in steps:
         try:
@@ -153,6 +185,7 @@ class SuggestBody(BaseModel):
     surface: str = "neither"
     min_fee: Optional[int] = None
     max_fee: Optional[int] = None
+    region: Optional[str] = None
 
 
 class ReportBody(BaseModel):
@@ -178,6 +211,7 @@ class PreferencesBody(BaseModel):
     hypofoals: Optional[list] = None
     favorites: Optional[list] = None
     analyzed: Optional[list] = None
+    notifications: Optional[dict] = None
 
 
 class UpcomingLotBody(BaseModel):
@@ -253,6 +287,31 @@ def auth_preferences(body: PreferencesBody, crossr_session: Optional[str] = Cook
     return {"preferences": prefs}
 
 
+@app.get("/api/weekly/{kind}")
+def weekly_report(kind: str, week: Optional[str] = None):
+    """Stored weekly entries / results list (built by the Monday job); latest week by default."""
+    if kind not in ("entries", "results"):
+        raise HTTPException(status_code=404, detail="Unknown report")
+    if week:
+        try:
+            week = datetime.date.fromisoformat(week).isoformat()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="week must be YYYY-MM-DD")
+    from crossr_core import railway_db
+
+    with railway_db.connect() as conn:
+        if conn.execute("SELECT to_regclass('weekly_reports')").fetchone()[0] is None:
+            return {"kind": kind, "week_start": week, "rows": []}  # the Monday job has not run yet
+        row = conn.execute(
+            "SELECT week_start::text, generated_at::text, row_count, payload FROM weekly_reports "
+            "WHERE kind = %s AND (%s::date IS NULL OR week_start = %s::date) ORDER BY week_start DESC LIMIT 1",
+            (kind, week, week),
+        ).fetchone()
+    if not row:
+        return {"kind": kind, "week_start": week, "rows": []}
+    return {"kind": kind, "week_start": row[0], "generated_at": row[1], "row_count": row[2], "rows": row[3]}
+
+
 @app.get("/api/search")
 def search(q: str = Query("", min_length=1), limit: int = Query(15, ge=1, le=40)):
     return {"results": horse_svc.search_horses(q, limit=limit, profiles=profiles())}
@@ -295,6 +354,11 @@ def stallions(
 @app.get("/api/stallions/farms")
 def stallion_farms():
     return {"farms": horse_svc.list_farms(profiles())}
+
+
+@app.get("/api/stallions/regions")
+def stallion_regions():
+    return {"regions": horse_svc.list_regions(profiles())}
 
 
 @app.get("/api/similarity")
@@ -364,7 +428,7 @@ def _add_cross_similarity(result):
 def hypomating_suggest(body: SuggestBody):
     result = hypomating_engine.suggest_matings(
         main.PEDIGREE_DATABASE,
-        profiles(),
+        horse_svc.profiles_in_region(profiles(), body.region),
         body.mare,
         surface_pref=body.surface,
         min_fee=body.min_fee,
@@ -398,8 +462,10 @@ def hypomating_suggest(body: SuggestBody):
 
 
 @app.get("/api/hypomating/lineage/{stallion}")
-def hypomating_lineage(stallion: str, max_fee: Optional[int] = None):
-    return hypomating_engine.lineage_options_payload(stallion, profiles(), budget_filter=max_fee)
+def hypomating_lineage(stallion: str, max_fee: Optional[int] = None, region: str = ""):
+    return hypomating_engine.lineage_options_payload(
+        stallion, horse_svc.profiles_in_region(profiles(), region), budget_filter=max_fee
+    )
 
 
 @app.get("/api/hypomating/crosses/{stallion}")
@@ -672,6 +738,8 @@ def sales_upcoming_lot(catalog_id: str, hip: str):
     """Precomputed hip page (crossr_core/hip_cache.py); computed live and stored when missing."""
     from crossr_core import hip_cache
 
+    # "50" finds hip "0050" (and the reverse): cache and compute under the catalog's own spelling.
+    hip = upcoming_svc.canonical_hip(catalog_id, hip) or hip
     # Stars / notes and the pedigree-scrape status are read live on top of the stored page.
     payload = hip_cache.get(catalog_id, hip, _compute_upcoming_lot)
     if payload is None:

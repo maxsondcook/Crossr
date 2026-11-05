@@ -118,7 +118,11 @@ def build_maps(df: pd.DataFrame, data):
     ped = rh.dropna(subset=["foal_year"]).drop_duplicates(["k", "foal_year"])
     horses = horses.merge(ped[["k", "foal_year", "sire_k", "dam_k"]], left_on=["k", "fy"],
                           right_on=["k", "foal_year"], how="inner")
-    events = horses[["year", "sire_k", "dam_k", "level"]].sort_values("year")
+    # Dated events: a graded placing counts from its own year even if the horse wins a graded race
+    # later (one event per horse at the win year would hide earlier placings from earlier sales).
+    placed_ev = horses[horses.placed.notna()].assign(year=lambda h: h.placed.astype(int), level=1)
+    won_ev = horses[horses.won.notna()].assign(year=lambda h: h.won.astype(int), level=2)
+    events = pd.concat([placed_ev, won_ev])[["year", "sire_k", "dam_k", "level"]].sort_values("year")
     outcome = horses[horses.level == 2].drop_duplicates(["sire_k", "dam_k", "fy"])
     gsw_keys = set(zip(outcome.sire_k, outcome.dam_k, outcome.fy.astype(int)))
     log(f"graded horses linked to pedigree: {len(horses):,} ({(horses.level == 2).sum():,} winners)")

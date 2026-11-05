@@ -8,6 +8,15 @@
     com.crossr.pipeline.mares-bred    weekly, Saturday 05:00: The Jockey Club's Report of Mares Bred
                                       -> breeding_seasons (one page; scripts/jockeyclub_mares_bred.py)
     com.crossr.pipeline.precompute    nightly 02:30: sales-model hip pages for upcoming catalogs
+    com.crossr.pipeline.weekly        Monday 08:00 (run at wake if the Mac slept): weekly entries /
+                                      results lists and starred-horse emails (crossr_core.weekly);
+                                      the SMTP settings come from the api service's Railway variables
+    com.crossr.pipeline.entries       daily 06:15 (run at wake if the Mac slept): NYRA's published entries
+                                      -> race_entries, then this week's entries list is refreshed
+    com.crossr.pipeline.audit         daily 05:30 (after the 03:00 push): read-only data audit
+                                      (scripts/data_audit.py) -> logs/audit/<date>.md, data_audit_runs
+    com.crossr.pipeline.stallion-news daily 06:00: Thoroughbred Daily News headlines about stallions
+                                      pensioned or dying -> suggestions to review (scripts/stallion_status.py)
 
 The two Chrome jobs (scrape, racing-post) share logs/pipeline/chrome.lock, so
 only one browser is open at a time.
@@ -31,6 +40,10 @@ RACING_POST = "com.crossr.pipeline.racing-post"
 PUSH = "com.crossr.pipeline.push"
 MARES_BRED = "com.crossr.pipeline.mares-bred"
 PRECOMPUTE = "com.crossr.pipeline.precompute"
+WEEKLY = "com.crossr.pipeline.weekly"
+AUDIT = "com.crossr.pipeline.audit"
+STALLION_NEWS = "com.crossr.pipeline.stallion-news"
+ENTRIES = "com.crossr.pipeline.entries"
 
 
 def plists(db: str, python: str) -> dict[str, dict]:
@@ -95,6 +108,41 @@ def plists(db: str, python: str) -> dict[str, dict]:
             "StartCalendarInterval": {"Hour": 2, "Minute": 30},
             "StandardOutPath": str(LOG_DIR / "precompute.log"),
             "StandardErrorPath": str(LOG_DIR / "precompute.log"),
+            **common,
+        },
+        # Safe to re-run: reports are upserted and emails already sent are skipped.
+        WEEKLY: {
+            "Label": WEEKLY,
+            "ProgramArguments": [str(Path.home() / ".local" / "railway-cli" / "node_modules" / ".bin" / "railway"),
+                                 "run", "-s", "api", "--", env, db, python, "-m", "crossr_core.weekly", "run"],
+            "StartCalendarInterval": {"Weekday": 1, "Hour": 8, "Minute": 0},
+            "StandardOutPath": str(LOG_DIR / "weekly.log"),
+            "StandardErrorPath": str(LOG_DIR / "weekly.log"),
+            **common,
+        },
+        # Before the Monday 08:00 weekly job, so Monday's list has the latest cards.
+        ENTRIES: {
+            "Label": ENTRIES,
+            "ProgramArguments": [env, db, python, "-m", "crossr_pipeline", "entries", "--apply"],
+            "StartCalendarInterval": {"Hour": 6, "Minute": 15},
+            "StandardOutPath": str(LOG_DIR / "entries.log"),
+            "StandardErrorPath": str(LOG_DIR / "entries.log"),
+            **common,
+        },
+        AUDIT: {
+            "Label": AUDIT,
+            "ProgramArguments": [env, db, python, str(REPO / "scripts" / "data_audit.py")],
+            "StartCalendarInterval": {"Hour": 5, "Minute": 30},
+            "StandardOutPath": str(LOG_DIR / "audit.log"),
+            "StandardErrorPath": str(LOG_DIR / "audit.log"),
+            **common,
+        },
+        STALLION_NEWS: {
+            "Label": STALLION_NEWS,
+            "ProgramArguments": [env, db, python, str(REPO / "scripts" / "stallion_news_watch.py"), "--apply"],
+            "StartCalendarInterval": {"Hour": 6, "Minute": 0},
+            "StandardOutPath": str(LOG_DIR / "stallion-news.log"),
+            "StandardErrorPath": str(LOG_DIR / "stallion-news.log"),
             **common,
         },
     }

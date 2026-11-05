@@ -5,6 +5,7 @@
     python -m crossr_pipeline push                    # staged rows -> Postgres (daily)
     python -m crossr_pipeline sales-import [--dry-run] [--force FILE ...]
     python -m crossr_pipeline racing-post [--limit N] [--delay 3]
+    python -m crossr_pipeline entries [--apply] [--days 7]   # NYRA entries -> race_entries (daily)
     python -m crossr_pipeline status
     python -m crossr_pipeline install-launchd [--db railway|crossr_dev]
 
@@ -237,6 +238,20 @@ def _age(ts) -> str:
     return f"{seconds / 86400:.1f}d ago"
 
 
+def cmd_entries(args) -> int:
+    from crossr_pipeline import nyra_entries
+
+    print(f"Database: {_db_name()}  ({datetime.now():%Y-%m-%d %H:%M})", flush=True)
+    try:
+        nyra_entries.run(apply=args.apply, days_ahead=args.days, sites=tuple(args.site or nyra_entries.SITES),
+                         delay=args.delay)
+    except Exception:
+        import traceback
+
+        traceback.print_exc()  # exit 0: launchd tries again tomorrow
+    return 0
+
+
 def cmd_status(args) -> int:
     from crossr_pipeline import state
 
@@ -299,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("scrape", help="One Equibase batch: catalogs, weekly race refresh, sale-parent pedigrees")
-    p.add_argument("--delay", type=float, default=3.0, help="Seconds between page loads (plus jitter)")
+    p.add_argument("--delay", type=float, default=5.0, help="Seconds between page loads (plus jitter); Equibase robots.txt asks Crawl-delay: 5")
     p.add_argument("--minutes", type=float, default=45, help="Batch length; Chrome closes at the end")
     p.add_argument("--limit", type=int, help="Stop after this many queue items (testing)")
     p.add_argument("--full-pages", action="store_true", help="Also download pictures, fonts and ad scripts")
@@ -354,6 +369,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--early", choices=["header", "list-year"], default="header",
                    help="2001-2007 lists: season from the file header (default) or the list year")
     p.set_defaults(func=cmd_fees_redate)
+
+    p = sub.add_parser("entries", help="NYRA's published entries -> race_entries (dry run unless --apply)")
+    p.add_argument("--apply", action="store_true")
+    p.add_argument("--days", type=int, default=7)
+    p.add_argument("--site", action="append", choices=("belmont", "saratoga", "aqueduct"))
+    p.add_argument("--delay", type=float, default=5.0)
+    p.set_defaults(func=cmd_entries)
 
     p = sub.add_parser("status", help="Recent runs, queue state, table counts")
     p.add_argument("--limit", type=int, default=15)

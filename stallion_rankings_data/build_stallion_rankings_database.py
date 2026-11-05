@@ -9,13 +9,14 @@ Stallion Rankings entity. Published text is kept as printed, including
 from __future__ import annotations
 
 import csv
+import datetime
 import re
 import sqlite3
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 OUT_DB = ROOT / "stallion_rankings.db"
-YEAR_DIRS = [str(year) for year in range(2001, 2027)]
+YEAR_DIRS = [str(year) for year in range(2001, datetime.date.today().year + 1)]
 
 COLUMNS = [
     "year",

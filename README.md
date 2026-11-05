@@ -192,12 +192,14 @@ python3 -m pytest crossr_pipeline equibase_scraper pq_scraper ifha_scraper -q   
 
 ## Known limitations
 
-- Weekly race entries/results email reports (DRF) are not built yet; DRF blocks
-  automated access, so entries need a licensed source.
+- Weekly results lists and starred-horse emails run on Monday (docs/weekly-reports.md),
+  but the emails need Gmail SMTP settings on Railway, and weekly entries need a permitted
+  source loaded with `scripts/import_entries.py`: DRF blocks automated access and
+  Equibase entry pages are bot-protected.
 - About 15% of yearling/weanling lots still lack a broodmare sire (dams not on file or
   several same-named mares); scraping those dams is in progress.
-- 877 Equibase IDs are shared by duplicate race-horse rows pending a reviewed merge
-  (`scripts/merge_duplicate_race_horses.py`).
+- Duplicate race-horse rows sharing an Equibase ID were merged on 2026-10-31
+  (`scripts/merge_duplicate_race_horses.py`; rows marked `merged`, nothing deleted).
 - Many race-horse rows have no foaling year, so some race records don't attach to the
   right horse until Equibase enriches them.
 - The local API needs ~1 GB of RAM; on an 8 GB Mac it won't start while the scrapers'

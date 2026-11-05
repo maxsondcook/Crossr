@@ -119,10 +119,20 @@ _NA_PLACES = re.compile(
 )
 
 
+_ABROAD = re.compile(
+    r"(?:^|,)\s*(JPN|Japan|IRE|Ireland|GB|ENG|England|UK|FR|FRA|France|GER|Germany|ITY|Italy|AUS|Australia|NZ|"
+    r"New Zealand|ARG|Argentina|BRZ|Brazil|CHI|Chile|URU|Uruguay|PER|Peru|KOR|Korea|UAE|SAF|South Africa|"
+    r"TUR|Turkey|IND|India)\s*$", re.I)
+
+
 def stands_in_north_america(card: dict | None) -> bool:
     """True when the stud card's fee is in US/Canadian dollars, or (no fee
     currency) its farm location names a US state or Canadian province."""
     if not card:
+        return False
+    # BloodHorse lists some overseas stallions with a dollar conversion of the fee
+    # (American Pharoah: "$25,850", Shizunai Stallion Station, JPN): the farm wins.
+    if _ABROAD.search(str(card.get("Farm") or "")):
         return False
     currency = str(card.get("Stud Fee Currency") or "").upper()
     if currency:
@@ -289,7 +299,12 @@ def classify(facts: dict, card: dict | None = None) -> dict:
     if is_stallion:
         latest = _year(card.get("Latest Season")) if card else None
         fee_text = " ".join(str(card.get(k) or "") for k in ("Stud Fee Display", "Status", "Notes")).lower() if card else ""
-        if re.search(r"\b(died|dead|deceased|euthani[sz]ed)\b", fee_text):
+        from crossr_core import stallion_status as _status
+
+        override = _status.override_for(facts.get("name") or "", facts.get("year"))
+        if override and override["status"] in _status.OFF_DUTY:
+            stallion_status = "deceased" if override["status"] == "deceased" else "pensioned"
+        elif re.search(r"\b(died|dead|deceased|euthani[sz]ed)\b", fee_text):
             stallion_status = "deceased"
         elif re.search(r"\b(pensioned|retired)\b", fee_text):
             stallion_status = "pensioned"

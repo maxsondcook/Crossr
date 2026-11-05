@@ -319,7 +319,7 @@ def _auction_candidates(name_keys, pairs):
         return []
     try:
         return conn.execute(
-            f"""
+            """
             SELECT l.name AS horse_name, l.nk, l.sk, l.dk, l.is_out, l.is_rna,
                    l.price_num, l.price_raw, l.purchaser, l.birth_year, l.hip,
                    c.title AS sale_title, CASE WHEN c.year > 0 THEN c.year::text ELSE '' END AS sale_year
@@ -581,6 +581,26 @@ def sire_sales_summary(sire_name, entered_stud=None, catalog_id=None, today=None
     # month_index 13 means "unknown month" (sales_history): sort those last in their year.
     sale_list.sort(key=lambda s: (-s["year"], -(s["month_index"] if 0 < (s["month_index"] or 0) <= 12 else 0), s["title"]))
 
+    # Price by cross: each broodmare sire's lots, per category (yearlings / weanlings / all).
+    by_damsire = {}
+    for l in lots:
+        name = re.sub(r"\s*\(\d{4}\)\s*$", "", str(l.get("damsire") or "")).strip()
+        if not name:
+            continue
+        by_damsire.setdefault(name.upper(), {"broodmare_sire": name, "pool": []})["pool"].append(l)
+    damsire_rows = []
+    for entry in by_damsire.values():
+        pool = entry.pop("pool")
+        cats = by_category(pool)
+        if any(c["sold"] for c in cats.values()):
+            # The horses behind the figures, newest sale first (outs dropped, like the stats).
+            entry["lots"] = [{
+                "name": l["name"], "year": l["year"], "sale": l["sale"], "hip": l["hip"],
+                "type": l["type"], "sex": l["sex"], "status": l["status"], "price": l["price"],
+            } for l in pool if l["status"] != "out"]
+            damsire_rows.append({**entry, **cats})
+    damsire_rows.sort(key=lambda r: -(r["all"]["average"] or 0))
+
     selected = catalog_id or (sale_list[0]["catalog_id"] if sale_list else None)
     sale_lots = [l for l in lots if l["catalog_id"] == selected]
     return {
@@ -593,4 +613,5 @@ def sire_sales_summary(sire_name, entered_stud=None, catalog_id=None, today=None
         "selected_catalog_id": selected,
         "sale_stats": by_category(sale_lots) if sale_lots else None,
         "sale_lots": sale_lots,
+        "by_damsire": damsire_rows,
     }

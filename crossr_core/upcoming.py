@@ -6,6 +6,7 @@ name without .csv; one JSON object per CSV row). Starred hips and notes live in
 upcoming_lot_marks and override the catalog's own STARRED / NOTES columns.
 """
 import re
+import time
 
 from crossr_core import railway_db
 
@@ -268,18 +269,45 @@ def _apply_mark(lot, mark):
     return lot
 
 
-def list_lots(catalog_id):
+_LOTS_CACHE: dict = {}  # catalog id -> (stamp, lots without stars / notes)
+_STAMP_CACHE: dict = {}  # catalog id -> (checked at, stamp)
+_STAMP_TTL = 30.0  # seconds between "has this catalog been reloaded?" checks
+
+
+def _catalog_stamp(catalog_id):
+    """Changes whenever the catalog is replaced (replace_upcoming_catalog re-inserts its row)."""
+    now = time.monotonic()
+    hit = _STAMP_CACHE.get(catalog_id)
+    if hit and now - hit[0] < _STAMP_TTL:
+        return hit[1]
+    with railway_db.connect() as conn:
+        row = conn.execute("SELECT updated_at::text, hip_count FROM upcoming_catalogs WHERE id = %s",
+                           (catalog_id,)).fetchone()
+    stamp = tuple(row) if row else None
+    _STAMP_CACHE[catalog_id] = (now, stamp)
+    return stamp
+
+
+def _base_lots(catalog_id):
+    """Parsed lots for a catalog, built once per catalog version (reading and parsing 3,400 hips
+    took about 0.6 s, and every hip page and the hip list paid it)."""
+    if not _valid_id(catalog_id):
+        return None
+    stamp = _catalog_stamp(catalog_id)
+    if stamp is None:
+        return None
+    hit = _LOTS_CACHE.get(catalog_id)
+    if hit and hit[0] == stamp:
+        return hit[1]
     catalog = _read_catalog(catalog_id)
     if catalog is None:
         return None
     sale_year = _year(catalog_id)
     _, rows = catalog
-    marks = railway_db.read_lot_marks(catalog_id)
     lots = []
     for row in rows:
         lot = _lot_from_row(row, sale_year=sale_year)
         lot["sale_year"] = sale_year
-        _apply_mark(lot, marks.get(lot["hip"]))
         if lot["hip"] or lot["name"]:
             lots.append(lot)
     # Catalog modal age fills any remaining blank sold_as (mixed/untitled sales).
@@ -292,7 +320,37 @@ def list_lots(catalog_id):
     except Exception:
         pass
     lots.sort(key=lambda lot: (_hip_sort(lot["hip"]), lot["hip"]))
+    _LOTS_CACHE[catalog_id] = (stamp, lots)
     return lots
+
+
+def list_lots(catalog_id):
+    """Every lot in the catalog with its live stars / notes."""
+    base = _base_lots(catalog_id)
+    if base is None:
+        return None
+    marks = railway_db.read_lot_marks(catalog_id)
+    out = []
+    for lot in base:
+        lot = dict(lot)
+        _apply_mark(lot, marks.get(lot["hip"]))
+        out.append(lot)
+    return out
+
+
+def hip_key(hip):
+    """'0050', '050' and '50' are one hip (catalogs differ on zero-padding); '50a' == '0050A'."""
+    return re.sub(r"^0+(?=\d)", "", str(hip or "").strip().upper())
+
+
+def canonical_hip(catalog_id, hip):
+    """The hip as this catalog writes it, for any padding of the number; None when absent."""
+    want = str(hip or "").strip()
+    lots = _base_lots(catalog_id) or []
+    if any(lot["hip"] == want for lot in lots):
+        return want
+    key = hip_key(want)
+    return next((lot["hip"] for lot in lots if hip_key(lot["hip"]) == key), None)
 
 
 def get_lot(catalog_id, hip):
@@ -303,7 +361,8 @@ def get_lot(catalog_id, hip):
     for lot in lots:
         if lot["hip"] == want:
             return lot
-    return None
+    want = hip_key(want)
+    return next((lot for lot in lots if hip_key(lot["hip"]) == want), None)
 
 
 def update_lot(catalog_id, hip, starred=None, notes=None):
@@ -311,7 +370,7 @@ def update_lot(catalog_id, hip, starred=None, notes=None):
     if catalog is None:
         return None
     _, rows = catalog
-    want = str(hip).strip()
+    want = canonical_hip(catalog_id, hip) or str(hip).strip()
     found = next((row for row in rows if _blank(_col(row, "HIP", "HIP NUMBER", "LOT")) == want), None)
     if found is None:
         return None

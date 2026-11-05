@@ -61,3 +61,9 @@ logs/
 
 # Pipeline staging (crossr_pipeline/stage.py)
 state/
+
+# production row backups taken before data merges (never commit)
+db-backups/
+
+# nightly bug reports (tests/nightly), read by AI agents locally
+bugs/

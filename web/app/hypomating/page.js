@@ -85,8 +85,9 @@ function HypomatingInner() {
   const sireFromPage = params.get("sire") || "";
   const [mare, setMare] = useState(sireFromPage ? "" : (params.get("mare") || ""));
   const [surface, setSurface] = useState("neither");
-  const [minFee, setMinFee] = useState("");
   const [maxFee, setMaxFee] = useState("");
+  const [region, setRegion] = useState("");
+  const [regions, setRegions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
@@ -101,12 +102,16 @@ function HypomatingInner() {
   const [restored, setRestored] = useState(false);
 
   useEffect(() => {
+    apiGet("/api/stallions/regions").then((d) => setRegions(d.regions || [])).catch(() => setRegions([]));
+  }, []);
+
+  useEffect(() => {
     if (sireFromPage || restored) return;
     const saved = loadHypomatingSession();
     if (saved?.result) {
       setMare(saved.mare || "");
       setSurface(saved.surface || "neither");
-      setMinFee(saved.minFee || "");
+      setRegion(saved.region || "");
       setMaxFee(saved.maxFee || "");
       setResult(saved.result);
       setOpenLineage(saved.openLineage || null);
@@ -146,11 +151,11 @@ function HypomatingInner() {
       const data = await apiPost("/api/hypomating/suggest", {
         mare: mareName,
         surface,
-        min_fee: minFee ? Number(minFee) : null,
         max_fee: maxFee ? Number(maxFee) : null,
+        region: region || null,
       });
       setResult(data);
-      saveHypomatingSession({ mare: mareName, surface, minFee, maxFee, result: data });
+      saveHypomatingSession({ mare: mareName, surface, maxFee, region, result: data });
     } catch (e) {
       if (e.status === 409 && e.detail?.error === "ambiguous_year") {
         setYearChoices(e.detail);
@@ -174,11 +179,14 @@ function HypomatingInner() {
     setError("");
     try {
       const data = await apiGet(
-        `/api/hypomating/lineage/${encodeURIComponent(name)}${maxFee ? `?max_fee=${maxFee}` : ""}`,
+        `/api/hypomating/lineage/${encodeURIComponent(name)}?${new URLSearchParams({
+          ...(maxFee ? { max_fee: maxFee } : {}),
+          ...(region ? { region } : {}),
+        })}`,
       );
       setLineageData(data);
       saveHypomatingSession({
-        mare, surface, minFee, maxFee, result, report,
+        mare, surface, maxFee, region, result, report,
         lineage: data, openLineage: name,
       });
     } catch (e) {
@@ -198,7 +206,7 @@ function HypomatingInner() {
       setReport(data);
       saveHypofoal({ foal_name: data.foal_name, sire, dam: data.dam });
       saveHypomatingSession({
-        mare, surface, minFee, maxFee, result, lineage: lineageData, openLineage, report: data,
+        mare, surface, maxFee, region, result, lineage: lineageData, openLineage, report: data,
       });
     } catch (e) {
       setError(e.message);
@@ -211,13 +219,14 @@ function HypomatingInner() {
   // Lineage groups already shown on a suggestion card open there; only list the rest separately.
   const suggestionNames = new Set((result?.suggestions || []).map((s) => s.name));
   const suggestionKeys = new Set([...suggestionNames].map((n) => String(n).toUpperCase()));
-  // Alternatives skip stallions already suggested above.
+  // Alternatives: every standing relative in the stallion registry (ranked or not),
+  // minus stallions already suggested above. The API sorts ranked sires first.
   const lineageOptions = (lineageData?.options || []).filter(
-    (o) => o.rank != null
-      && String(o.rank).toUpperCase() !== "N/A"
-      && !suggestionKeys.has(String(o.name).toUpperCase()),
+    (o) => !suggestionKeys.has(String(o.name).toUpperCase()),
   );
   const extraLineageGroups = (result?.lineage_groups || []).filter((g) => !suggestionNames.has(g.anchor));
+  const overBudgetGroups = extraLineageGroups.filter((g) => g.over_budget);
+  const otherLineageGroups = extraLineageGroups.filter((g) => !g.over_budget);
 
   if (sireFromPage) {
     return (
@@ -268,7 +277,7 @@ function HypomatingInner() {
         onBack={() => {
           setReport(null);
           saveHypomatingSession({
-            mare, surface, minFee, maxFee, result, lineage: lineageData, openLineage, report: null,
+            mare, surface, maxFee, region, result, lineage: lineageData, openLineage, report: null,
           });
         }}
       />
@@ -285,14 +294,11 @@ function HypomatingInner() {
             <input value={mare} onChange={(e) => setMare(e.target.value)} required />
           </div>
           <div className="field">
-            <label>WHAT IS YOUR PRICE RANGE?</label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <input value={minFee} onChange={(e) => setMinFee(e.target.value)} placeholder="Min stud fee" />
-              <input value={maxFee} onChange={(e) => setMaxFee(e.target.value)} placeholder="Max stud fee" />
-            </div>
+            <label>MAX STUD FEE</label>
+            <input value={maxFee} onChange={(e) => setMaxFee(e.target.value)} placeholder="Max stud fee" inputMode="numeric" />
           </div>
           <div className="field">
-            <label>DESIRED SURFACE</label>
+            <label>SURFACE PREFERENCE</label>
             <div className="surfaces">
               {["dirt", "turf", "neither"].map((s) => (
                 <label key={s}>
@@ -301,6 +307,15 @@ function HypomatingInner() {
                 </label>
               ))}
             </div>
+          </div>
+          <div className="field">
+            <label>STANDING LOCATION</label>
+            <select value={region} onChange={(e) => setRegion(e.target.value)}>
+              <option value="">Anywhere</option>
+              {regions.map((r) => (
+                <option key={r.region} value={r.region}>{r.region} ({r.count})</option>
+              ))}
+            </select>
           </div>
           {yearChoices ? (
             <div className="field">
@@ -344,7 +359,16 @@ function HypomatingInner() {
             <div className="panel">
               <h4>BROODMARE · {horseCaps(result.mare)}</h4>
               {result.damsire ? <p className="sub">DAMSIRE: {horseCaps(result.damsire)}</p> : null}
-              <PedigreeChart tree={brood?.pedigree} showSubject={false} />
+              <PedigreeChart
+                tree={brood?.pedigree}
+                showSubject={false}
+                expandedExtra={(
+                <div className="panel family-panel">
+                  <h4>FEMALE FAMILY</h4>
+                  <FemaleFamily family={brood?.female_family || []} />
+                </div>
+              )}
+              />
               <div className="family-panel" style={{ marginTop: 12 }}>
                 <h4>FEMALE FAMILY</h4>
                 <FemaleFamily family={brood?.female_family || []} />
@@ -353,13 +377,23 @@ function HypomatingInner() {
             <div>
               <div className="panel">
                 <h4>SUGGESTED STALLIONS</h4>
+                {overBudgetGroups.length ? (
+                  <p className="over-budget-note">
+                    {overBudgetGroups.slice(0, 4).map((g) => horseCaps(g.anchor)).join(", ")}
+                    {overBudgetGroups.length > 4 ? ` and ${overBudgetGroups.length - 4} more` : ""}
+                    {overBudgetGroups.length === 1 ? " is" : " are"} over your budget.{" "}
+                    <a href="#over-budget">See their related sires in budget ↓</a>
+                  </p>
+                ) : null}
                 {(result.suggestions || []).length === 0 ? (
                   <p className="empty">
-                    {minFee || maxFee ? "No stallions in this fee band." : "No standing stallions matched this mare."}
+                    {maxFee || region
+                      ? `No stallions${region ? ` standing in ${region}` : ""}${maxFee ? " under that fee" : ""}.`
+                      : "No standing stallions matched this mare."}
                     {extraLineageGroups.length
                       ? " Check the alternatives below."
-                      : minFee || maxFee
-                        ? " Try widening the fee range."
+                      : maxFee || region
+                        ? " Try a higher fee or another location."
                         : ""}
                   </p>
                 ) : null}
@@ -378,7 +412,7 @@ function HypomatingInner() {
                           href={horseHref(s.name)}
                           onClick={() => {
                             saveHypomatingSession({
-                              mare, surface, minFee, maxFee, result,
+                              mare, surface, maxFee, region, result,
                               lineage: lineageData, openLineage, report,
                             });
                             recordAppView("/hypomating", "Hypomating");
@@ -460,15 +494,22 @@ function HypomatingInner() {
                   </div>
                 ))}
               </div>
-              {extraLineageGroups.length ? (
-                <div className="panel" style={{ marginTop: 12 }}>
-                  <h4>ALTERNATIVES</h4>
-                  {extraLineageGroups.map((g) => (
+              {[
+                ["over-budget", "OVER YOUR BUDGET · RELATED SIRES IN BUDGET", overBudgetGroups],
+                ["alternatives", "ALTERNATIVES", otherLineageGroups],
+              ].map(([sectionId, title, groups]) => (groups.length ? (
+                <div key={sectionId} id={sectionId} className="panel" style={{ marginTop: 12 }}>
+                  <h4>{title}</h4>
+                  {groups.map((g) => (
                     <div key={g.anchor} className="suggest-card suggest-card-stack">
                       <div className="suggest-card-main">
                         <div>
                           <strong>{horseCaps(g.anchor)}</strong>
-                          <div className="parents">{g.variant ? "PROVEN CROSS · NOT STANDING" : "RELATED SIRES IN BUDGET"}</div>
+                          <div className="parents">
+                            {g.over_budget
+                              ? `${rankAndFee(g.rank, g.stud_fee)} · OVER BUDGET`
+                              : g.variant ? "PROVEN CROSS · NOT STANDING" : "RELATED SIRES IN BUDGET"}
+                          </div>
                         </div>
                         <button className="ghost alts-btn" type="button" onClick={() => toggleLineage(g.anchor)}>
                           <span>ALTERNATIVES</span>
@@ -501,7 +542,7 @@ function HypomatingInner() {
                     </div>
                   ))}
                 </div>
-              ) : null}
+              ) : null))}
               {error ? <p className="error">{error}</p> : null}
             </div>
           </div>

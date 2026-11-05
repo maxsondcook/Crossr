@@ -67,3 +67,12 @@ def test_pedigrees_round_trip_and_cache(tmp_path):
     assert stage.cached(conn, "k", "v1", build) == [{"name": "x"}]
     stage.cached(conn, "k", "v2", build)
     assert len(calls) == 2
+
+
+def test_refresh_since_is_jan_1_or_60_days_back():
+    from datetime import datetime, timezone
+
+    from crossr_pipeline.scrape import refresh_since
+
+    assert refresh_since(datetime(2026, 11, 4, tzinfo=timezone.utc)) == "2026-01-01"
+    assert refresh_since(datetime(2027, 1, 20, tzinfo=timezone.utc)) == "2026-11-21"

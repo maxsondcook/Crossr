@@ -81,25 +81,39 @@ def _stud_rank(name):
 
 
 def _parent_lookup():
-    """Sire/dam from data/race_horses.csv — never scans the pedigree DB."""
+    """name key -> [(foal year, sire, dam)] from race_horses rows that name a sire. Never scans the pedigree DB."""
     global _PARENT_BY_KEY
     if _PARENT_BY_KEY is not None:
         return _PARENT_BY_KEY
     out = {}
     from crossr_core import sample_db
     for row in sample_db.load_table("race_horses"):
-        key = main.clean_horse_name(row.get("name_key") or row.get("display_name") or "")
-        if not key or key in out:
+        if (row.get("status") or "") == "merged":
             continue
-        sire = (row.get("sire") or "").strip() or None
-        dam = (row.get("dam") or "").strip() or None
-        if sire:
-            sire = re.sub(r"\s*\(\d{4}\)", "", sire).strip() or None
-        if dam:
-            dam = re.sub(r"\s*\(\d{4}\)", "", dam).strip() or None
-        out[key] = (sire, dam)
+        key = main.clean_horse_name(row.get("name_key") or row.get("display_name") or "")
+        sire = re.sub(r"\s*\(\d{4}\)", "", (row.get("sire") or "").strip()).strip() or None
+        if not key or not sire:
+            continue
+        dam = re.sub(r"\s*\(\d{4}\)", "", (row.get("dam") or "").strip()).strip() or None
+        out.setdefault(key, []).append((_intish(str(row.get("foal_year") or "")[:4]) or None, sire, dam))
     _PARENT_BY_KEY = out
     return out
+
+
+def parents_for(rows, year=None):
+    """(sire, dam) for one horse among same-named race_horses rows, or (None, None).
+
+    Names are reused (Oscar Performance 2014 by Kitten's Joy vs an older namesake),
+    so a row only counts when its foaling year matches; without a year, only when
+    every dated row agrees on one horse. No parents beats a namesake's parents.
+    """
+    rows = rows or []
+    if year:
+        hits = [r for r in rows if r[0] == int(year)]
+    else:
+        years = {r[0] for r in rows if r[0]}
+        hits = rows if len(years) <= 1 and len({r[1].upper() for r in rows}) == 1 else []
+    return (hits[0][1], hits[0][2]) if hits else (None, None)
 
 
 def _load_mares_bred_2026():
@@ -137,13 +151,46 @@ def _roster_foal_year(name, data, stud_year):
     return year or sample_db.stallion_foal_year(name, stud_year or 2026) or None
 
 
+_OFF_DUTY_RE = re.compile(r"\b(pensioned|retired|died|dead|deceased|euthani[sz]ed)\b", re.I)
+
+
+def _off_duty(card, name=None, overrides=None):
+    """Pensioned, retired or dead: a recorded status change (stallion_status_overrides), else the
+    stud card's status, fee text or notes (same rule as identity.classify)."""
+    from crossr_core import stallion_status
+
+    if name and stallion_status.off_duty(name, _intish((card or {}).get("Year Born")), overrides):
+        return True
+    text = " ".join(str((card or {}).get(k) or "") for k in ("Status", "Stud Fee Display", "Notes"))
+    return bool(_OFF_DUTY_RE.search(text))
+
+
+def _on_current_card(card, name=None, overrides=None, scope="north_america", year=None):
+    """On the current register: a card for this or last season (fee may be private), standing in
+    North America unless the registry scope is "world"."""
+    from crossr_core.identity import stands_in_north_america
+
+    year = year or datetime.date.today().year
+    latest = _intish(str((card or {}).get("Latest Season") or "")[:4])
+    if not card or not latest or latest < year - 1 or _off_duty(card, name, overrides):
+        return False
+    return scope == "world" or stands_in_north_america(card)
+
+
 def build_stallion_roster(profiles=None):
-    """Cheap list cache: 2026 mares-bred roster + profile/CSV parents. No pedigree scans."""
+    """The stallion registry: every stallion on a current stud card (North America, or the world
+    with CROSSR_STALLION_SCOPE=world), plus every stallion reported bred to mares in 2026, less
+    any that are pensioned, retired or dead.
+    Profile/CSV parents only; no pedigree scans."""
     global _STALLION_ROSTER
     from crossr_core import sample_db as _sdb
 
     # Rebuild when a source table changes (new mares-bred report, fees), not only at startup.
-    version = tuple(_sdb.table_version(t) for t in ("breeding_seasons", "stud_fees", "stallion_rankings"))
+    from crossr_core import stallion_status
+
+    scope = stallion_status.scope()
+    version = tuple(_sdb.table_version(t) for t in ("breeding_seasons", "stud_fees", "stallion_rankings",
+                                                       stallion_status.TABLE)) + (scope,)
     if _STALLION_ROSTER is not None and _STALLION_ROSTER[0] == version:
         return _STALLION_ROSTER[1]
     profiles = profiles if profiles is not None else main.load_master_profiles()
@@ -152,13 +199,21 @@ def build_stallion_roster(profiles=None):
     ranks = _rank_map()
     roster = []
     mares_bred = _load_mares_bred_2026()
+    bred_keys = {row["key"] for row in mares_bred}
+    # Current stud cards (this or last season; overseas too when the scope is "world") that no
+    # 2026 mares-bred report lists: new stallions, late reports, private books.
+    overrides = stallion_status.overrides()
+    for name in profiles:
+        key = main.clean_horse_name(name)
+        if key and key not in bred_keys and _on_current_card(profiles[name], name, overrides, scope):
+            bred_keys.add(key)
+            mares_bred.append({"name": name, "key": key, "mares_bred": None, "state": None})
     from crossr_core import sample_db
     sample_db._foal_years_for(row["name"] for row in mares_bred)  # one query, not one per sire
     for row in mares_bred:
         key = row["key"]
         display, data = by_profile.get(key, (row["name"], {}))
-        status = str((data or {}).get("Status", "")).strip().lower()
-        if status == "pensioned":
+        if _off_duty(data, display or row["name"], overrides):
             continue
         fee = (data or {}).get("Stud Fee", 0)
         fee_n = fee if isinstance(fee, int) else _fee_num(fee)
@@ -171,7 +226,7 @@ def build_stallion_roster(profiles=None):
         farm_title = _title(str((data or {}).get("Farm", "")).replace("_", " "))
         if not farm_title and row.get("state"):
             farm_title = row["state"]
-        sire, dam = parents.get(key, (None, None))
+        sire, dam = parents_for(parents.get(key), _roster_foal_year(display or row["name"], data, stud_year))
         crop_l = crop_label(stud_year)
         rank = ranks.get(key)
         stallion_meta = {
@@ -277,6 +332,79 @@ def _progeny_earnings_lookup():
     return earn
 
 
+_CAREER_EARNINGS_SQL = """
+SELECT h.name_key, h.sire, h.foal_year,
+       COALESCE(SUM(NULLIF(regexp_replace(s.earnings::text, '[^0-9]', '', 'g'), '')::numeric)
+                FILTER (WHERE s.year ~ '^[0-9]{4}$'), 0) AS earnings
+FROM race_horses h
+LEFT JOIN race_seasons s ON s.horse_id = h.id
+WHERE h.name_key = ANY(%s) AND h.status = 'ok'
+GROUP BY h.id, h.name_key, h.sire, h.foal_year
+"""
+
+
+_CAREER_TABLE = None
+
+
+def _career_earnings_table():
+    """name_key -> [(sire, foal_year, career earnings)] for every fetched horse, loaded once per
+    race-table version (one query; a per-request query cost about 0.45 s on each report and hip)."""
+    global _CAREER_TABLE
+    from crossr_core import sample_db
+
+    version = (sample_db.table_version("race_horses"), sample_db.table_version("race_seasons"))
+    if _CAREER_TABLE is not None and _CAREER_TABLE[0] == version:
+        return _CAREER_TABLE[1]
+    pg = sample_db._pg()
+    if not pg:
+        return {}
+    sql = _CAREER_EARNINGS_SQL.replace("WHERE h.name_key = ANY(%s) AND h.status = 'ok'", "WHERE h.status = 'ok'")
+    table = {}
+    try:
+        with pg.connect() as conn:
+            for name_key, sire, foal_year, earnings in conn.execute(sql).fetchall():
+                if earnings:
+                    table.setdefault(name_key, []).append((sire, foal_year, earnings))
+    except Exception:
+        return (_CAREER_TABLE or (None, {}))[1]
+    _CAREER_TABLE = (version, table)
+    return table
+
+
+def career_earnings(names, sire_name=None):
+    """cleaned name -> career earnings (sum of race_seasons) for these horses.
+
+    Names are reused, so a horse only gets a figure when its race record is
+    unambiguous: same sire as ``sire_name``, or the only horse of that name.
+    Horses whose race record hasn't been collected get no entry (shown as "—").
+    """
+    from crossr_core import sample_db
+
+    names = [n for n in dict.fromkeys(names or []) if n]
+    if not names:
+        return {}
+    key_to_clean = {}
+    for name in names:
+        for key in _race_name_keys([name]):
+            key_to_clean.setdefault(key, main.clean_horse_name(name))
+    table = _career_earnings_table()
+    rows = [(key, *rec) for key in key_to_clean for rec in table.get(key, ())]
+    sire_clean = main.clean_horse_name(re.sub(r"\s*\(\d{4}\)", "", sire_name or ""))
+    by_name = {}
+    for name_key, sire, foal_year, earnings in rows:
+        clean = key_to_clean.get(name_key)
+        if clean:
+            by_name.setdefault(clean, []).append((main.clean_horse_name(sire or ""), foal_year, int(earnings or 0)))
+    out = {}
+    for clean, cands in by_name.items():
+        same_sire = [c for c in cands if sire_clean and c[0] == sire_clean]
+        pool = same_sire or (cands if len({c[1] for c in cands}) == 1 else [])
+        best = max((c[2] for c in pool), default=0)  # duplicate rows of one horse: keep the fullest
+        if best > 0:
+            out[clean] = best
+    return out
+
+
 _RACE_INDEX = None
 
 
@@ -336,6 +464,37 @@ WHERE horse_id = %s AND place = '1'
 ORDER BY race_date
 """
 
+_RACE_STARTS_SQL = """
+SELECT race_date, track, country, race_number, race_name, grade, place, chart_url
+FROM race_starts
+WHERE horse_id = %s
+ORDER BY race_date, race_number
+"""
+
+
+_GRADE_IN_NAME = re.compile(r"\s*\((?:gr\.?|grade|g)\s*([123]|i{1,3})\)", re.I)
+
+
+def _race_label(race_name, grade):
+    """Race name without its "(Gr. 3)" when the grade is shown as its own tag ("Iroquois Stakes" + G3)."""
+    name = str(race_name or "").strip()
+    return _GRADE_IN_NAME.sub("", name).strip() if grade and _GRADE_IN_NAME.search(name) else name
+
+
+def _start_row(race_date, track, country, race_number, race_name, grade, place, chart_url):
+    cls = _win_class(grade, race_name, country) if str(place or "").strip() == "1" else None
+    return {
+        "date": str(race_date or "")[:10] or None,
+        "track": track or None,
+        "country": country or None,
+        "race_number": race_number or None,
+        "race_name": _race_label(race_name, grade or cls) or None,
+        "grade": grade or None,
+        "class": cls,
+        "place": str(place).strip() if place not in (None, "") else None,
+        "chart_url": chart_url or None,
+    }
+
 
 def _season_row(year, born, row):
     earnings = _intish(row.get("earnings"))
@@ -368,13 +527,14 @@ def _win_class(grade, race_name, country):
 def _race_results_pg(pg, names, born):
     keys = _race_name_keys(names)
     if not keys:
-        return [], []
+        return [], [], []
     with pg.connect() as conn:
         hit = conn.execute(_RACE_HORSE_SQL, (keys, str(born))).fetchone()
         if not hit:
-            return [], []
+            return [], [], []
         seasons = conn.execute(_RACE_SEASONS_SQL, (hit[0],)).fetchall()
         starts = conn.execute(_RACE_WINS_SQL, (hit[0],)).fetchall()
+        every_start = conn.execute(_RACE_STARTS_SQL, (hit[0],)).fetchall()
     rows = []
     for year, starts_n, firsts, seconds, thirds, earnings in seasons:
         year = int(year)
@@ -389,38 +549,47 @@ def _race_results_pg(pg, names, born):
         "date": race_date,
         "track": track,
         "country": country,
-        "race_name": race_name,
+        "race_name": _race_label(race_name, grade or _win_class(grade, race_name, country)),
         "grade": grade,
         "class": _win_class(grade, race_name, country),
     } for race_date, track, country, race_name, grade in starts]
-    return rows, wins
+    return rows, wins, [_start_row(*row) for row in every_start]
 
 
 def race_results_for(name, foal_year=None, aliases=()):
-    """(season rows, wins) for a horse from race_horses / race_seasons / race_starts.
+    """(season rows, wins, starts) for a horse from race_horses / race_seasons / race_starts.
 
     Names are reused across generations, so a record only counts when its foaling year
     matches the horse's; with no known foaling year there is no safe match. Seasons skip
-    the career row; wins are the horse's 1st-place starts, oldest first.
+    the career row; wins are the horse's 1st-place starts and starts every run, oldest first.
     """
     from crossr_core import sample_db
 
     born = foal_year or _pedigree_foal_year(name)
     if not born:
-        return [], []
+        return [], [], []
     pg = sample_db._pg()
     if pg:
-        rows, wins = _race_results_pg(pg, [name, *aliases], born)
+        rows, wins, starts = _race_results_pg(pg, [name, *aliases], born)
     else:
         horses, seasons = _race_index()
         matches = [m for m in horses.get(main.clean_horse_name(name or ""), []) if m[1] == born]
-        rows, wins = [], []
+        rows, wins, starts = [], [], []
         for row in seasons.get(matches[0][0], []) if matches else []:
             year = _intish(row.get("year"))
             if year and year >= born + 2:
                 rows.append(_season_row(year, born, row))
+        if matches:
+            horse_id = matches[0][0]
+            for r in sample_db.load_table("race_starts"):
+                if r.get("horse_id") == horse_id:
+                    starts.append(_start_row(
+                        r.get("race_date"), r.get("track"), r.get("country"), r.get("race_number"),
+                        r.get("race_name"), r.get("grade"), r.get("place"), r.get("chart_url"),
+                    ))
+            starts.sort(key=lambda r: (r["date"] or "", str(r["race_number"] or "")))
     rows.sort(key=lambda r: r["season"])
-    return rows, wins
+    return rows, wins, starts
 
 
 
@@ -428,7 +597,10 @@ def _title(text):
     """str.title() that keeps a possessive 's lower-case ("Banker's Gold", not "Banker'S")
     and two-letter state codes upper-case ("Farm, KY", not "Farm, Ky")."""
     out = re.sub(r"(?<=[A-Za-z])'S\b", "'s", str(text or "").title())
-    return re.sub(r"(,\s*)([A-Za-z]{2})$", lambda m: m.group(1) + m.group(2).upper(), out)
+    out = re.sub(r"(,\s*)([A-Za-z]{2})$", lambda m: m.group(1) + m.group(2).upper(), out)
+    # three-letter country codes too ("Arrow Stud, JPN", not "Jpn")
+    return re.sub(r"(,\s*)(JPN|IRE|GBR|ENG|FRA|GER|ITY|AUS|ARG|BRZ|CHI|URU|PER|KOR|UAE|SAF|USA|CAN)$",
+                  lambda m: m.group(1) + m.group(2).upper(), out, flags=re.I)
 
 _CLASS_ORDER = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "SW": 6}
 
@@ -436,7 +608,9 @@ _CLASS_ORDER = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "S
 def top_progeny_for_sire(sire_name, limit=None):
     """Every black-type winner by this sire, best class first, then earnings (no cap by default)."""
     payload = hypomating_engine.top_crosses_payload(main.PEDIGREE_DATABASE, sire_name, limit=None)
-    earn_lookup = _progeny_earnings_lookup()
+    names = [w["name"] for cross in payload.get("crosses", []) for w in cross.get("winners", [])]
+    names += [h_name for h_name, _, _ in _race_horse_progeny().get(main.clean_horse_name(sire_name), {}).values()]
+    earn_lookup = career_earnings(names, sire_name)
     rows = []
     for cross in payload.get("crosses", []):
         for w in cross.get("winners", []):
@@ -869,7 +1043,7 @@ def _standing_sons(sire_key, profiles):
         index = {}
         for name in profiles:
             clean = main.clean_horse_name(name)
-            sire = (parents.get(clean) or (None, None))[0]
+            sire = parents_for(parents.get(clean), _intish((profiles.get(name) or {}).get("Year Born")))[0]
             if sire and hypomating_engine.get_profile_meta(name, profiles)["is_active"]:
                 index.setdefault(main.clean_horse_name(sire), []).append(name)
         _SONS_INDEX = (id(profiles), len(profiles), index)
@@ -879,7 +1053,8 @@ def _standing_sons(sire_key, profiles):
 def _sire_of(name):
     sire, _ = parent_names(name)
     if not sire:
-        sire = (_parent_lookup().get(main.clean_horse_name(name or "")) or (None, None))[0]
+        year = re.search(r"\((\d{4})\)", name or "")
+        sire = parents_for(_parent_lookup().get(main.clean_horse_name(name or "")), year and year.group(1))[0]
     return sire
 
 
@@ -908,8 +1083,8 @@ def similar_cross_rows(
     class_rank = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "SW": 6}
     ref = resolve_pedigree_tree(name=reference_name, tree=reference_tree, sire=reference_sire, dam=reference_dam)
     has_ref = bool(ref and _horse_id(ref))
-    earn_lookup = _progeny_earnings_lookup()
     summaries = hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
+    earn_lookup = career_earnings(list(summaries), sire_name)
     sire_display = re.sub(r"\s*\(\d{4}\)", "", sire_name or "").strip()
     sire_key = main.clean_horse_name(sire_name)
 
@@ -1018,6 +1193,31 @@ def similar_cross_rows(
     return rows[:limit]
 
 
+_ACTIVE_STALLIONS = (None, [])
+
+
+def _active_stallions(profiles):
+    """[(name, clean name, profile meta)] for stallions standing now; rebuilt when the stud cards,
+    rankings or status corrections change (checking all 5,758 cards cost about 0.3 s a request)."""
+    global _ACTIVE_STALLIONS
+    from crossr_core import sample_db, stallion_status
+
+    key = (id(profiles), len(profiles), datetime.date.today(),
+           tuple(sample_db.table_version(t) for t in ("stud_fees", "stallion_rankings", stallion_status.TABLE)))
+    if _ACTIVE_STALLIONS[0] == key:
+        return _ACTIVE_STALLIONS[1]
+    out = []
+    for name in profiles.keys():
+        clean = main.clean_horse_name(name)
+        if not clean:
+            continue
+        meta = hypomating_engine.get_profile_meta(name, profiles)
+        if meta.get("is_active"):
+            out.append((name, clean, meta))
+    _ACTIVE_STALLIONS = (key, out)
+    return out
+
+
 def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, limit=25):
     """Active stallions from placeholderdatabase/stallion_stats.csv ranked by pedigree similarity.
 
@@ -1029,12 +1229,8 @@ def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, 
     if not reference_tree or not _horse_id(reference_tree):
         return []
     rows = []
-    for name in profiles.keys():
-        clean = main.clean_horse_name(name)
-        if not clean or clean in exclude:
-            continue
-        meta = hypomating_engine.get_profile_meta(name, profiles)
-        if not meta.get("is_active"):
+    for name, clean, meta in _active_stallions(profiles):
+        if clean in exclude:
             continue
         sim = pedigree_similarity(a_tree=reference_tree, b=name)
         percent = (sim or {}).get("percent")
@@ -1250,7 +1446,20 @@ def _is_catalog_placeholder(name):
     return False
 
 
+CATALOG_GENERATIONS = 5  # ancestor generations the catalog pedigree chart shows
+
+
 def catalog_pedigree(name=None, year=None, sire=None, dam=None, damsire=None):
+    """Subject tree (or the sire × dam fallback), with short branches filled from ancestors' own records."""
+    from crossr_core.pedigree_fill import fill_gaps
+
+    tree = _catalog_pedigree_raw(name=name, year=year, sire=sire, dam=dam, damsire=damsire)
+    if not isinstance(tree, dict):
+        return tree
+    return fill_gaps(tree, CATALOG_GENERATIONS, main.pedigree_tree, main.clean_horse_name)
+
+
+def _catalog_pedigree_raw(name=None, year=None, sire=None, dam=None, damsire=None):
     """Subject tree when the horse is on file, otherwise the sire × dam catalog fallback."""
     label = (name or "").strip()
     # Upcoming yearlings often use 2025-DAM or "Sire x Dam" labels — prefer catalog parents.
@@ -1377,6 +1586,68 @@ def sale_workspace(
         # Sales Physical panel is intentionally a blank placeholder.
         "physical": None,
     }
+
+
+_US_STATES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado",
+    "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+    "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana",
+    "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota",
+    "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York", "NC": "North Carolina",
+    "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania",
+    "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas",
+    "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming", "PR": "Puerto Rico",
+}
+_CANADA = {"CAN", "CANADA", "AB", "BC", "MB", "NB", "NL", "NS", "ON", "ONTARIO", "PE", "PQ", "QC", "SK"}
+_COUNTRIES = {
+    "GB": "Great Britain", "UK": "Great Britain", "ENGLAND": "Great Britain", "IRE": "Ireland", "IRELAND": "Ireland",
+    "FR": "France", "FRANCE": "France", "JPN": "Japan", "JAPAN": "Japan", "AUS": "Australia", "AUSTRALIA": "Australia",
+    "KOR": "Korea", "KOREA": "Korea", "ARG": "Argentina", "BRZ": "Brazil", "CHI": "Chile", "GER": "Germany",
+    "SAF": "South Africa", "NZ": "New Zealand", "UAE": "UAE",
+}
+_STATE_NAMES = {v.upper(): v for v in _US_STATES.values()}
+
+
+def farm_region(farm):
+    """Region a stallion stands in ("Kentucky", "Canada", "Great Britain"…) from a farm string like
+    "Taylor Made Stallions, KY". Blank when the farm gives no place."""
+    text = str(farm or "").replace("_", " ").strip()
+    if not text:
+        return ""
+    tail = (text.rsplit(",", 1)[-1] if "," in text else text).strip().strip(".").upper()
+    tail = re.sub(r"[()]", "", tail).strip()
+    if tail in _US_STATES:
+        return _US_STATES[tail]
+    if tail in _STATE_NAMES:
+        return _STATE_NAMES[tail]
+    if tail in _CANADA:
+        return "Canada"
+    if tail in _COUNTRIES:
+        return _COUNTRIES[tail]
+    for name in _STATE_NAMES:  # "Sequel New York"
+        if text.upper().endswith(" " + name):
+            return _STATE_NAMES[name]
+    return ""
+
+
+def list_regions(profiles=None):
+    """Regions with standing stallions, most stallions first."""
+    counts = {}
+    for row in build_stallion_roster(profiles):
+        region = farm_region(row.get("farm"))
+        if region:
+            counts[region] = counts.get(region, 0) + 1
+    return [{"region": r, "count": n} for r, n in sorted(counts.items(), key=lambda t: (-t[1], t[0]))]
+
+
+def profiles_in_region(profiles, region):
+    """Stallion profiles standing in `region` (all of them when region is blank)."""
+    want = str(region or "").strip().lower()
+    if not want:
+        return profiles
+    return {k: v for k, v in profiles.items() if farm_region(v.get("Farm")).lower() == want}
 
 
 def list_farms(profiles=None):
@@ -2399,7 +2670,7 @@ def get_horse_profile(search_name, profiles=None):
     # for horses Equibase hasn't been scraped for yet.
     year_in_name = re.search(r"\((\d{4})\)", f"{search_name} {horse_name}")
     birth_hint = (int(year_in_name.group(1)) if year_in_name else None) or _intish((data or {}).get("Year Born")) or None
-    race_rows, race_wins = race_results_for(clean_search, foal_year=birth_hint, aliases=(search_name, horse_name))
+    race_rows, race_wins, race_starts = race_results_for(clean_search, foal_year=birth_hint, aliases=(search_name, horse_name))
     for season in race_rows:
         for field in race_totals:
             race_totals[field] += season[field]
@@ -2545,6 +2816,7 @@ def get_horse_profile(search_name, profiles=None):
         "race_record": race_rows,
         "race_totals": race_totals,
         "race_wins": race_wins,
+        "race_starts": race_starts,
         "pedigree": tree,
         "inbreeding": inbreeding,
         "top_progeny": payload_top,

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiPost, horseHref } from "../../lib/api";
 import { horseCaps, matingCaps } from "../../lib/display";
-import { loadBarn } from "../../lib/barn";
+import { loadBarn, saveBarn, toggleStar } from "../../lib/barn";
 import { loadUser } from "../../lib/auth";
 import HypofoalDetail from "../../components/HypofoalDetail";
 
@@ -50,6 +50,11 @@ export default function BarnPage() {
     }
   }
 
+  const notes = { email: false, entries: true, results: true, ...(barn.notifications || {}) };
+  function setNote(key, value) {
+    saveBarn({ ...barn, notifications: { ...notes, [key]: value } });
+  }
+
   if (report || reportLoading || reportError) {
     return (
       <HypofoalDetail
@@ -76,11 +81,32 @@ export default function BarnPage() {
           </p>
         )}
       </div>
+      {user ? (
+        <div className="panel wide">
+          <h4>WEEKLY EMAIL REPORT</h4>
+          <p>
+            EVERY MONDAY: STARRED HORSES&apos; ENTRIES AND RESULTS, PLUS THE RUNNERS BY STARRED STALLIONS, OUT OF STARRED
+            MARES, AND OUT OF DAUGHTERS OF STARRED BROODMARE SIRES. SENT TO {user.email}; NO EMAIL IN A WEEK WITH NOTHING TO REPORT.
+          </p>
+          <label style={{ marginRight: 18 }}>
+            <input type="checkbox" checked={notes.email} onChange={(e) => setNote("email", e.target.checked)} /> SEND ME THE WEEKLY EMAIL
+          </label>
+          <label style={{ marginRight: 18 }}>
+            <input type="checkbox" checked={notes.entries} disabled={!notes.email} onChange={(e) => setNote("entries", e.target.checked)} /> ENTRIES
+          </label>
+          <label>
+            <input type="checkbox" checked={notes.results} disabled={!notes.email} onChange={(e) => setNote("results", e.target.checked)} /> RESULTS
+          </label>
+        </div>
+      ) : null}
       <div className="panel">
-        <h4>STARRED STALLIONS</h4>
+        <h4>STARRED HORSES</h4>
         {barn.starred.length ? barn.starred.map((n) => (
-          <div key={n} className="suggest-card"><Link href={horseHref(n)}>{horseCaps(n)}</Link></div>
-        )) : <p className="empty">Star stallions from the directory or a profile.</p>}
+          <div key={n} className="suggest-card">
+            <Link href={horseHref(n)}>{horseCaps(n)}</Link>
+            <button type="button" className="ghost" title="Unstar" onClick={() => toggleStar(n)}>★</button>
+          </div>
+        )) : <p className="empty">Star horses from the stallion directory or any horse profile.</p>}
       </div>
       <div className="panel">
         <h4>HYPOFOALS</h4>

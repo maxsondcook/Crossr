@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { apiGet, horseHref } from "../../../lib/api";
@@ -106,6 +106,64 @@ function withBroodmareSireList(meta, rows, countLabel) {
     },
     rows: { ...(meta.rows || {}), [id]: rows.map((r) => ({ ...r, earnings_num: r.earnings, count_num: r.count })) },
   };
+}
+
+/** Race name without its "(Gr. 3)" / "(G1)" suffix when the class tag already shows the grade. */
+function raceTitle(r) {
+  const name = String(r.race_name || "");
+  return raceGrade(r) ? name.replace(/\s*\((?:Gr\.?|Grade|G)\s*[1-3]\)\s*/i, " ").trim() : name;
+}
+
+/** Grade tag for any graded start (win or not): G1 / G2 / G3. */
+function raceGrade(r) {
+  if (r.class && /^G[1-3]$/.test(r.class)) return r.class;
+  const g = String(r.grade || "").match(/[1-3]/) || String(r.race_name || "").match(/\((?:Gr\.?|Grade|G)\s*([1-3])\)/i);
+  return g ? `G${g[1] || g[0]}` : null;
+}
+
+/** 2016-06-30 → 06-30-2016 (month-day-year). */
+function mdy(date) {
+  const m = String(date || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[2]}-${m[3]}-${m[1]}` : (date || "—");
+}
+
+function ordinal(place) {
+  const n = parseInt(place, 10);
+  if (!Number.isFinite(n)) return place || "—";
+  const tail = n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" })[n % 10] || "th";
+  return `${n}${tail}`;
+}
+
+/** Every start, oldest first (falls back to wins only when starts aren't available). */
+function RaceList({ starts, wins }) {
+  const all = (starts || []).length ? starts : (wins || []).map((w) => ({ ...w, place: "1" }));
+  if (!all.length) return null;
+  const winsOnly = !(starts || []).length;
+  return (
+    <div className="race-list">
+      <h5>{winsOnly ? `Wins · ${all.length}` : `Races · ${all.length}`}</h5>
+      <div className="history-wrap">
+        <table>
+          <thead>
+            <tr><th>Date</th><th>Track</th><th>Race</th><th>Finish</th></tr>
+          </thead>
+          <tbody>
+            {all.map((r, i) => (
+              <tr key={`${r.date}-${r.race_number || i}`} className={String(r.place) === "1" ? "race-win" : undefined}>
+                <td>{mdy(r.date)}</td>
+                <td>{r.track || "—"}</td>
+                <td>
+                  {r.chart_url ? <a href={r.chart_url} target="_blank" rel="noopener noreferrer">{raceTitle(r) || "Race"}</a> : (raceTitle(r) || "—")}
+                  {raceGrade(r) ? <span className="race-class"> {raceGrade(r)}</span> : null}
+                </td>
+                <td>{ordinal(r.place)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 const CAREER_VIEW = "__career";
@@ -533,9 +591,138 @@ const BMS_COLUMNS = [
   ["sw", "#SWs", "Ungraded / listed stakes winners"],
 ];
 
-function BmsCrossesTable({ rows }) {
+const SALE_TYPES = [["yearlings", "Yearlings"], ["weanlings", "Weanlings"], ["all", "All ages"]];
+
+/** Which broodmare-sire cross brings the most at auction, by sale type. */
+function CrossSalesTable({ name }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [type, setType] = useState("yearlings");
+  const [minSold, setMinSold] = useState(2);
+  const [openRow, setOpenRow] = useState(null);
+  const typeMatch = { yearlings: ["Yearling"], weanlings: ["Weanling"], all: null }[type];
+  useEffect(() => {
+    setData(null);
+    setError("");
+    apiGet(`/api/sales/sire/${encodeURIComponent(name)}/summary`).then(setData).catch((e) => setError(e.message));
+  }, [name]);
+  if (error) return <p className="error">{error}</p>;
+  if (!data) return <p className="catalog-empty">Loading sales…</p>;
+  if (!data.by_damsire) return <p className="catalog-empty">Sales by cross isn&apos;t available on this server yet.</p>;
+  const rows = data.by_damsire
+    .filter((r) => (r[type]?.sold || 0) >= minSold && r[type]?.average != null)
+    .sort((a, b) => b[type].average - a[type].average);
+  return (
+    <>
+      <h4>SALES BY CROSS · {rows.length}</h4>
+      <div className="cross-sales-tools">
+        <div className="view-toggle" style={{ display: "flex", gap: 6 }}>
+          {SALE_TYPES.map(([id, label]) => (
+            <button key={id} type="button" className={type === id ? "primary" : "ghost"} onClick={() => setType(id)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <label>
+          At least
+          <select value={minSold} onChange={(e) => setMinSold(Number(e.target.value))}>
+            {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} sold</option>)}
+          </select>
+        </label>
+      </div>
+      {rows.length ? (
+        <div className="history-wrap">
+          <table>
+            <thead>
+              <tr><th>Broodmare Sire</th><th>Average</th><th>Median</th><th>Top price</th><th>Sold</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const lots = (r.lots || [])
+                  .filter((l) => !typeMatch || typeMatch.includes(l.type))
+                  .sort((a, b) => (b.status === "sold") - (a.status === "sold") || (b.price || 0) - (a.price || 0));
+                const isOpen = openRow === r.broodmare_sire;
+                return (
+                  <Fragment key={r.broodmare_sire}>
+                    <tr
+                      className={lots.length ? "bms-row" : undefined}
+                      onClick={lots.length ? () => setOpenRow(isOpen ? null : r.broodmare_sire) : undefined}
+                      aria-expanded={lots.length ? isOpen : undefined}
+                    >
+                      <td>
+                        {lots.length ? <span className="bms-caret">{isOpen ? "▾" : "▸"}</span> : null}
+                        {r.broodmare_sire}
+                      </td>
+                      <td className="money">{money(r[type].average)}</td>
+                      <td className="money">{r[type].median != null ? money(r[type].median) : "—"}</td>
+                      <td className="money">{r[type].high != null ? money(r[type].high) : "—"}</td>
+                      <td>{r[type].sold} of {r[type].offered}</td>
+                    </tr>
+                    {isOpen ? (
+                      <tr className="bms-horses">
+                        <td colSpan={5}>
+                          {lots.map((l, i) => (
+                            <div key={`${l.sale}-${l.hip}-${i}`} className="bms-horse cross-lot">
+                              <span className="cross-lot-name">{l.name || "Unnamed"}</span>
+                              <span className="bms-horse-meta">
+                                {[l.type, l.sex, `${l.sale} ${l.year}`, l.hip ? `Hip ${l.hip}` : null].filter(Boolean).join(" · ")}
+                              </span>
+                              <span className={`cross-lot-price${l.status === "sold" ? "" : " unsold"}`}>
+                                {l.status === "sold" ? money(l.price) : l.status === "not sold" ? `RNA${l.price ? ` ${money(l.price)}` : ""}` : l.status}
+                              </span>
+                            </div>
+                          ))}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="catalog-empty">No crosses with {minSold}+ sold in this category.</p>
+      )}
+      <p className="sub" style={{ fontSize: 12, marginTop: 6 }}>
+        Sold lots only (RNAs and outs excluded), all years. Lower &quot;at least&quot; to include one-off sales.
+      </p>
+    </>
+  );
+}
+
+const CLASS_ORDER = ["MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW"];
+
+// "Tapit Gr/R", "Tapit (2001)" and "TAPIT" are the same broodmare sire.
+const COAT_SUFFIX = /\s+(?:gr\/?ro?|gr\/r|dk\s*b\/?br?|b\/?br|ch|blk|bl|br|b|gr|ro)\.?$/i;
+function bmsKey(name) {
+  return String(name || "").replace(/\s*\(\d{4}\)\s*$/, "").trim().replace(COAT_SUFFIX, "").trim().toUpperCase();
+}
+
+function BmsCrossesTable({ rows, progeny = [], hrefFor }) {
   // Hide columns that are zero for every broodmare sire of this stallion.
   const cols = BMS_COLUMNS.filter(([key]) => rows.some((r) => r[key] > 0));
+  const [open, setOpen] = useState(() => new Set());
+  // The horses behind each cross come from Top Progeny (same sire, matched on broodmare sire).
+  const byBms = useMemo(() => {
+    const map = new Map();
+    for (const p of progeny) {
+      const key = bmsKey(p.broodmare_sire);
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(p);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => (CLASS_ORDER.indexOf(a.class) + 99) % 99 - (CLASS_ORDER.indexOf(b.class) + 99) % 99
+        || (Number(b.earnings) || 0) - (Number(a.earnings) || 0));
+    }
+    return map;
+  }, [progeny]);
+  const toggle = (key) => setOpen((cur) => {
+    const next = new Set(cur);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
   return (
     <>
       <h4>BEST BROODMARE SIRE CROSSES · {rows.length}</h4>
@@ -548,12 +735,44 @@ function BmsCrossesTable({ rows }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.broodmare_sire}>
-                <td>{r.broodmare_sire}</td>
-                {cols.map(([key]) => <td key={key}>{r[key] || "—"}</td>)}
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const key = bmsKey(r.broodmare_sire);
+              const horses = byBms.get(key) || [];
+              const isOpen = open.has(key);
+              return (
+                <Fragment key={r.broodmare_sire}>
+                  <tr
+                    className={horses.length ? "bms-row" : undefined}
+                    onClick={horses.length ? () => toggle(key) : undefined}
+                    aria-expanded={horses.length ? isOpen : undefined}
+                  >
+                    <td>
+                      {horses.length ? <span className="bms-caret">{isOpen ? "▾" : "▸"}</span> : null}
+                      {r.broodmare_sire}
+                    </td>
+                    {cols.map(([col]) => <td key={col}>{r[col] || "—"}</td>)}
+                  </tr>
+                  {isOpen ? (
+                    <tr className="bms-horses">
+                      <td colSpan={cols.length + 1}>
+                        {horses.map((h) => (
+                          <div key={h.name} className="bms-horse">
+                            <Link href={hrefFor ? hrefFor(h.name) : `/horses/${encodeURIComponent(h.name)}`} onClick={(e) => e.stopPropagation()}>
+                              {h.name}
+                            </Link>
+                            <span className="bms-horse-meta">
+                              {h.class || ""}
+                              {h.dam ? ` · out of ${String(h.dam).toUpperCase()}` : ""}
+                              {h.earnings ? ` · ${money(h.earnings)}` : ""}
+                            </span>
+                          </div>
+                        ))}
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -625,6 +844,9 @@ function HorsePage() {
   const [showAllProgeny, setShowAllProgeny] = useState(false);
   const [breeding, setBreeding] = useState(null);
   const [progenyView, setProgenyView] = useState("top");
+  const layout = "tabs";
+  const [tab, setTab] = useState("general");
+  useEffect(() => { setTab("general"); }, [decoded]);
   const returnTarget = useMemo(() => resolveReturnTarget(searchParams), [searchParams]);
   const salesReturn = returnTarget.sales;
   const hrefFor = useMemo(
@@ -720,6 +942,9 @@ function HorsePage() {
 
   const s = data.stallion || {};
   const cls = data.classification || {};
+  // Pensioned / deceased from a recorded status change; stud cards themselves always say "active".
+  const offDuty = ["deceased", "pensioned"].includes(cls.stallion_status) ? cls.stallion_status : null;
+  const studStatus = offDuty || s.status;
   const isStallion = Boolean(data.stallion) || Boolean(cls.is_stallion);
   const isFemale = cls.profile_type === "racing_female" || cls.profile_type === "broodmare";
   const typeLabel = {
@@ -750,8 +975,22 @@ function HorsePage() {
     for (const row of (rankingMeta.rows || {})[id] || []) bookRank[id][row.year] = row.rank;
   }
 
+  const tabbed = layout === "tabs";
+  const TABS = [
+    ["general", "General Info", true],
+    ["pedigree", "Pedigree", true],
+    ["race", "Race Record", true],
+    ["studbook", "Stud Book", (data.stud_book || []).length > 0],
+    ["stats", "Statistics", Boolean(data.stallion && (RANK_LISTS.length || statSummaries.length))],
+    ["stallions", "Stallions", BREEDING_TYPES.has(cls.profile_type)],
+    ["sales", "Sales", isStallion],
+    ["progeny", "Progeny", isStallion],
+  ].filter(([, , has]) => has);
+  const activeTab = TABS.some(([id]) => id === tab) ? tab : "general";
+  const show = (id) => !tabbed || activeTab === id;
+
   return (
-    <div className="dash">
+    <div className={`dash${tabbed ? " dash-tabbed" : ""}`}>
       <div className="sales-return-bar dash-span">
         <button className="primary" type="button" onClick={goBack}>
           {backLabel}
@@ -766,18 +1005,46 @@ function HorsePage() {
           {isStarred(data.name) && tick >= 0 ? "★" : "☆"}
         </button>
       </div>
-      <div>
+      {tabbed ? (
+        <nav className="horse-tabs dash-span" aria-label="Horse sections">
+          {TABS.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`horse-tab${activeTab === id ? " active" : ""}`}
+              aria-current={activeTab === id ? "page" : undefined}
+              onClick={() => setTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      ) : null}
+      {show("pedigree") ? (
+      <div className="ped-col">
         <div className="panel">
           <h4>PEDIGREE</h4>
-          <PedigreeChart tree={data.pedigree} showSubject={false} hrefFor={hrefFor} />
+          <PedigreeChart
+            tree={data.pedigree}
+            showSubject={false}
+            hrefFor={hrefFor}
+            expandedExtra={(
+              <div className="panel family-panel">
+                <h4>FEMALE FAMILY</h4>
+                <FemaleFamily family={family} hrefFor={hrefFor} />
+              </div>
+            )}
+          />
         </div>
         <div className="panel family-panel" style={{ marginTop: 12 }}>
           <h4>FEMALE FAMILY</h4>
           <FemaleFamily family={family} hrefFor={hrefFor} />
         </div>
       </div>
+      ) : null}
 
       <div className="horse-panels">
+        {show("general") ? (
         <div className="panel">
           {data.stallion ? (
             <div className="hero">
@@ -785,12 +1052,12 @@ function HorsePage() {
               <h1>{data.name.toUpperCase()}</h1>
               <div className="sub">
                 Foaled: {s.year_foaled || data.year || "—"} · Entered Stud: {s.entered_stud || "—"}
-                {s.status && s.status !== "active" ? ` · ${s.status[0].toUpperCase()}${s.status.slice(1)}` : ""}
+                {studStatus && studStatus !== "active" ? ` · ${studStatus[0].toUpperCase()}${studStatus.slice(1)}` : ""}
               </div>
               <div className="kpi-row">
                 <div className="kpi">
                   <span>Stud Fee</span>
-                  <b>{s.stud_fee || "—"}</b>
+                  <b>{offDuty ? offDuty.toUpperCase() : s.stud_fee || "—"}</b>
                 </div>
                 {s.rank && String(s.rank).toUpperCase() !== "N/A" ? (
                   <div className="kpi">
@@ -814,7 +1081,7 @@ function HorsePage() {
           {s.career_highlight ? (
             <div className="notes" style={{ marginTop: 16 }}>{s.career_highlight}</div>
           ) : null}
-          {isStallion || isFemale ? (
+          {(isStallion && !offDuty) || isFemale ? (
             <div style={{ marginTop: 16, textAlign: "center" }}>
               <Link
                 className="primary"
@@ -825,9 +1092,11 @@ function HorsePage() {
             </div>
           ) : null}
         </div>
+        ) : null}
 
+        {show("race") ? (
         <div className="panel">
-          <h4>RACE RECORD & MAJOR WINS</h4>
+          <h4>RACE RECORD</h4>
           <table>
             <thead>
               <tr>
@@ -858,9 +1127,11 @@ function HorsePage() {
             </tbody>
           </table>
           {s.major_wins ? <div className="notes" style={{ marginTop: 12 }}>{s.major_wins}</div> : null}
+          <RaceList starts={data.race_starts} wins={data.race_wins} />
         </div>
+        ) : null}
 
-        {(data.stud_book || []).length ? (
+        {show("studbook") && (data.stud_book || []).length ? (
           <div className="panel panel-wide">
             <h4>STUD FEE & MARES BRED</h4>
           <div className="history-wrap">
@@ -894,7 +1165,7 @@ function HorsePage() {
           </div>
         ) : null}
 
-        {data.stallion && (RANK_LISTS.length || statSummaries.length) ? (
+        {show("stats") && data.stallion && (RANK_LISTS.length || statSummaries.length) ? (
           <div className="panel panel-wide">
             <StallionRankingsPanel
               rankingMeta={rankingMeta}
@@ -905,14 +1176,14 @@ function HorsePage() {
           </div>
         ) : null}
 
-        {BREEDING_TYPES.has(cls.profile_type) ? <BreedingPanel panel={breeding} hrefFor={hrefFor} /> : null}
+        {show("stallions") && BREEDING_TYPES.has(cls.profile_type) ? <BreedingPanel panel={breeding} hrefFor={hrefFor} /> : null}
 
-        {isStallion ? <StallionSalesPanel name={data.name} hrefFor={hrefFor} /> : null}
+        {show("sales") && isStallion ? <StallionSalesPanel name={data.name} hrefFor={hrefFor} /> : null}
 
-        {isStallion ? (
+        {show("progeny") && isStallion ? (
         <div className="panel">
-          {(data.bms_crosses || []).length ? (
-            <div className="view-toggle" style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          {isStallion ? (
+            <div className="view-toggle" style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
               <button
                 type="button"
                 className={progenyView === "top" ? "primary" : "ghost"}
@@ -927,10 +1198,19 @@ function HorsePage() {
               >
                 BEST BROODMARE SIRE CROSSES
               </button>
+              <button
+                type="button"
+                className={progenyView === "sales" ? "primary" : "ghost"}
+                onClick={() => setProgenyView("sales")}
+              >
+                SALES BY CROSS
+              </button>
             </div>
           ) : null}
-          {progenyView === "bms" && (data.bms_crosses || []).length ? (
-            <BmsCrossesTable rows={data.bms_crosses} />
+          {progenyView === "sales" ? (
+            <CrossSalesTable name={data.name} />
+          ) : progenyView === "bms" && (data.bms_crosses || []).length ? (
+            <BmsCrossesTable rows={data.bms_crosses} progeny={data.top_progeny || []} hrefFor={hrefFor} />
           ) : (
           <>
           <h4>TOP PROGENY{(data.top_progeny || []).length ? ` · ${data.top_progeny.length}` : ""}</h4>

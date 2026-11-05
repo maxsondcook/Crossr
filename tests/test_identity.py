@@ -132,6 +132,11 @@ def test_male_without_stud_evidence_is_not_a_stallion():
     ({"Stud Fee Currency": "JPY", "Farm": "Shizunai Stallion Station"}, False),
     ({"Stud Fee Currency": "", "Farm": "Hill 'n' Dale Farms, Kentucky"}, True),
     ({"Stud Fee Currency": "", "Farm": "Banstead Manor Stud"}, False),
+    # dollar-converted fee but a Japanese farm (American Pharoah, California Chrome)
+    ({"Stud Fee Currency": "USD", "Farm": "Shizunai Stallion Station, JPN"}, False),
+    ({"Stud Fee Currency": "USD", "Farm": "Arrow Stud, Japan"}, False),
+    ({"Stud Fee Currency": "USD", "Farm": "Ocala Stud, FL"}, True),
+    ({"Stud Fee Currency": "USD", "Farm": "Lane's End, Versailles, KY"}, True),
 ])
 def test_stands_in_north_america(card, expected):
     assert identity.stands_in_north_america(card) is expected

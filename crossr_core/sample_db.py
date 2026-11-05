@@ -665,8 +665,6 @@ def _stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
         display = (row.get("Stallion") or "").strip()
         # The rankings record the stallion's own foaling year; race_horses may only
         # know a younger namesake (e.g. Englishman 2002 vs Englishman 2023).
-        from crossr_core.identity import card_foal_year
-
         year_born = card_foal_year(display, first_season) or _foal_year_for_stud(foal_years.get(key, []), first_season)
         profiles[display] = {
             "Farm": row.get("Farm") or "",
@@ -677,6 +675,7 @@ def _stallion_roster_from_fees(year: int | None = None) -> dict[str, dict]:
             "Stud Fee Display": format_fee(row.get("Stud Fee")) or "",
             "Stud Fee Currency": currency or "",
             "Status": "active",
+            "Notes": row.get("Notes") or "",
             "Surface": "",
             "Height": "N/A",
             "Conformation & Physical Profile": "",

@@ -679,7 +679,11 @@ def get_profile_meta(name, all_profiles):
     # Suggestions only use stallions standing in North America for now (user's call).
     from crossr_core.identity import stands_in_north_america
 
-    is_active = (len(profile) > 0) and not is_pensioned and is_standing and stands_in_north_america(profile)
+    from crossr_core import stallion_status
+
+    is_dead_or_retired = stallion_status.off_duty(name, profile.get("Year Born"))
+    is_active = (len(profile) > 0) and not is_pensioned and not is_dead_or_retired and is_standing \
+        and stands_in_north_america(profile)
 
     return {"rank": rank_val, "fee_str": fee_str, "fee_num": fee_num, "has_progeny": has_progeny, "is_active": is_active}
 
@@ -917,12 +921,27 @@ def suggest_matings(pedigree_db, all_profiles, mare_name, surface_pref="neither"
         if has_lineage_options(cand["name"], all_profiles, budget_filter=budget):
             lineage_groups.append({"anchor": cand["name"], "variant": False})
             seen.add(key)
-    for unfil_name in unfiltered_structural_hits:
+    # Cross hits left out of the suggestions. Standing sires that are only over the
+    # fee cap (e.g. Into Mischief at a $100k max) come first, best-ranked first,
+    # so their in-budget sons/relatives are easy to find.
+    def _hit_order(name):
+        meta = get_profile_meta(name, all_profiles)
+        over = bool(meta["is_active"] and budget is not None and meta["fee_num"] > budget)
+        rank = int(meta["rank"]) if str(meta["rank"]).isdigit() else 10 ** 6
+        return (0 if over else 1, rank, name), over, meta
+    ordered_hits = sorted((_hit_order(n) + (n,) for n in unfiltered_structural_hits), key=lambda t: t[0])
+    for _, over, meta, unfil_name in ordered_hits:
         key = main.clean_horse_name(unfil_name)
         if key in seen:
             continue
         if has_lineage_options(unfil_name, all_profiles, budget_filter=budget):
-            lineage_groups.append({"anchor": unfil_name, "variant": True})
+            lineage_groups.append({
+                "anchor": unfil_name,
+                "variant": True,
+                "over_budget": over,
+                "stud_fee": meta["fee_str"] if over else None,
+                "rank": meta["rank"] if over else None,
+            })
             seen.add(key)
 
     return {
