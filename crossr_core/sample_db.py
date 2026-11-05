@@ -396,6 +396,12 @@ def stud_fee_history() -> dict[str, dict[int, int]]:
     global _FEE_HISTORY
     from crossr_core.fees import parse_fee, usd_estimate
 
+    # Check the cache before load_table. Catalog pages call this once per lot, and
+    # load_table copies the whole stud-fee list on every call (about a second for
+    # a 3,400-hip catalog).
+    version = table_version("stud_fees")
+    if _FEE_HISTORY is not None and _FEE_HISTORY[0] == version:
+        return _FEE_HISTORY[1]
     rows = load_table("stud_fees")
     version = _MTIME.get("stud_fees")
     if _FEE_HISTORY is not None and _FEE_HISTORY[0] == version:
@@ -426,13 +432,15 @@ _BREEDING_INDEX: tuple[object, dict[str, list[dict]]] | None = None
 
 def breeding_for_stallion(stallion: str, year: int | None = None) -> list[dict]:
     global _BREEDING_INDEX
-    rows_all = load_table("breeding_seasons")
-    version = _MTIME.get("breeding_seasons")
+    version = table_version("breeding_seasons")
     if _BREEDING_INDEX is None or _BREEDING_INDEX[0] != version:
-        index: dict[str, list[dict]] = {}
-        for row in rows_all:
-            index.setdefault(name_key(row.get("stallion") or ""), []).append(row)
-        _BREEDING_INDEX = (version, index)
+        rows_all = load_table("breeding_seasons")
+        version = _MTIME.get("breeding_seasons")
+        if _BREEDING_INDEX is None or _BREEDING_INDEX[0] != version:
+            index: dict[str, list[dict]] = {}
+            for row in rows_all:
+                index.setdefault(name_key(row.get("stallion") or ""), []).append(row)
+            _BREEDING_INDEX = (version, index)
     rows = []
     for row in _BREEDING_INDEX[1].get(name_key(stallion), []):
         if year is not None and str(row.get("breeding_year")) != str(year):

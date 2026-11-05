@@ -972,6 +972,118 @@ def pedigree_similarity(
     return result
 
 
+def _prepare(tree):
+    """Ancestor slots and parent ids for one tree, so later comparisons skip the walk."""
+    if not tree or not _horse_id(tree):
+        return None
+    cache = {}
+    sire, dam = _parents_of(tree, cache)
+    sire_sire, sire_dam = _parents_of(sire, cache) if sire else (None, None)
+    dam_sire, dam_dam = _parents_of(dam, cache) if dam else (None, None)
+    return {
+        "id": _horse_id(tree),
+        "slots": _ancestor_slots(tree, cache),
+        "sire_id": _horse_id(sire),
+        "dam_id": _horse_id(dam),
+        "sire_sire_id": _horse_id(sire_sire),
+        "sire_dam_id": _horse_id(sire_dam),
+        "dam_sire_id": _horse_id(dam_sire),
+        "dam_dam_id": _horse_id(dam_dam),
+    }
+
+
+_PREP_CACHE = {}
+_PREP_DB = None
+
+
+def _prepare_named(name):
+    """Prepared pedigree for a named horse. Reused across hips and reports."""
+    global _PREP_DB
+    if not name:
+        return None
+    db_id = id(main.PEDIGREE_DATABASE)
+    if _PREP_DB != db_id:
+        _PREP_CACHE.clear()
+        _PREP_DB = db_id
+    if name in _PREP_CACHE:
+        return _PREP_CACHE[name]
+    tree = resolve_pedigree_tree(name=name)
+    prep = _prepare(tree) if tree else None
+    if len(_PREP_CACHE) > 20000:
+        _PREP_CACHE.clear()
+    _PREP_CACHE[name] = prep
+    return prep
+
+
+def _ids_match_pair(sire_a, dam_a, sire_b, dam_b):
+    return bool(
+        sire_a and _slot_ids_match(sire_a, sire_b) and dam_a and _slot_ids_match(dam_a, dam_b)
+    )
+
+
+def _similarity_prepared(prep_a, prep_b, b_name=None):
+    """Same percent and label as pedigree_similarity, from two prepared trees."""
+    if not prep_a or not prep_b or not prep_a.get("id") or not prep_b.get("id"):
+        return None
+    slots_a, slots_b = prep_a["slots"], prep_b["slots"]
+    both = [path for path in slots_a if path in slots_b]
+    if not both:
+        percent = 0
+    else:
+        matches = sum(1 for path in both if _slot_ids_match(slots_a[path], slots_b[path]))
+        percent = int(round(min(100.0, 100.0 * matches / len(both))))
+    same_sire = bool(prep_a["sire_id"] and _slot_ids_match(prep_a["sire_id"], prep_b["sire_id"]))
+    same_dam = bool(prep_a["dam_id"] and _slot_ids_match(prep_a["dam_id"], prep_b["dam_id"]))
+    sire_bros = _ids_match_pair(
+        prep_a["sire_sire_id"], prep_a["sire_dam_id"], prep_b["sire_sire_id"], prep_b["sire_dam_id"]
+    )
+    dam_sis = _ids_match_pair(
+        prep_a["dam_sire_id"], prep_a["dam_dam_id"], prep_b["dam_sire_id"], prep_b["dam_dam_id"]
+    )
+    three_quarter = (same_sire and dam_sis) or (same_dam and sire_bros)
+    label = None
+    if _slot_ids_match(prep_a["id"], prep_b["id"]):
+        percent = 100
+        label = "Same horse"
+    elif same_sire and same_dam:
+        percent = max(percent, 100)
+        label = "Full siblings"
+    elif three_quarter:
+        percent = max(percent, 75)
+        label = "3/4 siblings"
+    elif same_dam:
+        percent = max(percent, 50)
+        label = "Same dam"
+    elif same_sire:
+        percent = max(percent, 50)
+        label = "Same sire"
+    return {"percent": percent, "label": label, "b": b_name}
+
+
+_DAM_WINNERS = None
+
+
+def _winners_by_dam():
+    """Cleaned dam name -> stakes winners out of that mare. One pass, then each hip is a lookup."""
+    global _DAM_WINNERS
+    summaries = hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
+    parents = hypomating_engine.winner_parents(main.PEDIGREE_DATABASE, summaries)
+    version = (id(summaries), id(parents))
+    if _DAM_WINNERS is not None and _DAM_WINNERS[0] == version:
+        return _DAM_WINNERS[1]
+    index = {}
+    for h_name, h in summaries.items():
+        clean_h = main.clean_horse_name(h_name)
+        if not clean_h or clean_h not in parents:
+            continue
+        sire, dam, damsire = parents[clean_h]
+        dam_key = main.clean_horse_name(dam)
+        if dam_key:
+            index.setdefault(dam_key, []).append((h_name, h, sire, dam, damsire))
+    _DAM_WINNERS = (version, index)
+    return index
+
+
 def _same_dam_stakes_rows(dam_name, reference_tree=None, exclude_names=None):
     """Stakes winners out of the same dam (any sire) — e.g. Tiztastic for a Keesha yearling."""
     dam_key = main.clean_horse_name(dam_name or "")
@@ -979,17 +1091,13 @@ def _same_dam_stakes_rows(dam_name, reference_tree=None, exclude_names=None):
         return []
     exclude = {main.clean_horse_name(n) for n in (exclude_names or set()) if n}
     try:
-        summaries = hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
+        grouped = _winners_by_dam()
     except Exception:
         return []
     rows = []
-    parents = hypomating_engine.winner_parents(main.PEDIGREE_DATABASE, summaries)
-    for h_name, h in summaries.items():
+    for h_name, h, sire, dam, damsire in grouped.get(dam_key, ()):
         clean_h = main.clean_horse_name(h_name)
-        if not clean_h or clean_h in exclude or clean_h not in parents:
-            continue
-        sire, dam, damsire = parents[clean_h]
-        if main.clean_horse_name(dam) != dam_key:
+        if not clean_h or clean_h in exclude:
             continue
         sim = pedigree_similarity(a_tree=reference_tree, b=h_name) if reference_tree else None
         rows.append({
@@ -1084,7 +1192,6 @@ def similar_cross_rows(
     ref = resolve_pedigree_tree(name=reference_name, tree=reference_tree, sire=reference_sire, dam=reference_dam)
     has_ref = bool(ref and _horse_id(ref))
     summaries = hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
-    earn_lookup = career_earnings(list(summaries), sire_name)
     sire_display = re.sub(r"\s*\(\d{4}\)", "", sire_name or "").strip()
     sire_key = main.clean_horse_name(sire_name)
 
@@ -1097,6 +1204,32 @@ def similar_cross_rows(
     damsire_display = _title(re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip())
 
     rows, seen = [], {main.clean_horse_name(reference_name or "")} - {""}
+    # Earnings only for horses this report might list. Passing every stakes winner
+    # (the old call) was about 0.4 s after the table was already in memory.
+    index = _cross_index() if damsire_key else {}
+    wanted = []
+    if damsire_key and sire_key:
+        for h_name, _, _ in index.get((sire_key, damsire_key), {}).values():
+            wanted.append(h_name)
+        grandsire_name = _sire_of(sire_name)
+        grandsire_key_pre = main.clean_horse_name(grandsire_name or "")
+        if grandsire_key_pre:
+            for h_name, _, _ in index.get((grandsire_key_pre, damsire_key), {}).values():
+                wanted.append(h_name)
+            book_pre = profiles if profiles is not None else main.load_master_profiles()
+            for son in _standing_sons(grandsire_key_pre, book_pre):
+                son_key = main.clean_horse_name(son)
+                if son_key != sire_key:
+                    for h_name, _, _ in index.get((son_key, damsire_key), {}).values():
+                        wanted.append(h_name)
+    if include_same_dam and reference_dam:
+        for row in _same_dam_stakes_rows(reference_dam, exclude_names=seen):
+            wanted.append(row.get("name"))
+    for cross in hypomating_engine.top_crosses_payload(main.PEDIGREE_DATABASE, sire_name, limit=None).get("crosses") or []:
+        for winner in cross.get("winners") or []:
+            wanted.append(winner.get("name"))
+    earn_lookup = career_earnings(wanted, sire_name)
+    ref_prep = _prepare(ref) if has_ref else None
 
     def add(h_name, dam, row_damsire, relation, tier, source="sire_cross"):
         # source: sire_cross (same sire; feeds Auction History), sire_line, same_dam.
@@ -1105,7 +1238,11 @@ def similar_cross_rows(
         if not key or key in seen or not h.get("status"):
             return
         seen.add(key)
-        sim = pedigree_similarity(a_tree=ref, b=h_name) if has_ref else None
+        if ref_prep:
+            other = _prepare_named(h_name)
+            sim = _similarity_prepared(ref_prep, other, b_name=h_name) if other else None
+        else:
+            sim = None
         earnings = earn_lookup.get(key) or 0
         rows.append({
             "name": h_name,
@@ -1119,8 +1256,6 @@ def similar_cross_rows(
             "earnings": earnings or None,
             "_tier": tier,
         })
-
-    index = _cross_index() if damsire_key else {}
 
     def cross_tier(stallion_key, relation, tier, source="sire_cross"):
         winners = index.get((stallion_key, damsire_key), {})
@@ -1158,7 +1293,7 @@ def similar_cross_rows(
             })
 
     if include_same_dam and reference_dam:
-        for row in _same_dam_stakes_rows(reference_dam, reference_tree=ref, exclude_names=seen):
+        for row in _same_dam_stakes_rows(reference_dam, exclude_names=seen):
             add(row["name"], row.get("dam"), row.get("broodmare_sire"), "Same dam", 1, source="same_dam")
 
     if damsire_key and sire_key:
@@ -1194,6 +1329,7 @@ def similar_cross_rows(
 
 
 _ACTIVE_STALLIONS = (None, [])
+_ACTIVE_PREP = (None, [])
 
 
 def _active_stallions(profiles):
@@ -1218,6 +1354,25 @@ def _active_stallions(profiles):
     return out
 
 
+def _prepared_active(profiles):
+    """Active stallions with their ancestor slots already walked.
+
+    Comparing a foal to every standing stallion used to walk both pedigrees
+    each time (about 0.7 s on a hypomating report).
+    """
+    global _ACTIVE_PREP
+    key = (id(profiles), len(profiles), id(main.PEDIGREE_DATABASE))
+    if _ACTIVE_PREP[0] == key:
+        return _ACTIVE_PREP[1]
+    rows = []
+    for name, clean, meta in _active_stallions(profiles):
+        prep = _prepare_named(name)
+        if prep:
+            rows.append((name, clean, meta, prep))
+    _ACTIVE_PREP = (key, rows)
+    return rows
+
+
 def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, limit=25):
     """Active stallions from placeholderdatabase/stallion_stats.csv ranked by pedigree similarity.
 
@@ -1226,13 +1381,14 @@ def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, 
     """
     profiles = profiles if profiles is not None else main.load_master_profiles()
     exclude = {main.clean_horse_name(n) for n in (exclude_names or set()) if n}
-    if not reference_tree or not _horse_id(reference_tree):
+    ref_prep = _prepare(reference_tree)
+    if not ref_prep:
         return []
     rows = []
-    for name, clean, meta in _active_stallions(profiles):
+    for name, clean, meta, prep in _prepared_active(profiles):
         if clean in exclude:
             continue
-        sim = pedigree_similarity(a_tree=reference_tree, b=name)
+        sim = _similarity_prepared(ref_prep, prep, b_name=name)
         percent = (sim or {}).get("percent")
         if percent is None:
             continue
@@ -2355,27 +2511,41 @@ def stallion_ranking_history(stallion_name, entered_stud=None):
     return {"lists": lists, "rows": rows, "columns": columns}
 
 
-def _broodmare_ranking_rows(stallion_name):
-    """Year/rank/earnings/runners from data/stallion_rankings.csv (Broodmare list)."""
-    key = main.clean_horse_name(stallion_name)
-    by_year = {}
+_BMS_BY_NAME = None
+
+
+def _broodmare_index():
+    """Cleaned stallion name -> broodmare-sire rows, newest year first. Built once."""
+    global _BMS_BY_NAME
     from crossr_core import sample_db
+
+    version = sample_db.table_version("stallion_rankings")
+    if _BMS_BY_NAME is not None and _BMS_BY_NAME[0] == version:
+        return _BMS_BY_NAME[1]
+    by_name = {}
     for row in sample_db.load_table("stallion_rankings"):
         if (row.get("list") or "").strip() != "Broodmare":
             continue
-        if main.clean_horse_name(row.get("stallion") or "") != key:
-            continue
+        key = main.clean_horse_name(row.get("stallion") or "")
         year = _intish(row.get("year"))
-        if not year:
+        if not key or not year:
             continue
-        by_year[year] = {
+        by_name.setdefault(key, {})[year] = {
             "year": year,
             "rank": _intish(row.get("rank")),
             "earnings": _intish(row.get("year_earnings") or row.get("chief_earner_earnings")),
             "count": _intish(row.get("runners") or row.get("dams")),
             "count_label": "Runners" if row.get("runners") else "Dams",
         }
-    return [by_year[y] for y in sorted(by_year, reverse=True)]
+    index = {key: [years[y] for y in sorted(years, reverse=True)] for key, years in by_name.items()}
+    _BMS_BY_NAME = (version, index)
+    return index
+
+
+def _broodmare_ranking_rows(stallion_name):
+    """Year/rank/earnings/runners from data/stallion_rankings.csv (Broodmare list)."""
+    key = main.clean_horse_name(stallion_name)
+    return list(_broodmare_index().get(key, ()))
 
 
 def broodmare_sire_history(stallion_name):
@@ -2587,9 +2757,39 @@ def female_family(pedigree_data, subject_name=""):
     return dams
 
 
+_PROFILE_CACHE = {}
+
+
+def _profile_stamp(profiles):
+    from crossr_core import sample_db
+
+    tables = (
+        "race_horses", "race_seasons", "race_starts", "stallion_rankings",
+        "stud_fees", "breeding_seasons", "graded_stakes",
+    )
+    return (
+        id(profiles),
+        id(main.PEDIGREE_DATABASE),
+        len(main.PEDIGREE_DATABASE),
+        tuple(sample_db.table_version(name) for name in tables),
+    )
+
+
+def _remember_profile(key, result):
+    if len(_PROFILE_CACHE) > 500:
+        _PROFILE_CACHE.clear()
+    _PROFILE_CACHE[key] = result
+    return result
+
+
 def get_horse_profile(search_name, profiles=None):
     profiles = profiles if profiles is not None else main.load_master_profiles()
     clean_search = main.clean_horse_name(search_name)
+    # Keep the year in the key: "Stage Magic (2007)" and "Stage Magic (2015)" are
+    # different horses, and clean_horse_name strips the year.
+    profile_key = (str(search_name or "").strip().upper(), _profile_stamp(profiles))
+    if profile_key in _PROFILE_CACHE:
+        return _PROFILE_CACHE[profile_key]
     data = None
     matched_key = None
     for key in profiles.keys():
@@ -2600,13 +2800,13 @@ def get_horse_profile(search_name, profiles=None):
 
     hit = main.lookup_pedigree(search_name)
     if hit["ambiguous"]:
-        return {
+        return _remember_profile(profile_key, {
             "ambiguous": True,
             "key": hit["clean_name"],
             "name": hit["clean_name"],
             "years": hit["years"],
             "display": hit["clean_name"],
-        }
+        })
     pedigree_data = hit["tree"]
 
     # Never attach a stud card by name alone: check it is the same horse
@@ -2632,13 +2832,13 @@ def get_horse_profile(search_name, profiles=None):
             elif facts.get("year"):
                 # Two different horses share the name (a 2003 racehorse and the
                 # stallion foaled 2013 with no pedigree on file): ask which one.
-                return {
+                return _remember_profile(profile_key, {
                     "ambiguous": True,
                     "key": clean_search,
                     "name": clean_search,
                     "years": sorted({str(facts["year"]), str(card_year)}),
                     "display": clean_search,
-                }
+                })
         if not ok:
             data = None
             matched_key = None
@@ -2663,7 +2863,7 @@ def get_horse_profile(search_name, profiles=None):
             has_valid_pedigree = True
 
     if not data and not has_valid_pedigree:
-        return None
+        return _remember_profile(profile_key, None)
 
     race_totals = {"starts": 0, "firsts": 0, "seconds": 0, "thirds": 0, "earnings": 0}
     # Race results from race_seasons win; the stud card's "Race Record" only fills in
@@ -2832,4 +3032,4 @@ def get_horse_profile(search_name, profiles=None):
     }
     if stallion:
         stallion["status"] = classification.get("stallion_status") or stallion.get("status")
-    return result
+    return _remember_profile(profile_key, result)

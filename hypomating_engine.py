@@ -1005,42 +1005,72 @@ def build_hypo_report(pedigree_db, all_profiles, sire_name, dam_name, persist=Fa
     }
 
 
-def top_crosses_payload(pedigree_db, stallion_name, limit=20):
-    clean_target = main.clean_horse_name(stallion_name)
+_CROSSES_BY_SIRE = None
+_STATUS_WEIGHTS = {"MG1W": 500, "G1W": 400, "MGSW": 300, "G2W": 250, "G3W": 200, "MSW": 150, "SW": 100}
+_TIER_ORDER = ["MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW"]
+
+
+def _crosses_by_sire(pedigree_db=None):
+    """Cleaned sire name -> ranked broodmare-sire crosses. Built once per stakes table.
+
+    Scanning every stakes winner on each hip and profile was about 0.1 s, and
+    those screens do it more than once.
+    """
+    global _CROSSES_BY_SIRE
+    if pedigree_db is None:
+        pedigree_db = main.PEDIGREE_DATABASE
     horse_summaries = build_horse_summaries(load_stakes_data())
     parents = winner_parents(pedigree_db, horse_summaries)
-    crosses = {}
-    status_weights = {"MG1W": 500, "G1W": 400, "MGSW": 300, "G2W": 250, "G3W": 200, "MSW": 150, "SW": 100}
-    tier_order = ["MG1W", "G1W", "MGSW", "G2W", "G3W", "MSW", "SW"]
+    version = (id(horse_summaries), id(parents))
+    if _CROSSES_BY_SIRE is not None and _CROSSES_BY_SIRE[0] == version:
+        return _CROSSES_BY_SIRE[1]
+    by_sire = {}
     for h_name, h in horse_summaries.items():
         clean_h = main.clean_horse_name(h_name)
         if clean_h not in parents:
             continue
         h_sire, dam_name, h_damsire = parents[clean_h]
-        if main.clean_horse_name(h_sire) != clean_target:
-            continue
-        if not h_damsire:
+        sire_key = main.clean_horse_name(h_sire)
+        if not sire_key or not h_damsire:
             continue
         clean_ds = re.sub(r"\s*\(\d{4}\)", "", h_damsire).strip().title()
-        if clean_ds not in crosses:
-            crosses[clean_ds] = {"score": 0, "winners": []}
-        crosses[clean_ds]["score"] += status_weights.get(h["status"], 100)
-        crosses[clean_ds]["winners"].append({
+        crosses = by_sire.setdefault(sire_key, {})
+        bucket = crosses.get(clean_ds)
+        if bucket is None:
+            bucket = {"score": 0, "winners": []}
+            crosses[clean_ds] = bucket
+        bucket["score"] += _STATUS_WEIGHTS.get(h["status"], 100)
+        bucket["winners"].append({
             "name": h_name,
             "status": h["status"],
             "dam": re.sub(r"\s*\(\d{4}\)", "", dam_name).strip(),
         })
-    ranked = []
-    for ds_name, data in sorted(crosses.items(), key=lambda x: -x[1]["score"]):
-        lookup_key = main.clean_horse_name(ds_name)
-        bms = BROODMARE_DATABASE.get(lookup_key) or {}
-        ranked.append({
-            "broodmare_sire": ds_name,
-            "rank": bms.get("Rank"),
-            "score": data["score"],
-            "winners": sorted(data["winners"], key=lambda w: tier_order.index(w["status"]) if w["status"] in tier_order else 99),
-        })
-    return {"stallion": stallion_name, "crosses": ranked[:limit] if limit else ranked}
+    index = {}
+    for sire_key, crosses in by_sire.items():
+        ranked = []
+        for ds_name, data in sorted(crosses.items(), key=lambda x: -x[1]["score"]):
+            lookup_key = main.clean_horse_name(ds_name)
+            bms = BROODMARE_DATABASE.get(lookup_key) or {}
+            ranked.append({
+                "broodmare_sire": ds_name,
+                "rank": bms.get("Rank"),
+                "score": data["score"],
+                "winners": sorted(
+                    data["winners"],
+                    key=lambda w: _TIER_ORDER.index(w["status"]) if w["status"] in _TIER_ORDER else 99,
+                ),
+            })
+        index[sire_key] = ranked
+    _CROSSES_BY_SIRE = (version, index)
+    return index
+
+
+def top_crosses_payload(pedigree_db, stallion_name, limit=20):
+    clean_target = main.clean_horse_name(stallion_name)
+    ranked = _crosses_by_sire(pedigree_db).get(clean_target, [])
+    # A slice so callers can walk the list without rewriting the cached one.
+    # limit 0 keeps the old "no cap" behaviour (a missing cap is falsy).
+    return {"stallion": stallion_name, "crosses": ranked[:limit] if limit else list(ranked)}
 
 
 def broodmare_context(pedigree_db, mare_name):

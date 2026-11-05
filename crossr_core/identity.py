@@ -144,13 +144,31 @@ def stands_in_north_america(card: dict | None) -> bool:
 # Facts about one horse
 # ---------------------------------------------------------------------------
 
+_RACE_ROWS = None
+
+
+def _race_row_index():
+    """upper(name_key) -> [(sex, foal_year, sire)]. One pass over race_horses.
+
+    The profile used to query ``upper(name_key) = ...`` with no index (about
+    80 ms, a scan of every fetched horse) on each open.
+    """
+    global _RACE_ROWS
+    version = sample_db.table_version("race_horses")
+    if _RACE_ROWS is not None and _RACE_ROWS[0] == version:
+        return _RACE_ROWS[1]
+    index = {}
+    for row in sample_db.load_table("race_horses"):
+        key = (row.get("name_key") or "").strip().upper()
+        if not key:
+            continue
+        index.setdefault(key, []).append((row.get("sex") or "", row.get("foal_year") or "", row.get("sire") or ""))
+    _RACE_ROWS = (version, index)
+    return index
+
+
 def _race_horse_rows(name: str) -> list[tuple]:
-    pg = sample_db._pg()
-    with pg.connect() as conn:
-        return conn.execute(
-            "SELECT sex, foal_year, sire FROM race_horses WHERE upper(name_key) = %s",
-            (sample_db.name_key(name),),
-        ).fetchall()
+    return list(_race_row_index().get(sample_db.name_key(name), ()))
 
 
 def horse_facts(name: str, tree: dict | None = None, year: int | None = None) -> dict:

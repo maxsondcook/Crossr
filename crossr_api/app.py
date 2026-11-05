@@ -1,5 +1,6 @@
 """Crossr FastAPI — JSON only. Never serves sales_data/ or stakes CSVs."""
 import datetime
+import json
 import os
 import threading
 import time
@@ -19,6 +20,7 @@ import main
 from crossr_core import timing
 import hypomating_engine
 from crossr_core import horses as horse_svc
+from crossr_core import sample_db
 from crossr_core import sales as sales_svc
 from crossr_core import upcoming as upcoming_svc
 from crossr_core import auth as auth_svc
@@ -147,6 +149,8 @@ def _warm_stallion_ancestors():
 
 def _warm_caches():
     steps = (
+        # Before the other warmups: a profile's race record was three sequential scans.
+        lambda: __import__("crossr_core.railway_db", fromlist=["x"]).ensure_race_lookup_indexes(),
         lambda: hypomating_engine.winner_parents(
             main.PEDIGREE_DATABASE, hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
         ),
@@ -167,13 +171,136 @@ def _warm_caches():
         horse_svc._parent_lookup,
         horse_svc._race_horse_progeny,
         lambda: horse_svc._active_stallions(profiles()),
-        lambda: [upcoming_svc._base_lots(c["id"]) for c in upcoming_svc.list_catalogs() or []],
+        lambda: [upcoming_svc.base_lots(c["id"]) for c in upcoming_svc.list_catalogs() or []],
+        lambda: horse_svc._winners_by_dam(),
+        lambda: hypomating_engine._crosses_by_sire(),
+        lambda: horse_svc._prepared_active(profiles()),
+        lambda: __import__("crossr_core.identity", fromlist=["x"])._race_row_index(),
+        lambda: __import__("crossr_core.stallion_rankings_rich", fromlist=["x"])._ranking_index(),
+        lambda: horse_svc._broodmare_index(),
+        _warm_catalog_prices,
     )
     for step in steps:
         try:
             step()
         except Exception:
             pass
+    _precompute_missing_hips()
+
+
+_PRICED_LOTS = {}
+
+
+def _cached_priced_lots(lots, book, *, catalog_title, sale_year, cache_key):
+    """Lot list with sire height and filter price, reused until the catalog or fees change.
+
+    Building this for Keeneland November was about 1.2 s, almost all of it copying
+    the stud-fee table once per hip. The fee lookup is fixed; this keeps the
+    remaining per-lot work off the request.
+    """
+    from crossr_core import sample_db
+
+    try:
+        sample_db.stud_fee_history()
+    except Exception:
+        pass
+    key = (cache_key, id(book), sample_db._MTIME.get("stud_fees"))
+    hit = _PRICED_LOTS.get(key)
+    if hit is None:
+        priced = [dict(lot) for lot in lots]
+        _attach_heights(priced, horse_svc.profile_lookup(book))
+        _attach_filter_prices(
+            priced, book, catalog_title=catalog_title or "", sale_year=sale_year
+        )
+        if len(_PRICED_LOTS) > 16:
+            _PRICED_LOTS.clear()
+        _PRICED_LOTS[key] = priced
+        hit = priced
+    return hit
+
+
+def _warm_catalog_prices():
+    book = profiles()
+    for row in upcoming_svc.list_catalogs() or []:
+        if row.get("source") != "upcoming":
+            continue
+        base = upcoming_svc.base_lots(row["id"])
+        if not base:
+            continue
+        _cached_priced_lots(
+            base, book,
+            catalog_title=row["id"],
+            sale_year=_sale_year_from(catalog_title=row["id"]),
+            cache_key=("upcoming", row["id"], id(base)),
+        )
+
+
+def _precompute_missing_hips():
+    """Store upcoming hip pages that are missing or stale.
+
+    The nightly launchd job (com.crossr.pipeline.precompute) does the same work
+    on Maxson's Mac and is often not loaded. Doing it here, after the caches
+    are warm, means the first open of a hip is a read. One worker only
+    (advisory lock). Skipped under pytest so the test suite does not spend
+    minutes writing hip pages.
+    """
+    import sys
+
+    if "pytest" in sys.modules or os.environ.get("CROSSR_PRECOMPUTE", "1") == "0":
+        return
+    from crossr_core import hip_cache, railway_db
+
+    try:
+        with railway_db.connect() as conn:
+            locked = conn.execute("SELECT pg_try_advisory_lock(812345003)").fetchone()[0]
+            if not locked:
+                return
+            conn.commit()
+            try:
+                book = profiles()
+                rows = upcoming_svc.list_catalogs() or []
+                upcoming_only = [row for row in rows if row.get("source") == "upcoming"]
+                for row in upcoming_only or rows:
+                    catalog_id = row["id"]
+                    lots = upcoming_svc.base_lots(catalog_id) or []
+                    hips = [lot["hip"] for lot in lots if lot.get("hip")]
+                    if not hips:
+                        continue
+                    current = hip_cache.inputs_fingerprint()
+                    todo = hip_cache.stale_hips(catalog_id, hips, current)
+                    if not todo:
+                        print(f"hip precompute {catalog_id}: up to date", flush=True)
+                        continue
+                    print(f"hip precompute {catalog_id}: {len(todo)} of {len(hips)}", flush=True)
+
+                    last_ping = time.monotonic()
+
+                    def progress(done, total, secs, catalog_id=catalog_id):
+                        nonlocal last_ping
+                        # The lock connection sits idle while hips are built on other
+                        # connections. A ping keeps that session, and the lock, alive.
+                        now = time.monotonic()
+                        if now - last_ping > 15:
+                            try:
+                                conn.execute("SELECT 1")
+                                conn.commit()
+                            except Exception:
+                                pass
+                            last_ping = now
+                        if done == total or done % 200 == 0:
+                            print(f"hip precompute {catalog_id}: {done}/{total} in {secs:.0f}s", flush=True)
+
+                    hip_cache.build(
+                        catalog_id, lots,
+                        lambda cid, lot: build_upcoming_lot_payload(cid, lot, book),
+                        hips=todo,
+                        batch=20,
+                        progress=progress,
+                    )
+            finally:
+                conn.execute("SELECT pg_advisory_unlock(812345003)")
+    except Exception:
+        pass
 
 
 def profiles():
@@ -523,6 +650,19 @@ def _split_hips(raw):
     return [part.strip() for part in str(raw).split(",") if part.strip()]
 
 
+def _json(payload):
+    """Skip FastAPI's jsonable_encoder.
+
+    A 3,406-hip catalog is about 2.7 MB. Walking every value before encoding
+    was about 0.1 s on top of the query, which is most of a warm catalog
+    response once the prices are cached.
+    """
+    return Response(
+        content=json.dumps(payload, separators=(",", ":"), default=str),
+        media_type="application/json",
+    )
+
+
 def _attach_heights(lots, lookup):
     for lot in lots:
         lot["height"] = horse_svc.sire_height(lot.get("sire"), lookup)
@@ -565,6 +705,9 @@ def _attach_filter_prices(lots, book, catalog_title="", sale_year=None):
     modal = proj_svc.annotate_lot_kinds(
         lots, sale_year=year, catalog_title=catalog_title or ""
     )
+    # Keeneland November is 3,406 hips and about 450 sires. The band depends on
+    # the sire and the yearling/weanling kind, so each pair is priced once.
+    bands = {}
     for lot in lots:
         sale = lot.get("price_num") or 0
         try:
@@ -575,18 +718,24 @@ def _attach_filter_prices(lots, book, catalog_title="", sale_year=None):
             lot["filter_price"] = sale
             lot["filter_price_source"] = "sale_price"
             continue
-        profile = lookup.get(main.clean_horse_name(lot.get("sire") or ""))
+        sire = lot.get("sire") or ""
         lot_year = year or _sale_year_from(lot, catalog_title=catalog_title)
-        band = proj_svc.expected_market_mid_for_filter(
-            lot.get("sire") or "",
-            sold_as=lot.get("sold_as") or lot.get("sold_as_kind") or "",
-            catalog_title=catalog_title or lot.get("catalog_title") or "",
-            sex=lot.get("sex_letter") or lot.get("sex") or "",
-            sire_profile=profile,
-            sale_year=lot_year,
-            birth_year=lot.get("birth_year") or lot.get("birth_date"),
-            catalog_default_kind=modal,
-        )
+        kind = lot.get("sold_as_kind") or "Yearling"
+        band_key = (sample_db.name_key(sire), kind, lot_year)
+        band = bands.get(band_key)
+        if band is None:
+            profile = lookup.get(main.clean_horse_name(sire))
+            band = proj_svc.expected_market_mid_for_filter(
+                sire,
+                sold_as=lot.get("sold_as") or kind,
+                catalog_title=catalog_title or lot.get("catalog_title") or "",
+                sex=lot.get("sex_letter") or lot.get("sex") or "",
+                sire_profile=profile,
+                sale_year=lot_year,
+                birth_year=lot.get("birth_year") or lot.get("birth_date"),
+                catalog_default_kind=modal,
+            )
+            bands[band_key] = band
         mid = band.get("mid")
         low, high = band.get("low"), band.get("high")
         if mid:
@@ -661,17 +810,18 @@ def sales_catalog_nav(catalog_id: int):
     if not payload:
         raise HTTPException(status_code=404, detail="Catalog not found")
     book = profiles()
-    lookup = horse_svc.profile_lookup(book)
-    _attach_heights(payload["lots"], lookup)
     catalog = payload.get("catalog") or {}
     title = catalog.get("title") or payload.get("title") or ""
-    _attach_filter_prices(
+    priced = _cached_priced_lots(
         payload["lots"],
         book,
         catalog_title=title,
         sale_year=_sale_year_from(catalog=catalog, catalog_title=title),
+        cache_key=("past", catalog_id, sample_db.table_version("sales_lots")),
     )
-    return payload
+    # Copy so a later edit of the response cannot change the cached lots.
+    payload["lots"] = [dict(lot) for lot in priced]
+    return _json(payload)
 
 
 @app.get("/api/sales/lots/{lot_id}")
@@ -708,18 +858,18 @@ def sales_upcoming_lots(
     exclude_hips: Optional[str] = None,
     only_hips: Optional[str] = None,
 ):
-    lots = upcoming_svc.list_lots(catalog_id)
-    if lots is None:
+    base = upcoming_svc.base_lots(catalog_id)
+    if base is None:
         raise HTTPException(status_code=404, detail="Catalog not found")
     book = profiles()
-    lookup = horse_svc.profile_lookup(book)
-    _attach_heights(lots, lookup)
-    _attach_filter_prices(
-        lots,
+    priced = _cached_priced_lots(
+        base,
         book,
         catalog_title=catalog_id,
         sale_year=_sale_year_from(catalog_title=catalog_id),
+        cache_key=("upcoming", catalog_id, id(base)),
     )
+    lots = upcoming_svc.with_marks(catalog_id, priced)
     filtered = upcoming_svc.filter_lots(
         lots,
         sex=sex,
@@ -730,7 +880,7 @@ def sales_upcoming_lots(
         exclude_hips=_split_hips(exclude_hips),
         only_hips=_split_hips(only_hips),
     )
-    return {"lots": filtered, "total": len(filtered)}
+    return _json({"lots": filtered, "total": len(filtered)})
 
 
 @app.get("/api/sales/upcoming/{catalog_id}/lots/{hip}")
