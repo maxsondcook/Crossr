@@ -13,7 +13,9 @@ Each batch (about BATCH_MINUTES):
      a full tree, so every hip by them has its sire side.
   4. damsire-dams: dams whose sale lots have no broodmare sire, one search
      each (see damsire_dams); the push fills those lots.
-  5. pedigrees-sales: the sire and dam of every sale lot, to a full 5-gen
+  5. races-sales: race records of horses sold since 2015, newest sale first
+     (see sales_races).
+  6. pedigrees-sales: the sire and dam of every sale lot, to a full 5-gen
      tree (see sales_parents).
 Everything is read from and written to the local stage (state/stage.sqlite);
 the daily ``push`` job sends race records and pedigrees to Postgres.
@@ -36,7 +38,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from crossr_pipeline import damsire_dams, notify, sales_parents, stage, state
+from crossr_pipeline import damsire_dams, notify, sales_parents, sales_races, stage, state
 
 REPO = Path(__file__).resolve().parents[1]
 LOG_DIR = REPO / "logs" / "pipeline"
@@ -478,6 +480,87 @@ def run_damsire_dams(eb, page, pg, local, delay: float, limit: int | None, deadl
 
 
 # ---------------------------------------------------------------------------
+# races-sales
+# ---------------------------------------------------------------------------
+
+def sale_horses(pg, local) -> list[dict]:
+    """sales_races.load_items, re-read only when sales_lots changes."""
+    from crossr_core import pg_push as push
+
+    version = push.table_versions(pg, ("sales_lots",)).get("sales_lots", "")
+    return stage.cached(local, "sale_horses", version, lambda: sales_races.load_items(pg))
+
+
+def process_sale_horse(eb, page, local, item: dict, delay: float) -> tuple[str, str]:
+    rows = [r for r in stage.find_horses(local, item["name_key"], item["name_key"], item["foal_year"])
+            if r.get("foal_year") == item["foal_year"]]
+    row = rows[0] if rows else None
+    if row is None:
+        key = item["name_key"]
+        if stage.key_taken(local, key):
+            key = f"{key} ({item['foal_year']})"
+        if stage.key_taken(local, key):
+            return "error", f"key {key} taken by another horse"
+        stage.insert_batch_horse(local, {"pedigree_key": key, "name_key": item["name_key"],
+                                         "foal_year": item["foal_year"], "display_name": item["name"],
+                                         "sire": item["sire"], "dam": item["dam"], "sex": "",
+                                         "queue_batch": sales_races.QUEUE_BATCH})
+        row = next((r for r in stage.find_horses(local, key, item["name_key"], item["foal_year"])
+                    if r["pedigree_key"] == key), None)
+        if row is None:
+            return "error", "insert failed"
+    if row["status"] in sales_races.DONE:
+        return row["status"], f"race_horses {row['id']}"
+    horse = dict(row)
+    horse["sire"] = horse.get("sire") or item["sire"]
+    horse["dam"] = horse.get("dam") or item["dam"]
+    return eb.fetch_horse(page, local, horse, delay), f"race_horses {row['id']}"
+
+
+def run_sales_races(eb, page, pg, local, delay: float, limit: int | None, deadline: float, hook=None) -> int:
+    """Look up sold horses until done or out of time. Returns items left."""
+    states = stage.queue_states(local, sales_races.JOB)
+    known = {(r["name_key"], r["foal_year"]) for r in local.execute(
+        "SELECT name_key, foal_year FROM race_horses WHERE status IN ('ok', 'not_found', 'ambiguous', "
+        "'year_mismatch', 'merged') AND COALESCE(foal_year, '') <> ''")}
+    todo = sales_races.build_queue(sale_horses(pg, local), states, known, limit)
+    if not todo:
+        return 0
+    run = state.Run(pg, sales_races.JOB)
+    print(f"{sales_races.JOB}: {len(todo)} to do", flush=True)
+    run.heartbeat("running")
+    errors_in_a_row = done = 0
+    try:
+        for index, item in enumerate(todo, start=1):
+            if time.monotonic() >= deadline:
+                break
+            print(f"[sold {index}/{len(todo)}] {item['name']} ({item['foal_year']}) sold {item['latest']}", flush=True)
+            try:
+                result, detail = _with_block_retry(
+                    eb, page, run, {"display_name": item["name"], "pedigree_key": item["name_key"]},
+                    lambda: process_sale_horse(eb, page, local, item, delay))
+                errors_in_a_row = 0 if result != "error" else errors_in_a_row + 1
+            except Exception as exc:
+                result, detail = "error", f"{exc.__class__.__name__}: {exc}"
+                errors_in_a_row += 1
+            stage.mark_item(local, sales_races.JOB, item["key"], result, detail)
+            done = index
+            run.bump(result)
+            if errors_in_a_row >= MAX_ERRORS_IN_A_ROW:
+                raise RuntimeError(f"{errors_in_a_row} errors in a row; stopping (Chrome closed?)")
+            if index % HEARTBEAT_EVERY == 0:
+                run.heartbeat("running")
+            if hook is not None:
+                hook()
+    except BaseException as exc:
+        run.finish("failed" if isinstance(exc, RuntimeError) else "partial", f"stopped: {exc}")
+        raise
+    left = len(todo) - done
+    run.finish("ok" if not left else "partial", f"{done} of {len(todo)} sold horses")
+    return left
+
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -533,6 +616,9 @@ def scrape(delay: float = 3.0, limit: int | None = None, refresh_cap: int | None
                         more = more or (left > 0 and not (dams_only and limit))
                     if dams_only:
                         return EXIT_MORE if more else 0
+                    if not refresh_only and time.monotonic() < deadline:
+                        left = run_sales_races(eb, page, pg, local, delay, None, deadline, hook)
+                        more = more or left > 0
                     if not refresh_only and time.monotonic() < deadline:
                         left = run_pedigrees(eb, page, pg, local, book, delay, limit, deadline, role, hook)
                         more = more or (left > 0 and not limit)

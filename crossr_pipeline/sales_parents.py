@@ -1,7 +1,7 @@
 """Queue: the sire and dam of every lot in sales_lots, missing a full 5-gen tree.
 
-Order: sires first, then dams, each by their most recent sale (newest first),
-then by how many lots they have. Sale lots carry a parent's name but not its
+Order: sires first, then dams, each by how many of their lots sold since 2010
+(the most lots unlocked first), then by their most recent sale. Sale lots carry a parent's name but not its
 foal year, so each item carries what narrows an Equibase search instead:
 
 * dams: the lot's damsire is the dam's sire (most common non-blank value
@@ -51,6 +51,7 @@ def load_parents(conn) -> list[dict]:
     sires = conn.execute(
         """
         SELECT sire_key, MAX(sire) AS name, MAX(catalog_year) AS latest, COUNT(*) AS lots,
+               COUNT(*) FILTER (WHERE catalog_year >= '2010') AS recent,
                MIN(NULLIF(birth_year, '')) AS first_foal, MAX(NULLIF(birth_year, '')) AS last_foal
         FROM sales_lots WHERE COALESCE(sire_key, '') <> ''
         GROUP BY sire_key
@@ -71,6 +72,7 @@ def load_parents(conn) -> list[dict]:
     dams = conn.execute(
         """
         SELECT dam_key, MAX(dam) AS name, MAX(catalog_year) AS latest, COUNT(*) AS lots,
+               COUNT(*) FILTER (WHERE catalog_year >= '2010') AS recent,
                MIN(NULLIF(birth_year, '')) AS first_foal, MAX(NULLIF(birth_year, '')) AS last_foal
         FROM sales_lots WHERE COALESCE(dam_key, '') <> ''
         GROUP BY dam_key
@@ -80,7 +82,8 @@ def load_parents(conn) -> list[dict]:
         counts = damsires.get(row["dam_key"])
         items.append(_item("dam", row, counts.most_common(1)[0][0] if counts else ""))
 
-    items.sort(key=lambda it: (it["role"] != "sire", -(it["latest"] or 0), -it["lots"], it["name_key"]))
+    # Most lots unlocked first (sale years the models train on), then newest sale.
+    items.sort(key=lambda it: (it["role"] != "sire", -it["recent"], -(it["latest"] or 0), -it["lots"], it["name_key"]))
     return items
 
 
@@ -119,6 +122,7 @@ def _item(role: str, row: dict, sire: str) -> dict:
         "key": item_key(role, name_key, sire_key),
         "latest": _int(row["latest"]),
         "lots": int(row["lots"] or 0),
+        "recent": int(row.get("recent") or 0),
         "yob_range": yob_window(role, _int(row["first_foal"]), _int(row["last_foal"])),
     }
 

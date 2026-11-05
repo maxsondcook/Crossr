@@ -9,7 +9,9 @@ horse.
 | --- | --- | --- |
 | `pedigrees-sales` | Sire and dam of every lot in `sales_lots`, filled to a full 5-generation tree from Equibase. Every horse opened on the way is stored as a race record too. | in hourly 45-minute `scrape` batches; pushed daily |
 | `damsire-dams` | Dams whose sale lots still have no broodmare sire (`state/shared/missing-damsire-dams.csv`, most lots since 2010 first): one Equibase search each, then the push fills those lots (see below). | inside the `scrape` batches, after catalogs and the refresh, before `pedigrees-sales`; filled at the daily push |
-| `races-refresh` | Re-opens each ok horse with a start in the last 60 days, so new starts and earnings land in `race_seasons` / `race_starts`. | weekly, inside the `scrape` batches |
+| `pedigrees-stallions` | This year's stallions (`breeding_seasons`) without a full tree, most mares bred first. | inside the `scrape` batches, after the refresh |
+| `races-sales` | Race records of horses sold since 2015 (named lots, foaled 3+ years ago), newest sale first. | inside the `scrape` batches, after `damsire-dams`; pushed daily |
+| `races-refresh` | Re-opens each ok horse active this year (a start since Jan 1, or an entry in `race_entries`), so new starts and earnings land in `race_seasons` / `race_starts`. | weekly, inside the `scrape` batches |
 | upcoming catalogs | Hips of a newly published catalog, ahead of everything else. | inside the `scrape` batches; pushed every 30 min |
 | `push` | Sends staged race records, pedigrees and queue states to Postgres in one transaction. | daily at 03:00 |
 | `sales-import` | Loads new or changed `sales_data/*.csv` into `sales_lots`, replacing only that file's rows. | daily at 07:00 |
@@ -65,7 +67,7 @@ on the next pass.
   (DevTools URL blocking, and ad hosts never resolve), so requests do not pass
   through Python, and Chrome runs without its GPU process. While a block page
   is up, pictures load again, so the check can be done.
-- About 3 s plus jitter between page loads.
+- About 2 s plus jitter between page loads (on trial from 2026-11-05; it was 3 s; `--delay` sets it).
 - **Queue order:** sires first, then dams, each by their most recent sale
   (newest first), then by number of lots. Parents already complete in
   `pedigrees` are skipped.
