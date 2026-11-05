@@ -279,6 +279,35 @@ def schema_sql() -> str:
     return "\n\n".join(parts) + "\n"
 
 
+def ensure_race_lookup_indexes() -> None:
+    """Indexes for one horse's race record.
+
+    A profile looked the horse up with ``name_key = ...`` and then its seasons
+    and starts with ``horse_id = ...``. Those columns were not indexed, so each
+    open scanned race_horses (about 326k rows), race_seasons and race_starts.
+    This does not run from the health check: building the starts index takes
+    long enough to fail a deploy if startup waits on it.
+    """
+    ensure_schema()
+    wanted = {
+        "idx_race_horses_name_year":
+            "CREATE INDEX IF NOT EXISTS idx_race_horses_name_year ON race_horses (name_key, foal_year)",
+        "idx_race_seasons_horse":
+            "CREATE INDEX IF NOT EXISTS idx_race_seasons_horse ON race_seasons (horse_id)",
+        "idx_race_starts_horse":
+            "CREATE INDEX IF NOT EXISTS idx_race_starts_horse ON race_starts (horse_id)",
+    }
+    with connect() as conn:
+        existing = {
+            name for (name,) in conn.execute(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
+            )
+        }
+        missing = [sql for name, sql in wanted.items() if name not in existing]
+        for sql in missing:
+            conn.execute(sql)
+
+
 def ensure_schema() -> None:
     global _schema_ready
     if _schema_ready:

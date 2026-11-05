@@ -1,5 +1,6 @@
 """Crossr FastAPI — JSON only. Never serves sales_data/ or stakes CSVs."""
 import datetime
+import json
 import os
 import threading
 import time
@@ -148,6 +149,8 @@ def _warm_stallion_ancestors():
 
 def _warm_caches():
     steps = (
+        # Before the other warmups: a profile's race record was three sequential scans.
+        lambda: __import__("crossr_core.railway_db", fromlist=["x"]).ensure_race_lookup_indexes(),
         lambda: hypomating_engine.winner_parents(
             main.PEDIGREE_DATABASE, hypomating_engine.build_horse_summaries(hypomating_engine.load_stakes_data())
         ),
@@ -647,6 +650,19 @@ def _split_hips(raw):
     return [part.strip() for part in str(raw).split(",") if part.strip()]
 
 
+def _json(payload):
+    """Skip FastAPI's jsonable_encoder.
+
+    A 3,406-hip catalog is about 2.7 MB. Walking every value before encoding
+    was about 0.1 s on top of the query, which is most of a warm catalog
+    response once the prices are cached.
+    """
+    return Response(
+        content=json.dumps(payload, separators=(",", ":"), default=str),
+        media_type="application/json",
+    )
+
+
 def _attach_heights(lots, lookup):
     for lot in lots:
         lot["height"] = horse_svc.sire_height(lot.get("sire"), lookup)
@@ -689,6 +705,9 @@ def _attach_filter_prices(lots, book, catalog_title="", sale_year=None):
     modal = proj_svc.annotate_lot_kinds(
         lots, sale_year=year, catalog_title=catalog_title or ""
     )
+    # Keeneland November is 3,406 hips and about 450 sires. The band depends on
+    # the sire and the yearling/weanling kind, so each pair is priced once.
+    bands = {}
     for lot in lots:
         sale = lot.get("price_num") or 0
         try:
@@ -699,18 +718,24 @@ def _attach_filter_prices(lots, book, catalog_title="", sale_year=None):
             lot["filter_price"] = sale
             lot["filter_price_source"] = "sale_price"
             continue
-        profile = lookup.get(main.clean_horse_name(lot.get("sire") or ""))
+        sire = lot.get("sire") or ""
         lot_year = year or _sale_year_from(lot, catalog_title=catalog_title)
-        band = proj_svc.expected_market_mid_for_filter(
-            lot.get("sire") or "",
-            sold_as=lot.get("sold_as") or lot.get("sold_as_kind") or "",
-            catalog_title=catalog_title or lot.get("catalog_title") or "",
-            sex=lot.get("sex_letter") or lot.get("sex") or "",
-            sire_profile=profile,
-            sale_year=lot_year,
-            birth_year=lot.get("birth_year") or lot.get("birth_date"),
-            catalog_default_kind=modal,
-        )
+        kind = lot.get("sold_as_kind") or "Yearling"
+        band_key = (sample_db.name_key(sire), kind, lot_year)
+        band = bands.get(band_key)
+        if band is None:
+            profile = lookup.get(main.clean_horse_name(sire))
+            band = proj_svc.expected_market_mid_for_filter(
+                sire,
+                sold_as=lot.get("sold_as") or kind,
+                catalog_title=catalog_title or lot.get("catalog_title") or "",
+                sex=lot.get("sex_letter") or lot.get("sex") or "",
+                sire_profile=profile,
+                sale_year=lot_year,
+                birth_year=lot.get("birth_year") or lot.get("birth_date"),
+                catalog_default_kind=modal,
+            )
+            bands[band_key] = band
         mid = band.get("mid")
         low, high = band.get("low"), band.get("high")
         if mid:
@@ -796,7 +821,7 @@ def sales_catalog_nav(catalog_id: int):
     )
     # Copy so a later edit of the response cannot change the cached lots.
     payload["lots"] = [dict(lot) for lot in priced]
-    return payload
+    return _json(payload)
 
 
 @app.get("/api/sales/lots/{lot_id}")
@@ -855,7 +880,7 @@ def sales_upcoming_lots(
         exclude_hips=_split_hips(exclude_hips),
         only_hips=_split_hips(only_hips),
     )
-    return {"lots": filtered, "total": len(filtered)}
+    return _json({"lots": filtered, "total": len(filtered)})
 
 
 @app.get("/api/sales/upcoming/{catalog_id}/lots/{hip}")

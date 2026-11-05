@@ -258,6 +258,46 @@ def test_connection_pool_reuses_and_resets(monkeypatch):
     assert len(made) == 2
 
 
+def test_catalog_prices_each_sire_and_kind_once(monkeypatch):
+    from crossr_core import projections
+
+    calls = {"n": 0}
+
+    def band(*args, **kwargs):
+        calls["n"] += 1
+        return {"low": 1000, "high": 3000, "mid": 2000, "sire": kwargs.get("sold_as")}
+
+    monkeypatch.setattr(projections, "expected_market_mid_for_filter", band)
+    lots = [
+        {"sire": "Into Mischief", "price_num": 0, "sold_as": "Weanling", "sold_as_kind": "Weanling",
+         "sex": "C", "birth_year": 2026, "sale_year": 2026},
+        {"sire": "Into Mischief", "price_num": 0, "sold_as": "Weanling", "sold_as_kind": "Weanling",
+         "sex": "F", "birth_year": 2026, "sale_year": 2026},
+        {"sire": "Into Mischief", "price_num": 0, "sold_as": "Broodmare", "sold_as_kind": None,
+         "sex": "M", "birth_year": 2018, "sale_year": 2026},
+        {"sire": "Curlin", "price_num": 500000, "sold_as": "Weanling", "sold_as_kind": "Weanling",
+         "sex": "C", "birth_year": 2026, "sale_year": 2026},
+    ]
+    api._attach_filter_prices(
+        lots, {}, catalog_title="Keeneland November Breeding Stock Sale (2026)", sale_year=2026
+    )
+    # Two weanlings share a band. The broodmare is a different kind. The sold lot is not priced.
+    assert calls["n"] == 2
+    assert lots[0]["filter_price"] == lots[1]["filter_price"] == 2000
+    assert lots[2]["filter_price"] == 2000
+    assert lots[3]["filter_price"] == 500000
+    assert lots[3]["filter_price_source"] == "sale_price"
+
+
+def test_catalog_json_does_not_walk_every_value():
+    import json
+
+    res = api._json({"lots": [{"hip": "0001", "filter_price": 2.5}], "total": 1})
+    assert res.media_type == "application/json"
+    body = json.loads(res.body)
+    assert body["total"] == 1 and body["lots"][0]["hip"] == "0001"
+
+
 def test_precompute_does_not_run_during_tests(monkeypatch):
     import crossr_api.app as api
 
