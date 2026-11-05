@@ -473,12 +473,45 @@ ORDER BY race_date, race_number
 
 
 _GRADE_IN_NAME = re.compile(r"\s*\((?:gr\.?|grade|g)\s*([123]|i{1,3})\)", re.I)
+_TRAILING_GRADE = re.compile(r"\s+(?:gr\.?|grade|g)\s*([123]|i{1,3})\s*$", re.I)
+_JUNK_LABEL = re.compile(r"^(?:#?\s*)?(?:n/?a|undefined|nan|null|none)$", re.I)
+
+
+def _graded_token(grade) -> str | None:
+    """'3', 'G3' → 'G3'. Anything else (including 'Stakes') is not a grade tag."""
+    text = str(grade or "").strip().upper()
+    if text in {"1", "2", "3"}:
+        return "G" + text
+    if text in {"G1", "G2", "G3"}:
+        return text
+    return None
 
 
 def _race_label(race_name, grade):
-    """Race name without its "(Gr. 3)" when the grade is shown as its own tag ("Iroquois Stakes" + G3)."""
+    """Race name without a second copy of the grade tag.
+
+    'Iroquois Stakes (Gr. 3) G3' shown beside class G3 is one grade, twice.
+    The parenthetical and a trailing 'G3' / 'Gr. 3' come off when that tag
+    is shown on its own. A name that is the only place the grade appears is
+    left as written.
+    """
     name = str(race_name or "").strip()
-    return _GRADE_IN_NAME.sub("", name).strip() if grade and _GRADE_IN_NAME.search(name) else name
+    if not grade:
+        return name
+    name = _GRADE_IN_NAME.sub("", name).strip()
+    if _graded_token(grade):
+        name = _TRAILING_GRADE.sub("", name).strip()
+    return name
+
+
+def _shown(value):
+    """Drop placeholder labels. A missing height is not the height 'N/A'."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or _JUNK_LABEL.match(text):
+        return None
+    return text if isinstance(value, str) else value
 
 
 def _start_row(race_date, track, country, race_number, race_name, grade, place, chart_url):
@@ -507,7 +540,7 @@ def _season_row(year, born, row):
         "thirds": _intish(row.get("thirds")),
         "earnings": earnings,
         "earnings_display": f"${earnings:,}" if earnings else "$0",
-        "accomplishments": "n/a",
+        "accomplishments": None,
     }
 
 
@@ -2587,6 +2620,16 @@ def female_family(pedigree_data, subject_name=""):
     return dams
 
 
+def _directory_listing(clean_name, profiles):
+    """The roster row for this name, or None. A directory stallion with no
+    pedigree still has a page; a name that is not listed does not."""
+    roster = build_stallion_roster(profiles)
+    for row in roster or []:
+        if row.get("key") == clean_name or main.clean_horse_name(row.get("name") or "") == clean_name:
+            return row
+    return None
+
+
 def get_horse_profile(search_name, profiles=None):
     profiles = profiles if profiles is not None else main.load_master_profiles()
     clean_search = main.clean_horse_name(search_name)
@@ -2663,7 +2706,12 @@ def get_horse_profile(search_name, profiles=None):
             has_valid_pedigree = True
 
     if not data and not has_valid_pedigree:
-        return None
+        # In the directory with no stud card and no pedigree (Run Tiger Run):
+        # a blank page, not a 404, and not some other horse's record.
+        listed = _directory_listing(clean_search, profiles)
+        if not listed:
+            return None
+        horse_name = listed.get("name") or horse_name
 
     race_totals = {"starts": 0, "firsts": 0, "seconds": 0, "thirds": 0, "earnings": 0}
     # Race results from race_seasons win; the stud card's "Race Record" only fills in
@@ -2720,7 +2768,7 @@ def get_horse_profile(search_name, profiles=None):
                     "thirds": thirds,
                     "earnings": earn_num,
                     "earnings_display": f"${earn_num:,}" if earn_num else "$0",
-                    "accomplishments": stats.get("Major Accomplishments", "n/a"),
+                    "accomplishments": _shown(stats.get("Major Accomplishments")),
                 })
 
     if data:
@@ -2747,10 +2795,10 @@ def get_horse_profile(search_name, profiles=None):
             "stud_fee_num": raw_fee if isinstance(raw_fee, int) else 0,
             "surface": data.get("Surface", "Both"),
             "status": data.get("Status", "active"),
-            "height": data.get("Height", "N/A"),
+            "height": _shown(data.get("Height")),
             "conformation": data.get("Conformation & Physical Profile", "Information unavailable."),
-            "major_wins": data.get("Major Wins", "N/A"),
-            "career_highlight": data.get("Career Highlight", "N/A"),
+            "major_wins": _shown(data.get("Major Wins")),
+            "career_highlight": _shown(data.get("Career Highlight")),
             "rank": _stud_rank(matched_key or search_name),
             "broodmare_rank": None,
             "progeny_racing": data.get("Progeny Racing Statistics"),

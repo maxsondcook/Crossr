@@ -1,0 +1,27 @@
+# Daily fixture suite for the bug classes already found in CROSSR.
+# Scrapers stay off: DATABASE_URL is empty, CROSSR_SCRAPERS=off, and the tests
+# refuse a network connection. GitHub runs this schedule from the default branch.
+
+name: Bug regressions
+
+on:
+  schedule:
+    - cron: "15 10 * * *"
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  bug-regressions:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ""
+      CROSSR_SCRAPERS: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the suite (pytest only; scrapers are not installed)
+        run: python -m pip install pytest beautifulsoup4
+      - name: Run bug regressions
+        run: python -m pytest -q tests/test_bug_regressions.py

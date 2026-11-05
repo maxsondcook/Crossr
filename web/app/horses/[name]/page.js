@@ -108,10 +108,18 @@ function withBroodmareSireList(meta, rows, countLabel) {
   };
 }
 
-/** Race name without its "(Gr. 3)" / "(G1)" suffix when the class tag already shows the grade. */
+/** Race name without a second copy of the grade when the class tag already shows it.
+ *  "Iroquois Stakes (Gr. 3) G3" next to a G3 tag is the grade twice. */
 function raceTitle(r) {
-  const name = String(r.race_name || "");
-  return raceGrade(r) ? name.replace(/\s*\((?:Gr\.?|Grade|G)\s*[1-3]\)\s*/i, " ").trim() : name;
+  let name = String(r.race_name || "");
+  const grade = raceGrade(r);
+  if (!grade) return name;
+  name = name.replace(/\s*\((?:Gr\.?|Grade|G)\s*[1-3]\)\s*/gi, " ");
+  if (/^G[1-3]$/.test(grade)) {
+    const n = grade.slice(1);
+    name = name.replace(new RegExp(`\\s+(?:${grade}|(?:Gr\\.?|Grade|G)\\s*${n})\\s*$`, "i"), "");
+  }
+  return name.trim();
 }
 
 /** Grade tag for any graded start (win or not): G1 / G2 / G3. */
