@@ -17,9 +17,10 @@ picked up by the next report: results look back ``RESULTS_LOOKBACK_DAYS`` and
 skip what was already sent. A failed email stays 'failed' in ``weekly_emails``
 and is retried on the next run.
 
-Entries: ``race_entries`` is filled by ``scripts/import_entries.py`` from a
-permitted source. DRF blocks automated access and Equibase's entry pages sit
-behind bot protection, so no entries scraper is run (see docs/weekly-reports.md).
+Entries: ``race_entries`` is filled daily from NYRA's published entries
+(crossr_pipeline.nyra_entries) and by ``scripts/import_entries.py`` from any
+other permitted source. DRF and Equibase forbid automated access in their terms,
+so neither is scraped (see docs/weekly-reports.md).
 
 Email is sent over SMTP (Gmail with an app password by default):
     CROSSR_SMTP_USER, CROSSR_SMTP_PASSWORD   required to send
