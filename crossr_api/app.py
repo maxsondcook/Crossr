@@ -16,6 +16,7 @@ from pydantic import BaseModel
 os.environ.setdefault("CROSSR_COMPACT_PEDIGREES", "1")
 
 import main
+from crossr_core import timing
 import hypomating_engine
 from crossr_core import horses as horse_svc
 from crossr_core import sales as sales_svc
@@ -94,7 +95,23 @@ async def protect_and_rate_limit(request: Request, call_next):
                     return JSONResponse({"detail": "Too many requests. Please wait a moment."}, status_code=429)
                 bucket.append(now)
             break
-    return await call_next(request)
+    timing.start()
+    started = time.perf_counter()
+    response = await call_next(request)
+    if path.startswith("/api/"):
+        response.headers["Server-Timing"] = timing.header(timing.collected(), (time.perf_counter() - started) * 1000)
+    return response
+
+
+# Step timings for the slow paths (hypomating report, hip pages, profiles): see crossr_core/timing.py.
+timing.instrument(
+    horse_svc, "similar_cross_rows", "similar_active_stallions", "breeding_panel", "enrich_hypofoal_report",
+    "_nick_auctions", "_add_nick_reasons", "_same_dam_stakes_rows", "catalog_pedigree", "sale_workspace",
+    "female_family", "get_horse_profile", "top_progeny_for_sire", "career_earnings", "race_results_for",
+    "resolve_pedigree_tree", "build_stallion_roster",
+)
+timing.instrument(hypomating_engine, "build_hypo_report", "suggest_matings", "top_crosses_payload",
+                  "build_horse_summaries")
 
 
 @app.on_event("startup")
