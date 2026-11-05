@@ -472,15 +472,25 @@ ORDER BY race_date, race_number
 """
 
 
+_GRADE_IN_NAME = re.compile(r"\s*\((?:gr\.?|grade|g)\s*([123]|i{1,3})\)", re.I)
+
+
+def _race_label(race_name, grade):
+    """Race name without its "(Gr. 3)" when the grade is shown as its own tag ("Iroquois Stakes" + G3)."""
+    name = str(race_name or "").strip()
+    return _GRADE_IN_NAME.sub("", name).strip() if grade and _GRADE_IN_NAME.search(name) else name
+
+
 def _start_row(race_date, track, country, race_number, race_name, grade, place, chart_url):
+    cls = _win_class(grade, race_name, country) if str(place or "").strip() == "1" else None
     return {
         "date": str(race_date or "")[:10] or None,
         "track": track or None,
         "country": country or None,
         "race_number": race_number or None,
-        "race_name": race_name or None,
+        "race_name": _race_label(race_name, grade or cls) or None,
         "grade": grade or None,
-        "class": _win_class(grade, race_name, country) if str(place or "").strip() == "1" else None,
+        "class": cls,
         "place": str(place).strip() if place not in (None, "") else None,
         "chart_url": chart_url or None,
     }
@@ -539,7 +549,7 @@ def _race_results_pg(pg, names, born):
         "date": race_date,
         "track": track,
         "country": country,
-        "race_name": race_name,
+        "race_name": _race_label(race_name, grade or _win_class(grade, race_name, country)),
         "grade": grade,
         "class": _win_class(grade, race_name, country),
     } for race_date, track, country, race_name, grade in starts]
