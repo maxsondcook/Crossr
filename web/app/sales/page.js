@@ -357,6 +357,8 @@ function SalesPage() {
   const [markupTool, setMarkupTool] = useState(null);
   const [markupClear, setMarkupClear] = useState(0);
   const [quickNotes, setQuickNotes] = useState(false);
+  // Minimized notes: a small bar in the corner; voice typing keeps going.
+  const [notesMin, setNotesMin] = useState(false);
   // Opening a sale: "Do you have any clients?" → names → each client's filters.
   // null | { step: "ask" } | { step: "names", count } | { step: "client", index } | { step: "mine" }
   const [setup, setSetup] = useState(null);
@@ -1348,7 +1350,11 @@ function SalesPage() {
             <button
               className={`rail-btn markup-btn${quickNotes ? " on" : ""}`}
               type="button"
-              onClick={() => setQuickNotes((v) => !v)}
+              onClick={() => {
+                if (quickNotes && notesMin) { setNotesMin(false); return; }
+                setNotesMin(false);
+                setQuickNotes((v) => !v);
+              }}
               title="Take notes on this hip"
             >
               <MarkupIcon d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h5" />
@@ -1427,11 +1433,20 @@ function SalesPage() {
               />
             ) : null}
             {quickNotes && current ? (
-              <div className="quick-notes" role="dialog" aria-label="Notes for this hip">
+              <div className={`quick-notes${notesMin ? " min" : ""}`} role="dialog" aria-label="Notes for this hip">
                 <div className="quick-notes-head">
                   <h4>NOTES · HIP {current.hip}</h4>
-                  <button className="ghost" type="button" onClick={() => { saveNotes(); setQuickNotes(false); }}>Close</button>
+                  <button
+                    className="ghost"
+                    type="button"
+                    onClick={() => { saveNotes(); setNotesMin((v) => !v); }}
+                    title={notesMin ? "Open the notes box" : "Shrink to the corner (voice typing keeps going)"}
+                  >
+                    {notesMin ? "Expand" : "Minimize"}
+                  </button>
+                  <button className="ghost" type="button" onClick={() => { saveNotes(); setQuickNotes(false); setNotesMin(false); }}>Close</button>
                 </div>
+                {notesMin && noteDraft ? <p className="quick-notes-peek">{noteDraft.slice(-90)}</p> : null}
                 <textarea
                   className="note-box"
                   value={noteDraft}
