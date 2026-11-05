@@ -975,7 +975,8 @@ def _standing_sons(sire_key, profiles):
 def _sire_of(name):
     sire, _ = parent_names(name)
     if not sire:
-        sire = (_parent_lookup().get(main.clean_horse_name(name or "")) or (None, None))[0]
+        year = re.search(r"\((\d{4})\)", name or "")
+        sire = parents_for(_parent_lookup().get(main.clean_horse_name(name or "")), year and year.group(1))[0]
     return sire
 
 
