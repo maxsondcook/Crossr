@@ -69,22 +69,123 @@ def _psycopg():
     return psycopg
 
 
+# A new Postgres connection is tens of milliseconds. Hip reads, profiles and the
+# catalog list each used to open one (or several) per request.
+_POOL_MAX = int(os.environ.get("CROSSR_DB_POOL", "6"))
+_pool_lock = threading.Lock()
+_pool_idle: list = []
+_pool_open = 0
+
+
+def _new_connection():
+    return _psycopg().connect(database_url(), connect_timeout=10)
+
+
+def _connection_alive(conn) -> bool:
+    if getattr(conn, "closed", True):
+        return False
+    idle = time.monotonic() - getattr(conn, "_crossr_used", 0.0)
+    if idle < 30:
+        return True
+    try:
+        conn.execute("SELECT 1").fetchone()
+        conn.rollback()
+        return True
+    except Exception:
+        return False
+
+
+def _checkout():
+    """A pooled connection, or a one-off when every slot is in use."""
+    global _pool_open
+    while True:
+        with _pool_lock:
+            if _pool_idle:
+                conn = _pool_idle.pop()
+            elif _pool_open < _POOL_MAX:
+                conn = _new_connection()
+                _pool_open += 1
+                return conn, False
+            else:
+                conn = None
+        if conn is None:
+            return _new_connection(), True
+        if _connection_alive(conn):
+            return conn, False
+        with _pool_lock:
+            _pool_open -= 1
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _checkin(conn, ephemeral: bool) -> None:
+    global _pool_open
+    from psycopg.rows import tuple_row
+
+    if ephemeral or getattr(conn, "closed", True):
+        if not ephemeral:
+            with _pool_lock:
+                _pool_open -= 1
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return
+    try:
+        conn.row_factory = tuple_row
+        conn._crossr_used = time.monotonic()
+    except Exception:
+        with _pool_lock:
+            _pool_open -= 1
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return
+    with _pool_lock:
+        if len(_pool_idle) < _POOL_MAX:
+            _pool_idle.append(conn)
+            return
+        _pool_open -= 1
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+def _discard(conn, ephemeral: bool) -> None:
+    global _pool_open
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+    try:
+        conn.close()
+    except Exception:
+        pass
+    if not ephemeral:
+        with _pool_lock:
+            _pool_open -= 1
+
+
 @contextmanager
 def connect(row_factory=None):
     require()
-    psycopg = _psycopg()
-    kwargs = {"connect_timeout": 10}
+    conn, ephemeral = _checkout()
     if row_factory is not None:
-        kwargs["row_factory"] = row_factory
-    conn = psycopg.connect(database_url(), **kwargs)
+        conn.row_factory = row_factory
     try:
         yield conn
         conn.commit()
     except Exception:
-        conn.rollback()
+        _discard(conn, ephemeral)
+        conn = None
         raise
     finally:
-        conn.close()
+        if conn is not None:
+            _checkin(conn, ephemeral)
 
 
 def _q(name: str) -> str:

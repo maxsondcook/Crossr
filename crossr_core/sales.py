@@ -312,24 +312,39 @@ def _is_catalog_label(horse_name):
     return not text or bool(re.search(r"\s[xX]\s", text)) or text.upper().startswith(("UNNAMED", "NAME"))
 
 
+_AUCTION_SELECT = """
+SELECT l.id, l.name AS horse_name, l.nk, l.sk, l.dk, l.is_out, l.is_rna,
+       l.price_num, l.price_raw, l.purchaser, l.birth_year, l.hip,
+       c.title AS sale_title, CASE WHEN c.year > 0 THEN c.year::text ELSE '' END AS sale_year
+FROM sales_lot_index l
+JOIN sales_catalogs c ON c.id = l.catalog_id
+"""
+
+
 def _auction_candidates(name_keys, pairs):
-    """Sales-index rows whose name key or (sire, dam) keys match, in load order."""
+    """Sales-index rows whose name key or (sire, dam) keys match, in load order.
+
+    Name and parent matches are separate queries so each one uses its index.
+    One ``OR`` across both made Postgres scan the whole sales index (about
+    0.4 s on a hypomating report).
+    """
     conn = connect()
     if not conn or not (name_keys or pairs):
         return []
     try:
-        return conn.execute(
-            """
-            SELECT l.name AS horse_name, l.nk, l.sk, l.dk, l.is_out, l.is_rna,
-                   l.price_num, l.price_raw, l.purchaser, l.birth_year, l.hip,
-                   c.title AS sale_title, CASE WHEN c.year > 0 THEN c.year::text ELSE '' END AS sale_year
-            FROM sales_lot_index l
-            JOIN sales_catalogs c ON c.id = l.catalog_id
-            WHERE l.nk = ANY(?) OR (l.sk, l.dk) IN (SELECT * FROM unnest(?::text[], ?::text[]))
-            ORDER BY l.id
-            """,
-            (list(name_keys), [p[0] for p in pairs], [p[1] for p in pairs]),
-        ).fetchall()
+        found = {}
+        if name_keys:
+            for row in conn.execute(
+                _AUCTION_SELECT + " WHERE l.nk = ANY(?)", (list(name_keys),)
+            ).fetchall():
+                found[row["id"]] = row
+        if pairs:
+            for row in conn.execute(
+                _AUCTION_SELECT + " WHERE (l.sk, l.dk) IN (SELECT * FROM unnest(?::text[], ?::text[]))",
+                ([p[0] for p in pairs], [p[1] for p in pairs]),
+            ).fetchall():
+                found.setdefault(row["id"], row)
+        return [found[i] for i in sorted(found)]
     finally:
         conn.close()
 

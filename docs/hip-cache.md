@@ -40,6 +40,12 @@ $E railway .venv/bin/python scripts/load_railway.py --only catalogs --precompute
 The data pipeline calls these: after publishing a catalog, after each scrape
 batch (`--rescraped`), once the catalog is complete (`--full`), and nightly.
 
+The API also fills missing and stale hips itself, in the background, once its
+caches are warm (`crossr_api.app._precompute_missing_hips`). That is the same
+work as the Mac launchd job `com.crossr.pipeline.precompute`. The job is still
+there if the precompute should run off the web server; the site no longer
+waits on it. Set `CROSSR_PRECOMPUTE=0` to turn the in-process pass off.
+
 ## Speed (crossr_dev, from the Mac)
 
 Keeneland November Breeding Stock Sale (2026), 3,405 hips:

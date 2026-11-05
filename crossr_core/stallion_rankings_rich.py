@@ -171,15 +171,51 @@ _SQL = (
 )
 
 
-def _ranking_rows(key):
-    """All ranking rows for one stallion as dicts of strings ('' for blanks)."""
-    from crossr_core import railway_db
+_RANK_INDEX = None
 
-    with railway_db.connect() as conn:
-        return [
-            {c: ("" if v is None else str(v)) for c, v in zip(_COLUMNS, rec)}
-            for rec in conn.execute(_SQL, (key, key))
-        ]
+
+def _ranking_index():
+    """upper(stallion) -> rows, plus 'NAME (year)' rows under NAME.
+
+    The old query opened a connection and scanned stallion_rankings for every
+    profile (about 70 ms, and the largest part of a 150 KB profile).
+    """
+    global _RANK_INDEX
+    version = sample_db.table_version("stallion_rankings")
+    if _RANK_INDEX is not None and _RANK_INDEX[0] == version:
+        return _RANK_INDEX[1]
+    exact = {}
+    prefix = {}
+    for i, row in enumerate(sample_db.load_table("stallion_rankings")):
+        stallion = (row.get("stallion") or "").strip()
+        if not stallion:
+            continue
+        up = stallion.upper()
+        exact.setdefault(up, []).append((i, row))
+        if " (" in up:
+            prefix.setdefault(up.split(" (", 1)[0], []).append((i, row))
+    _RANK_INDEX = (version, {"exact": exact, "prefix": prefix})
+    return _RANK_INDEX[1]
+
+
+def _ranking_rows(key):
+    """All ranking rows for one stallion as dicts of strings ('' for blanks).
+
+    Same rows as ``upper(stallion) = upper(key) OR upper(stallion) LIKE upper(key) || ' (%'``,
+    ordered year, list, table, then load order (the table's ``_rid``).
+    """
+    index = _ranking_index()
+    up = (key or "").upper()
+    tagged = list(index["exact"].get(up, ()))
+    tagged.extend(index["prefix"].get(up, ()))
+    # Same order as the SQL: year text DESC, then list, table, load order.
+    tagged.sort(key=lambda item: (
+        (item[1].get("list") or ""),
+        (item[1].get("table_name") or ""),
+        item[0],
+    ))
+    tagged.sort(key=lambda item: item[1].get("year") or "", reverse=True)
+    return [row for _, row in tagged]
 
 
 def _intish(val):

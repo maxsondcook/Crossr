@@ -324,6 +324,22 @@ def _base_lots(catalog_id):
     return lots
 
 
+def base_lots(catalog_id):
+    """Parsed lots for a catalog, without live stars / notes. None when missing."""
+    return _base_lots(catalog_id)
+
+
+def with_marks(catalog_id, lots):
+    """Copies of ``lots`` with this catalog's stars and notes applied."""
+    marks = railway_db.read_lot_marks(catalog_id)
+    out = []
+    for lot in lots:
+        lot = dict(lot)
+        _apply_mark(lot, marks.get(lot.get("hip")))
+        out.append(lot)
+    return out
+
+
 def list_lots(catalog_id):
     """Every lot in the catalog with its live stars / notes."""
     base = _base_lots(catalog_id)
