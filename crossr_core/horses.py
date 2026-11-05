@@ -1488,6 +1488,68 @@ def sale_workspace(
     }
 
 
+_US_STATES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado",
+    "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+    "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana",
+    "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota",
+    "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York", "NC": "North Carolina",
+    "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania",
+    "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas",
+    "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming", "PR": "Puerto Rico",
+}
+_CANADA = {"CAN", "CANADA", "AB", "BC", "MB", "NB", "NL", "NS", "ON", "ONTARIO", "PE", "PQ", "QC", "SK"}
+_COUNTRIES = {
+    "GB": "Great Britain", "UK": "Great Britain", "ENGLAND": "Great Britain", "IRE": "Ireland", "IRELAND": "Ireland",
+    "FR": "France", "FRANCE": "France", "JPN": "Japan", "JAPAN": "Japan", "AUS": "Australia", "AUSTRALIA": "Australia",
+    "KOR": "Korea", "KOREA": "Korea", "ARG": "Argentina", "BRZ": "Brazil", "CHI": "Chile", "GER": "Germany",
+    "SAF": "South Africa", "NZ": "New Zealand", "UAE": "UAE",
+}
+_STATE_NAMES = {v.upper(): v for v in _US_STATES.values()}
+
+
+def farm_region(farm):
+    """Region a stallion stands in ("Kentucky", "Canada", "Great Britain"…) from a farm string like
+    "Taylor Made Stallions, KY". Blank when the farm gives no place."""
+    text = str(farm or "").replace("_", " ").strip()
+    if not text:
+        return ""
+    tail = (text.rsplit(",", 1)[-1] if "," in text else text).strip().strip(".").upper()
+    tail = re.sub(r"[()]", "", tail).strip()
+    if tail in _US_STATES:
+        return _US_STATES[tail]
+    if tail in _STATE_NAMES:
+        return _STATE_NAMES[tail]
+    if tail in _CANADA:
+        return "Canada"
+    if tail in _COUNTRIES:
+        return _COUNTRIES[tail]
+    for name in _STATE_NAMES:  # "Sequel New York"
+        if text.upper().endswith(" " + name):
+            return _STATE_NAMES[name]
+    return ""
+
+
+def list_regions(profiles=None):
+    """Regions with standing stallions, most stallions first."""
+    counts = {}
+    for row in build_stallion_roster(profiles):
+        region = farm_region(row.get("farm"))
+        if region:
+            counts[region] = counts.get(region, 0) + 1
+    return [{"region": r, "count": n} for r, n in sorted(counts.items(), key=lambda t: (-t[1], t[0]))]
+
+
+def profiles_in_region(profiles, region):
+    """Stallion profiles standing in `region` (all of them when region is blank)."""
+    want = str(region or "").strip().lower()
+    if not want:
+        return profiles
+    return {k: v for k, v in profiles.items() if farm_region(v.get("Farm")).lower() == want}
+
+
 def list_farms(profiles=None):
     roster = build_stallion_roster(profiles)
     farms = sorted({row["farm"] for row in roster if row.get("farm")})

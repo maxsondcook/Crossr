@@ -85,8 +85,9 @@ function HypomatingInner() {
   const sireFromPage = params.get("sire") || "";
   const [mare, setMare] = useState(sireFromPage ? "" : (params.get("mare") || ""));
   const [surface, setSurface] = useState("neither");
-  const [minFee, setMinFee] = useState("");
   const [maxFee, setMaxFee] = useState("");
+  const [region, setRegion] = useState("");
+  const [regions, setRegions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
@@ -101,12 +102,16 @@ function HypomatingInner() {
   const [restored, setRestored] = useState(false);
 
   useEffect(() => {
+    apiGet("/api/stallions/regions").then((d) => setRegions(d.regions || [])).catch(() => setRegions([]));
+  }, []);
+
+  useEffect(() => {
     if (sireFromPage || restored) return;
     const saved = loadHypomatingSession();
     if (saved?.result) {
       setMare(saved.mare || "");
       setSurface(saved.surface || "neither");
-      setMinFee(saved.minFee || "");
+      setRegion(saved.region || "");
       setMaxFee(saved.maxFee || "");
       setResult(saved.result);
       setOpenLineage(saved.openLineage || null);
@@ -146,11 +151,11 @@ function HypomatingInner() {
       const data = await apiPost("/api/hypomating/suggest", {
         mare: mareName,
         surface,
-        min_fee: minFee ? Number(minFee) : null,
         max_fee: maxFee ? Number(maxFee) : null,
+        region: region || null,
       });
       setResult(data);
-      saveHypomatingSession({ mare: mareName, surface, minFee, maxFee, result: data });
+      saveHypomatingSession({ mare: mareName, surface, maxFee, region, result: data });
     } catch (e) {
       if (e.status === 409 && e.detail?.error === "ambiguous_year") {
         setYearChoices(e.detail);
@@ -174,11 +179,14 @@ function HypomatingInner() {
     setError("");
     try {
       const data = await apiGet(
-        `/api/hypomating/lineage/${encodeURIComponent(name)}${maxFee ? `?max_fee=${maxFee}` : ""}`,
+        `/api/hypomating/lineage/${encodeURIComponent(name)}?${new URLSearchParams({
+          ...(maxFee ? { max_fee: maxFee } : {}),
+          ...(region ? { region } : {}),
+        })}`,
       );
       setLineageData(data);
       saveHypomatingSession({
-        mare, surface, minFee, maxFee, result, report,
+        mare, surface, maxFee, region, result, report,
         lineage: data, openLineage: name,
       });
     } catch (e) {
@@ -198,7 +206,7 @@ function HypomatingInner() {
       setReport(data);
       saveHypofoal({ foal_name: data.foal_name, sire, dam: data.dam });
       saveHypomatingSession({
-        mare, surface, minFee, maxFee, result, lineage: lineageData, openLineage, report: data,
+        mare, surface, maxFee, region, result, lineage: lineageData, openLineage, report: data,
       });
     } catch (e) {
       setError(e.message);
@@ -267,7 +275,7 @@ function HypomatingInner() {
         onBack={() => {
           setReport(null);
           saveHypomatingSession({
-            mare, surface, minFee, maxFee, result, lineage: lineageData, openLineage, report: null,
+            mare, surface, maxFee, region, result, lineage: lineageData, openLineage, report: null,
           });
         }}
       />
@@ -284,11 +292,17 @@ function HypomatingInner() {
             <input value={mare} onChange={(e) => setMare(e.target.value)} required />
           </div>
           <div className="field">
-            <label>WHAT IS YOUR PRICE RANGE?</label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <input value={minFee} onChange={(e) => setMinFee(e.target.value)} placeholder="Min stud fee" />
-              <input value={maxFee} onChange={(e) => setMaxFee(e.target.value)} placeholder="Max stud fee" />
-            </div>
+            <label>WHAT IS YOUR MAX STUD FEE?</label>
+            <input value={maxFee} onChange={(e) => setMaxFee(e.target.value)} placeholder="Max stud fee" inputMode="numeric" />
+          </div>
+          <div className="field">
+            <label>STANDING LOCATION</label>
+            <select value={region} onChange={(e) => setRegion(e.target.value)}>
+              <option value="">Anywhere</option>
+              {regions.map((r) => (
+                <option key={r.region} value={r.region}>{r.region} ({r.count})</option>
+              ))}
+            </select>
           </div>
           <div className="field">
             <label>DESIRED SURFACE</label>
@@ -363,11 +377,13 @@ function HypomatingInner() {
                 <h4>SUGGESTED STALLIONS</h4>
                 {(result.suggestions || []).length === 0 ? (
                   <p className="empty">
-                    {minFee || maxFee ? "No stallions in this fee band." : "No standing stallions matched this mare."}
+                    {maxFee || region
+                      ? `No stallions${region ? ` standing in ${region}` : ""}${maxFee ? " under that fee" : ""}.`
+                      : "No standing stallions matched this mare."}
                     {extraLineageGroups.length
                       ? " Check the alternatives below."
-                      : minFee || maxFee
-                        ? " Try widening the fee range."
+                      : maxFee || region
+                        ? " Try a higher fee or another location."
                         : ""}
                   </p>
                 ) : null}
@@ -386,7 +402,7 @@ function HypomatingInner() {
                           href={horseHref(s.name)}
                           onClick={() => {
                             saveHypomatingSession({
-                              mare, surface, minFee, maxFee, result,
+                              mare, surface, maxFee, region, result,
                               lineage: lineageData, openLineage, report,
                             });
                             recordAppView("/hypomating", "Hypomating");

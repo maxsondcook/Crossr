@@ -154,6 +154,7 @@ class SuggestBody(BaseModel):
     surface: str = "neither"
     min_fee: Optional[int] = None
     max_fee: Optional[int] = None
+    region: Optional[str] = None
 
 
 class ReportBody(BaseModel):
@@ -324,6 +325,11 @@ def stallion_farms():
     return {"farms": horse_svc.list_farms(profiles())}
 
 
+@app.get("/api/stallions/regions")
+def stallion_regions():
+    return {"regions": horse_svc.list_regions(profiles())}
+
+
 @app.get("/api/similarity")
 def pedigree_similarity(
     a: str = "",
@@ -391,7 +397,7 @@ def _add_cross_similarity(result):
 def hypomating_suggest(body: SuggestBody):
     result = hypomating_engine.suggest_matings(
         main.PEDIGREE_DATABASE,
-        profiles(),
+        horse_svc.profiles_in_region(profiles(), body.region),
         body.mare,
         surface_pref=body.surface,
         min_fee=body.min_fee,
@@ -425,8 +431,10 @@ def hypomating_suggest(body: SuggestBody):
 
 
 @app.get("/api/hypomating/lineage/{stallion}")
-def hypomating_lineage(stallion: str, max_fee: Optional[int] = None):
-    return hypomating_engine.lineage_options_payload(stallion, profiles(), budget_filter=max_fee)
+def hypomating_lineage(stallion: str, max_fee: Optional[int] = None, region: str = ""):
+    return hypomating_engine.lineage_options_payload(
+        stallion, horse_svc.profiles_in_region(profiles(), region), budget_filter=max_fee
+    )
 
 
 @app.get("/api/hypomating/crosses/{stallion}")
