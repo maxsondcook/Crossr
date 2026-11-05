@@ -294,11 +294,11 @@ function HypomatingInner() {
             <input value={mare} onChange={(e) => setMare(e.target.value)} required />
           </div>
           <div className="field">
-            <label>1. MAX STUD FEE</label>
+            <label>MAX STUD FEE</label>
             <input value={maxFee} onChange={(e) => setMaxFee(e.target.value)} placeholder="Max stud fee" inputMode="numeric" />
           </div>
           <div className="field">
-            <label>2. SURFACE PREFERENCE</label>
+            <label>SURFACE PREFERENCE</label>
             <div className="surfaces">
               {["dirt", "turf", "neither"].map((s) => (
                 <label key={s}>
@@ -309,7 +309,7 @@ function HypomatingInner() {
             </div>
           </div>
           <div className="field">
-            <label>3. STANDING LOCATION</label>
+            <label>STANDING LOCATION</label>
             <select value={region} onChange={(e) => setRegion(e.target.value)}>
               <option value="">Anywhere</option>
               {regions.map((r) => (
