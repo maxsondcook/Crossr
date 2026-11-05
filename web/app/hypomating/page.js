@@ -225,6 +225,8 @@ function HypomatingInner() {
     (o) => !suggestionKeys.has(String(o.name).toUpperCase()),
   );
   const extraLineageGroups = (result?.lineage_groups || []).filter((g) => !suggestionNames.has(g.anchor));
+  const overBudgetGroups = extraLineageGroups.filter((g) => g.over_budget);
+  const otherLineageGroups = extraLineageGroups.filter((g) => !g.over_budget);
 
   if (sireFromPage) {
     return (
@@ -375,6 +377,14 @@ function HypomatingInner() {
             <div>
               <div className="panel">
                 <h4>SUGGESTED STALLIONS</h4>
+                {overBudgetGroups.length ? (
+                  <p className="over-budget-note">
+                    {overBudgetGroups.slice(0, 4).map((g) => horseCaps(g.anchor)).join(", ")}
+                    {overBudgetGroups.length > 4 ? ` and ${overBudgetGroups.length - 4} more` : ""}
+                    {overBudgetGroups.length === 1 ? " is" : " are"} over your budget.{" "}
+                    <a href="#over-budget">See their related sires in budget ↓</a>
+                  </p>
+                ) : null}
                 {(result.suggestions || []).length === 0 ? (
                   <p className="empty">
                     {maxFee || region
@@ -484,15 +494,22 @@ function HypomatingInner() {
                   </div>
                 ))}
               </div>
-              {extraLineageGroups.length ? (
-                <div className="panel" style={{ marginTop: 12 }}>
-                  <h4>ALTERNATIVES</h4>
-                  {extraLineageGroups.map((g) => (
+              {[
+                ["over-budget", "OVER YOUR BUDGET · RELATED SIRES IN BUDGET", overBudgetGroups],
+                ["alternatives", "ALTERNATIVES", otherLineageGroups],
+              ].map(([sectionId, title, groups]) => (groups.length ? (
+                <div key={sectionId} id={sectionId} className="panel" style={{ marginTop: 12 }}>
+                  <h4>{title}</h4>
+                  {groups.map((g) => (
                     <div key={g.anchor} className="suggest-card suggest-card-stack">
                       <div className="suggest-card-main">
                         <div>
                           <strong>{horseCaps(g.anchor)}</strong>
-                          <div className="parents">{g.variant ? "PROVEN CROSS · NOT STANDING" : "RELATED SIRES IN BUDGET"}</div>
+                          <div className="parents">
+                            {g.over_budget
+                              ? `${rankAndFee(g.rank, g.stud_fee)} · OVER BUDGET`
+                              : g.variant ? "PROVEN CROSS · NOT STANDING" : "RELATED SIRES IN BUDGET"}
+                          </div>
                         </div>
                         <button className="ghost alts-btn" type="button" onClick={() => toggleLineage(g.anchor)}>
                           <span>ALTERNATIVES</span>
@@ -525,7 +542,7 @@ function HypomatingInner() {
                     </div>
                   ))}
                 </div>
-              ) : null}
+              ) : null))}
               {error ? <p className="error">{error}</p> : null}
             </div>
           </div>

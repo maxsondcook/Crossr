@@ -936,6 +936,8 @@ td.range-col { background: rgba(212, 175, 55, 0.06); }
 .rail-client.fits { opacity: 1; color: var(--text); border-color: #3fb37f; background: rgba(63, 179, 127, 0.12); }
 .rail-client.fits .rail-client-initials { background: #3fb37f; border-color: #3fb37f; color: #0b1420; }
 .rail-client.on { opacity: 1; border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold) inset; }
+.over-budget-note { margin: 4px 0 12px; padding: 10px 12px; border: 1px solid var(--gold); border-radius: 10px; color: var(--text); font-size: 14px; }
+.over-budget-note a { color: var(--gold); font-weight: 700; }
 .chart-readout { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-top: 4px; font-size: 13px; }
 .chart-readout i { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
 /* Best broodmare sire crosses: click a row to list the horses that cross produced. */
