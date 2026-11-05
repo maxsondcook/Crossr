@@ -547,7 +547,10 @@ def _title(text):
     """str.title() that keeps a possessive 's lower-case ("Banker's Gold", not "Banker'S")
     and two-letter state codes upper-case ("Farm, KY", not "Farm, Ky")."""
     out = re.sub(r"(?<=[A-Za-z])'S\b", "'s", str(text or "").title())
-    return re.sub(r"(,\s*)([A-Za-z]{2})$", lambda m: m.group(1) + m.group(2).upper(), out)
+    out = re.sub(r"(,\s*)([A-Za-z]{2})$", lambda m: m.group(1) + m.group(2).upper(), out)
+    # three-letter country codes too ("Arrow Stud, JPN", not "Jpn")
+    return re.sub(r"(,\s*)(JPN|IRE|GBR|ENG|FRA|GER|ITY|AUS|ARG|BRZ|CHI|URU|PER|KOR|UAE|SAF|USA|CAN)$",
+                  lambda m: m.group(1) + m.group(2).upper(), out, flags=re.I)
 
 _CLASS_ORDER = {"MG1W": 0, "G1W": 1, "MGSW": 2, "G2W": 3, "G3W": 4, "MSW": 5, "SW": 6}
 
