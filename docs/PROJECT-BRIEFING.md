@@ -296,8 +296,9 @@ After a bulk write, bump `crossr_table_versions` with `railway_db._bump(conn, ta
 
 ## 7. Open decisions waiting on the owner
 **Status 2026-11-05:** the owner is working on getting **fully licensed, complete data** and asked everyone to
-hold. Build no new Equibase steps and add no Equibase traffic until they decide. The existing hourly job is left
-as it is.
+hold. Later the same day: all scrapers stay off. Automated collection is disabled in
+`crossr_pipeline/collection.py` (`COLLECTION_ENABLED = False`). A push to this repo does not unload jobs
+already running from `~/Crossr-pipeline`; those plist names are in `docs/PIPELINE.md`.
 
 1. **Equibase terms.** Their terms forbid automated scraping, and race records and pedigrees depend on it.
    The options:
@@ -317,7 +318,7 @@ as it is.
    cd ~/Crossr-pipeline && .venv/bin/python -m crossr_pipeline install-launchd
    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.audit.plist
    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.precompute.plist
-   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossr.pipeline.stallion-news.plist
+   # stallion-news stays unloaded. Collection is off. See docs/PIPELINE.md.
    ```
 6. **Stallion status updates from the news scan:** 8 stallions still listed as active
    ([section 8](#8-what-is-left-in-priority-order), item 2).

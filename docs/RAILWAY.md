@@ -137,8 +137,9 @@ With `DATABASE_URL` exported, the pipeline (`scripts/pipeline/run.py`) and the
 pedigree scrapers write straight to Railway. The running API notices changes
 within ~15 s (`crossr_table_versions`) and reloads only the table that changed.
 
-The scheduled pipeline (Equibase race records, sale-parent pedigrees, sales
-CSV import) is in [PIPELINE.md](PIPELINE.md).
+The scheduled pipeline is in [PIPELINE.md](PIPELINE.md). Automated collection
+(Equibase, pedigrees, the Jockey Club page, news) is off. Sales CSV import of
+files already on disk is unchanged.
 
 ## Known limits
 

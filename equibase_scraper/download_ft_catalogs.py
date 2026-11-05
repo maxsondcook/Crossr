@@ -248,7 +248,18 @@ def repair_start_day(record: dict) -> None:
     record["file"] = catalog_name(record)
 
 
+def _refuse() -> None:
+    # Intentionally off. See crossr_pipeline/collection.py.
+    import sys
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Fasig-Tipton catalog download")
+
+
 def retry_failed() -> None:
+    _refuse()
     rows = json.loads(MANIFEST.read_text())
     pending = [row for row in rows if row.get("status") == "failed"]
     print(f"Retrying {len(pending)} failed catalogs", flush=True)
@@ -274,6 +285,7 @@ def retry_failed() -> None:
 
 
 def main() -> None:
+    _refuse()
     DEST.mkdir(parents=True, exist_ok=True)
     pages = sale_pages()
     print(f"Sale pages: {len(pages)}", flush=True)

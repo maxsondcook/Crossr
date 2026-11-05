@@ -16,12 +16,21 @@ Playwright, channel="chrome", a persistent profile, locale en-US.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+if __name__ == "__main__":
+    # Intentionally off, before the browser libraries load. See collection.py.
+    _root = Path(__file__).resolve().parents[1]
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Equibase scraper")
+
 import argparse
 import random
-import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 from pq_scraper.dbio import load_pedigree_map, save_pedigree_map
 
@@ -639,6 +648,10 @@ def warmup(page) -> bool:
 
 
 def run_fetch(conn, horses, delay: float, pedigree_fill: bool = True) -> int:
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Equibase race-record fetch")
+
     from playwright.sync_api import sync_playwright
 
     if not horses:
@@ -692,6 +705,10 @@ def run_fetch(conn, horses, delay: float, pedigree_fill: bool = True) -> int:
 
 def run_fill_pedigrees(conn, delay: float) -> int:
     """Walk status=ok horses whose 5-generation pedigree is not in the book yet."""
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Equibase pedigree fill")
+
     from playwright.sync_api import sync_playwright
 
     book = _PedigreeBook(conn)
@@ -918,6 +935,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.horse and args.year is None:
         print('Pass --year. Example: python3 -m equibase_scraper.run --horse "American Pharoah" --year 2012')
         return 1
+
+    if args.enqueue or args.resume or args.horse or args.fill_pedigrees:
+        # --show only reads rows already stored. Fetching and queueing stay off.
+        from crossr_pipeline.collection import refuse_if_off
+        refuse_if_off("Equibase scraper")
 
     conn = db.connect()
     try:

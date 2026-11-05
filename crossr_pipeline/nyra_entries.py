@@ -56,6 +56,10 @@ def _ssl_context():
 
 
 def fetch(url: str, timeout: float = 20) -> str:
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("NYRA entries")
+
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:

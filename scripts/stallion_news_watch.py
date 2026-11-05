@@ -43,6 +43,10 @@ CRAWL_DELAY = 10  # thoroughbreddailynews.com/robots.txt
 
 
 def fetch(url: str) -> list[dict]:
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Stallion news watch")
+
     req = urllib.request.Request(url, headers={"User-Agent": "Crossr/1.0 (daily stallion news check)"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         root = ET.fromstring(resp.read())
@@ -119,6 +123,10 @@ def archive(since: int, until: int) -> list[dict]:
 
     The headline is read from the article's address: /war-front-pensioned-at-claiborne/.
     """
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Stallion news archive")
+
     items = []
     for year in range(until, since - 1, -1):
         req = urllib.request.Request(TDN_SITEMAP.format(year=year), headers={"User-Agent": "Crossr/1.0 (stallion news archive)"})

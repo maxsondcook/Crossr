@@ -47,6 +47,10 @@ FILL = {
 
 
 def export_catalog(url: str, dest: Path, profile_dir: Path) -> Path:
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Keeneland catalog export")
+
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:

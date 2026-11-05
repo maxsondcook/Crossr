@@ -104,13 +104,9 @@ scraper / loader inputs only (`.dockerignore` keeps them out of the API image):
 
 ## Pipelines (optional)
 
-**Pedigrees from Pedigree Query.** Headed Chrome is the primary path (live PQ blocks curl). After graded-stakes horses are in the DB or are real terminal misses, `--queue auto` walks incomplete ancestor slots the same way `pedigrees_cleaner.py` would. Wayback is a polite fallback only and is paused for a few days after an IP block (`pq_scraper/wayback_pause_until.txt`).
+**Collection is off.** `crossr_pipeline/collection.py` sets `COLLECTION_ENABLED = False`. The fetch commands below exit without requesting a page. Collected rows stay in the database. LaunchAgents already loaded on the Mac are not stopped by this repo; unload `com.maxsoncook.pq.fetch-gsw` and `com.maxsoncook.pq.fetch-watchdog`, and the pipeline agents listed in [`docs/PIPELINE.md`](docs/PIPELINE.md).
 
-```bash
-python3 pq_scraper/fetch_pedigrees.py --resume --retry-misses --queue auto --source live --delay 1.5 --save-every 10
-```
-
-The live job is a LaunchAgent (`com.maxsoncook.pq.fetch-gsw`) plus a 5-minute heartbeat watchdog (`com.maxsoncook.pq.fetch-watchdog`). Progress: `pq_scraper/progress.json` (`last_added`, `last_attempt`, `heartbeat_at`). Misses: `pq_scraper/misses.csv`. HTTP 0 / connect failures are **not** 404s. Do not raise Wayback concurrency.
+**Pedigrees from Pedigree Query.** The fetch commands are off. Progress already recorded is in `pq_scraper/progress.json` (`last_added`, `last_attempt`, `heartbeat_at`). Misses: `pq_scraper/misses.csv`.
 
 If a horse already has sire/dam names and those parents are in `pedigrees_database.py`, stitch the parent trees in (no network):
 
@@ -159,18 +155,18 @@ committed (`.env.example` holds placeholders).
 - Backfills never overwrite and log every fill in `sales_lots_fill_log`
   (`scripts/backfill_damsire_by_age.py`: damsire from the dam's own record, with her
   age used to separate namesakes).
-- `scripts/jockeyclub_mares_bred.py` loads The Jockey Club's Report of Mares Bred
-  (the complete current North American stallion list) — dry run by default.
+- `scripts/jockeyclub_mares_bred.py` used to load The Jockey Club's Report of Mares Bred.
+  The fetch is off. A saved page passed with `--file` still parses.
 
 ## Data sources and access
 
 | Source | How | Notes |
 | --- | --- | --- |
-| The Jockey Club Report of Mares Bred | one page per run (`scripts/jockeyclub_mares_bred.py`) | robots.txt allows; weekly |
-| Keeneland catalogs | public catalog JSON (`scripts/keeneland_catalog.py`) | one file per sale |
-| Racing Post fee histories | pipeline (`crossr_pipeline racing-post`) | weekly batch |
-| BloodHorse ranking lists | CSVs in `stallion_rankings_data/` | fee season read from each file's header |
-| Equibase race records | headed-Chrome scraper (`equibase_scraper`, `crossr_pipeline scrape`) | Equibase pages sit behind Imperva/Incapsula; the scraper drives a real browser through it — expect occasional blocks and review Equibase's terms |
+| The Jockey Club Report of Mares Bred | `scripts/jockeyclub_mares_bred.py` | fetch is off; a saved `--file` still parses |
+| Keeneland catalogs | `scripts/keeneland_catalog.py` | a download is off; a local JSON file still loads |
+| Racing Post fee histories | `crossr_pipeline racing-post` | fetch is off |
+| BloodHorse ranking lists | CSVs in `stallion_rankings_data/` | the sire-list scrapers are off; saved CSVs stay |
+| Equibase race records | `equibase_scraper`, `crossr_pipeline scrape` | fetch is off, including dam and pedigree batches |
 | BloodHorse Stallion Register, DRF | **not scraped** | behind bot protection / subscriber content; needs a licensed feed or an export |
 
 ## Modeling

@@ -38,6 +38,14 @@ COLUMNS = [
 
 def _load(src: str) -> dict:
     if src.startswith("http"):
+        # Intentionally off. A local JSON file still loads. See crossr_pipeline/collection.py.
+        import sys
+        root = Path(__file__).resolve().parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from crossr_pipeline.collection import refuse_if_off
+        refuse_if_off("Keeneland catalog download")
+
         req = urllib.request.Request(src, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=120) as resp:
             return json.load(resp)

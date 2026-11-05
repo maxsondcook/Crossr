@@ -200,6 +200,10 @@ def wayback_paused() -> tuple[bool, str]:
 
 def curl_get(url: str, timeout: int = 35) -> tuple[int, str, str]:
     """Return (status, final_url, body). IPv4 + short connect timeout."""
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Pedigree Query fetch")
+
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         tmp_path = tmp.name
     try:
@@ -253,6 +257,10 @@ def curl_get(url: str, timeout: int = 35) -> tuple[int, str, str]:
 
 def live_get(url: str, timeout: int = 20) -> tuple[int, str, str]:
     """Fast live GET via curl_cffi Chrome impersonation, then curl."""
+    # Intentionally off. See crossr_pipeline/collection.py.
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Pedigree Query fetch")
+
     try:
         from curl_cffi import requests as cr
 
@@ -348,6 +356,11 @@ def fetch_url(
                 }
 
     limiter = limiter or RateLimiter()
+
+    # Cached pages above still return. A live or Wayback fetch is intentionally off.
+    if allow_live or allow_wayback:
+        from crossr_pipeline.collection import refuse_if_off
+        refuse_if_off("Pedigree Query fetch")
 
     if allow_live:
         status, final, body = curl_get_retry(url, limiter, live=True)

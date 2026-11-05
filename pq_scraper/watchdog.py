@@ -30,6 +30,14 @@ def _parse_iso(value: str) -> float | None:
 
 
 def main() -> int:
+    # Intentionally off: this restarts the Pedigree Query LaunchAgent.
+    import sys
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from crossr_pipeline.collection import refuse_if_off
+    refuse_if_off("Pedigree Query watchdog")
+
     if not PROGRESS_PATH.is_file():
         print("watchdog: no progress.json", flush=True)
         return 0

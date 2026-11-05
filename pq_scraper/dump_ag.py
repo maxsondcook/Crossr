@@ -332,6 +332,10 @@ if __name__ == "__main__":
     if args.count:
         print(json.dumps(count_remaining(), indent=2))
     elif args.dump_batch:
+        # Intentionally off. --count and --import-file do not fetch.
+        from crossr_pipeline.collection import refuse_if_off
+        refuse_if_off("Pedigree Query IDE batch")
+
         payload = dump_batch(args.dump_batch)
         print(
             f"DUMP n={len(payload['items'])} remaining_est={payload['remaining_est']} "
