@@ -1,6 +1,6 @@
 # Crossr: project briefing for a new AI agent
 
-Last updated 2026-11-05. Read this first, then `README.md`. This file says what Crossr is, how it runs, what is
+Last updated 2026-11-05 (late). Read this first, then `README.md`, then `bugs/latest.md` (tonight's bug list). This file says what Crossr is, how it runs, what is
 done, what is decided, what is open, and the rules every agent working on it follows.
 
 ---
@@ -63,7 +63,8 @@ Every push to `unified` redeploys the live api and web, so pushing is a release.
   - `jockeyclub_mares_bred.py`, `keeneland_catalog.py`, `merge_duplicate_race_horses.py`,
     `backfill_damsire_by_age.py`, `data_readiness_report.py`, `train_sales_model.py`.
 - `tests/`: unit tests. Run `DATABASE_URL= python3 -m pytest -q tests --ignore=tests/e2e crossr_pipeline equibase_scraper ifha_scraper`.
-  On 2026-11-05: 488 passed, 37 skipped.
+  On 2026-11-05: 491 passed, 37 skipped.
+- `tests/nightly/`: **the nightly bug hunt** (`python -m tests.nightly`, section 5a).
 - `docs/`: design docs (listed in section 9). `docs/handover/` has copies of the other agents' plans.
 
 ### Main tables (Postgres)
@@ -229,6 +230,58 @@ After a bulk write, bump `crossr_table_versions` with `railway_db._bump(conn, ta
   - 80% price ranges come from conformalized quantile regression (CQR), with 80.9% coverage on test years.
   - Not used by the site yet.
 
+### 5a. Nightly bug hunt and speed tooling (2026-11-05)
+- **`python -m tests.nightly`** (run with `scripts/pipeline/railway_env.sh railway` for the database checks)
+  runs three sets of checks:
+  - **Unit tests.**
+  - **The data audit's database checks.**
+  - **Live checks of the site:**
+    - the registry (pensioned or dead stallions not listed);
+    - the identity rules (Curlin is a stallion, Zenyatta a broodmare, Englishman ambiguous, War Front
+      pensioned, Frosted deceased);
+    - random directory stallions' profiles;
+    - top-progeny earnings against the race record;
+    - grades not repeated;
+    - hypomating suggestions and reports;
+    - every upcoming catalog's hip list;
+    - random hips (pedigree named, zero-padding);
+    - sire sales summaries;
+    - the weekly endpoints;
+    - web pages.
+
+  Each check has a **speed budget** (`tests/nightly/live.py: BUDGETS`).
+- **Output:** `bugs/latest.md` (and `bugs/inbox/<date>.md` / `.json`), gitignored. Each bug has an id, a reproduce
+  command, expected vs actual, and likely files. **Any agent, Cursor included, can start from this file.**
+- **Scheduled agent:** the Claude Desktop scheduled task `crossr-nightly-bug-hunt`, daily at 5:00 am while the
+  app is open. It runs the hunt in its own worktree, fixes what it can on branch `nightly-fix/<date>` with tests,
+  pushes **only that branch**, and writes `bugs/fixes-<date>.md`. The owner reviews and merges to ship. It never
+  deploys, writes to production or scrapes.
+- **Step timings:** every `/api` response carries a `Server-Timing` header listing its main steps
+  (`crossr_core/timing.py`; the instrumented functions are listed in `crossr_api/app.py`). Use it to profile,
+  in the browser's network panel or with `curl -D -`.
+- **Speed work done:**
+  - **Upcoming catalogs** are parsed once per catalog version (`upcoming._base_lots`). They used to be re-read on
+    every hip request.
+  - **Career earnings** are an in-memory table per race-table version.
+  - **The active-stallion list** is cached.
+  - **Startup warms** the dam-produce index, earnings, parents, progeny, active stallions and catalogs.
+  - **Results:**
+
+    | Request | Before | After |
+    |---|---|---|
+    | Saved hip | 0.7–0.9 s | 0.03 s |
+    | Hip list | 1.7 s | 0.5 s |
+    | Hypomating report | 2.4 s | 1.0 s |
+    | Suggestions | 1–1.8 s | 0.5 s |
+    | Profiles | — | about 0.25 s |
+- **Still to speed up:**
+  - **A hip opened for the first time** takes 2–7 s. It needs the precompute job loaded
+    (`com.crossr.pipeline.precompute`), or a faster `sale_workspace`.
+  - **The hypomating report** (about 1 s) is mostly `similar_cross_rows`, `similar_active_stallions` (pedigree
+    similarity against every active stallion) and `_nick_auctions`.
+  - **The stallion list** takes about 0.7 s with a 218 KB payload; consider trimming fields and paging.
+  - **The first request after a deploy** is slow until the warm-up finishes.
+
 ## 6. Current numbers (2026-11-04/05)
 - **Broodmare sire on yearling and weanling lots:** 85% overall, 89–93% for 2010–2023.
 - **Sire stud fee at conception:** 85–93%.
@@ -242,6 +295,10 @@ After a bulk write, bump `crossr_table_versions` with `railway_db._bump(conn, ta
   - a hip opened for the first time: 2–8 s (the fix is the nightly precompute job, which needs loading).
 
 ## 7. Open decisions waiting on the owner
+**Status 2026-11-05:** the owner is working on getting **fully licensed, complete data** and asked everyone to
+hold. Build no new Equibase steps and add no Equibase traffic until they decide. The existing hourly job is left
+as it is.
+
 1. **Equibase terms.** Their terms forbid automated scraping, and race records and pedigrees depend on it.
    The options:
    - keep scraping at a polite pace (5 s between pages);
@@ -267,7 +324,11 @@ After a bulk write, bump `crossr_table_versions` with `railway_db._bump(conn, ta
 7. **Stud cards for the 218:** use state breeders' association rosters? (robots.txt and terms checked per site.)
 
 ## 8. What is left, in priority order
-1. **Data collection** (the owner's main focus). The plan is `docs/handover/data-priorities-plan-2026-11-04.md`.
+0. **Nightly bugs:** start each work session from `bugs/latest.md` and any `nightly-fix/*` branch waiting for
+   review. Open on 2026-11-05:
+   - Run Tiger Run is in the directory, but his profile returns 404;
+   - the stallion list is over its 0.5 s budget.
+1. **Data collection** (the owner's main focus; **on hold pending licensing**). The plan is `docs/handover/data-priorities-plan-2026-11-04.md`.
    - **Weekly refresh** of every horse that raced in 2026 or is entered: built, on the pipeline branch.
    - **Pedigrees** for the 172 directory stallions with no tree (Cupid, Unified, Oscar Performance…), queued.
      Without them, half of every hip pedigree by those sires is blank.
