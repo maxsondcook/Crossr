@@ -299,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("scrape", help="One Equibase batch: catalogs, weekly race refresh, sale-parent pedigrees")
-    p.add_argument("--delay", type=float, default=2.0, help="Seconds between page loads (plus jitter; 2 s on trial from 2026-11-05, was 3)")
+    p.add_argument("--delay", type=float, default=5.0, help="Seconds between page loads (plus jitter); Equibase robots.txt asks Crawl-delay: 5")
     p.add_argument("--minutes", type=float, default=45, help="Batch length; Chrome closes at the end")
     p.add_argument("--limit", type=int, help="Stop after this many queue items (testing)")
     p.add_argument("--full-pages", action="store_true", help="Also download pictures, fonts and ad scripts")

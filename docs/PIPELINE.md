@@ -67,7 +67,7 @@ on the next pass.
   (DevTools URL blocking, and ad hosts never resolve), so requests do not pass
   through Python, and Chrome runs without its GPU process. While a block page
   is up, pictures load again, so the check can be done.
-- About 2 s plus jitter between page loads (on trial from 2026-11-05; it was 3 s; `--delay` sets it).
+- About 5 s plus jitter between page loads, the Crawl-delay in Equibase's robots.txt (`--delay` sets it).
 - **Queue order:** sires first, then dams, each by their most recent sale
   (newest first), then by number of lots. Parents already complete in
   `pedigrees` are skipped.
