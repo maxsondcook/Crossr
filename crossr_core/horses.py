@@ -858,8 +858,9 @@ def _ancestor_slots(node, cache, max_depth=5):
     return slots
 
 
-def _slot_overlap_percent(tree_a, tree_b, cache):
-    slots_a = _ancestor_slots(tree_a, cache)
+def _slot_overlap_percent(tree_a, tree_b, cache, slots_a=None):
+    if slots_a is None:
+        slots_a = _ancestor_slots(tree_a, cache)
     slots_b = _ancestor_slots(tree_b, cache)
     both = [path for path in slots_a if path in slots_b]
     if not both:
@@ -909,21 +910,47 @@ def _full_siblings(sire_a, dam_a, sire_b, dam_b):
     )
 
 
+class SimilarityReference:
+    """One side of many pedigree_similarity calls, resolved once.
+
+    Reports compare one foal against hundreds of horses; rebuilding the foal's
+    5-generation ancestor map for each comparison repeated the same work. Each call
+    starts from a copy of the cache as it stood after that map was built, which is
+    the state a plain call reaches at the same point, so results are identical.
+    """
+
+    __slots__ = ("tree", "slots", "cache")
+
+    def __init__(self, a=None, a_tree=None, a_sire=None, a_dam=None):
+        self.tree = resolve_pedigree_tree(name=a, tree=a_tree, sire=a_sire, dam=a_dam)
+        self.cache = {}
+        self.slots = _ancestor_slots(self.tree, self.cache) if _horse_id(self.tree) else {}
+
+
 def pedigree_similarity(
-    a=None, b=None, a_tree=None, b_tree=None, a_sire=None, a_dam=None, b_sire=None, b_dam=None, kinship=False
+    a=None, b=None, a_tree=None, b_tree=None, a_sire=None, a_dam=None, b_sire=None, b_dam=None, kinship=False,
+    reference=None,
 ):
     """Percent of matching 5-generation ancestor slots; sibling floors as a safety net.
 
     kinship=True (the standalone compare) also scores shared blood regardless of
     slot, so two established stallions or a sire and son don't read 0%.
     Reports keep the slot score: their filters are tuned to it.
+    reference: a SimilarityReference that stands in for a / a_tree / a_sire / a_dam.
     """
-    tree_a = resolve_pedigree_tree(name=a, tree=a_tree, sire=a_sire, dam=a_dam)
+    if reference is not None:
+        tree_a = reference.tree
+    else:
+        tree_a = resolve_pedigree_tree(name=a, tree=a_tree, sire=a_sire, dam=a_dam)
     tree_b = resolve_pedigree_tree(name=b, tree=b_tree, sire=b_sire, dam=b_dam)
     if not _horse_id(tree_a) or not _horse_id(tree_b):
         return None
-    cache = {}
-    percent = _slot_overlap_percent(tree_a, tree_b, cache)
+    if reference is not None:
+        cache = dict(reference.cache)
+        percent = _slot_overlap_percent(tree_a, tree_b, cache, slots_a=reference.slots)
+    else:
+        cache = {}
+        percent = _slot_overlap_percent(tree_a, tree_b, cache)
     sa, da = _parents_of(tree_a, cache)
     sb, db = _parents_of(tree_b, cache)
     same_sire = bool(_horse_id(sa) and _slot_ids_match(_horse_id(sa), _horse_id(sb)))
@@ -983,6 +1010,7 @@ def _same_dam_stakes_rows(dam_name, reference_tree=None, exclude_names=None):
     except Exception:
         return []
     rows = []
+    sim_ref = SimilarityReference(a_tree=reference_tree) if reference_tree else None
     parents = hypomating_engine.winner_parents(main.PEDIGREE_DATABASE, summaries)
     for h_name, h in summaries.items():
         clean_h = main.clean_horse_name(h_name)
@@ -991,7 +1019,7 @@ def _same_dam_stakes_rows(dam_name, reference_tree=None, exclude_names=None):
         sire, dam, damsire = parents[clean_h]
         if main.clean_horse_name(dam) != dam_key:
             continue
-        sim = pedigree_similarity(a_tree=reference_tree, b=h_name) if reference_tree else None
+        sim = pedigree_similarity(b=h_name, reference=sim_ref) if sim_ref else None
         rows.append({
             "name": h_name,
             "broodmare_sire": _title(re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip()) or None,
@@ -1097,6 +1125,7 @@ def similar_cross_rows(
     damsire_display = _title(re.sub(r"\s*\(\d{4}\)", "", damsire or "").strip())
 
     rows, seen = [], {main.clean_horse_name(reference_name or "")} - {""}
+    sim_ref = SimilarityReference(a_tree=ref) if has_ref else None
 
     def add(h_name, dam, row_damsire, relation, tier, source="sire_cross"):
         # source: sire_cross (same sire; feeds Auction History), sire_line, same_dam.
@@ -1105,7 +1134,7 @@ def similar_cross_rows(
         if not key or key in seen or not h.get("status"):
             return
         seen.add(key)
-        sim = pedigree_similarity(a_tree=ref, b=h_name) if has_ref else None
+        sim = pedigree_similarity(b=h_name, reference=sim_ref) if sim_ref else None
         earnings = earn_lookup.get(key) or 0
         rows.append({
             "name": h_name,
@@ -1229,10 +1258,11 @@ def similar_active_stallions(reference_tree, profiles=None, exclude_names=None, 
     if not reference_tree or not _horse_id(reference_tree):
         return []
     rows = []
+    sim_ref = SimilarityReference(a_tree=reference_tree)
     for name, clean, meta in _active_stallions(profiles):
         if clean in exclude:
             continue
-        sim = pedigree_similarity(a_tree=reference_tree, b=name)
+        sim = pedigree_similarity(b=name, reference=sim_ref)
         percent = (sim or {}).get("percent")
         if percent is None:
             continue
