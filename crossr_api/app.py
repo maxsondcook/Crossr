@@ -708,28 +708,35 @@ def sales_upcoming_lots(
     exclude_hips: Optional[str] = None,
     only_hips: Optional[str] = None,
 ):
-    lots = upcoming_svc.list_lots(catalog_id)
+    # Spans: the nightly hunt reads them to say which step is slow ("total" minus the
+    # spans is mostly turning the ~2.7 MB of lots into JSON).
+    with timing.span("list_lots"):
+        lots = upcoming_svc.list_lots(catalog_id)
     if lots is None:
         raise HTTPException(status_code=404, detail="Catalog not found")
-    book = profiles()
-    lookup = horse_svc.profile_lookup(book)
-    _attach_heights(lots, lookup)
-    _attach_filter_prices(
-        lots,
-        book,
-        catalog_title=catalog_id,
-        sale_year=_sale_year_from(catalog_title=catalog_id),
-    )
-    filtered = upcoming_svc.filter_lots(
-        lots,
-        sex=sex,
-        color=color,
-        max_price=max_price,
-        height=height,
-        starred=starred,
-        exclude_hips=_split_hips(exclude_hips),
-        only_hips=_split_hips(only_hips),
-    )
+    with timing.span("profiles"):
+        book = profiles()
+        lookup = horse_svc.profile_lookup(book)
+    with timing.span("attach_heights"):
+        _attach_heights(lots, lookup)
+    with timing.span("attach_filter_prices"):
+        _attach_filter_prices(
+            lots,
+            book,
+            catalog_title=catalog_id,
+            sale_year=_sale_year_from(catalog_title=catalog_id),
+        )
+    with timing.span("filter_lots"):
+        filtered = upcoming_svc.filter_lots(
+            lots,
+            sex=sex,
+            color=color,
+            max_price=max_price,
+            height=height,
+            starred=starred,
+            exclude_hips=_split_hips(exclude_hips),
+            only_hips=_split_hips(only_hips),
+        )
     return {"lots": filtered, "total": len(filtered)}
 
 
