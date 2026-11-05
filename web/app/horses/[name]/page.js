@@ -844,19 +844,8 @@ function HorsePage() {
   const [showAllProgeny, setShowAllProgeny] = useState(false);
   const [breeding, setBreeding] = useState(null);
   const [progenyView, setProgenyView] = useState("top");
-  // Layout trial: "tabs" shows one section at a time; "classic" is the full grid.
-  const [layout, setLayoutState] = useState("tabs");
+  const layout = "tabs";
   const [tab, setTab] = useState("general");
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem("crossr-horse-layout");
-      if (saved === "tabs" || saved === "classic") setLayoutState(saved);
-    } catch { /* storage blocked: keep default */ }
-  }, []);
-  const setLayout = (next) => {
-    setLayoutState(next);
-    try { window.localStorage.setItem("crossr-horse-layout", next); } catch { /* ignore */ }
-  };
   useEffect(() => { setTab("general"); }, [decoded]);
   const returnTarget = useMemo(() => resolveReturnTarget(searchParams), [searchParams]);
   const salesReturn = returnTarget.sales;
@@ -1011,9 +1000,6 @@ function HorsePage() {
           onClick={() => { toggleStar(data.name); saveFavorite(data.name); setTick((n) => n + 1); }}
         >
           {isStarred(data.name) && tick >= 0 ? "★" : "☆"}
-        </button>
-        <button className="ghost layout-switch" type="button" onClick={() => setLayout(tabbed ? "classic" : "tabs")}>
-          {tabbed ? "Classic layout" : "Tabbed layout"}
         </button>
       </div>
       {tabbed ? (

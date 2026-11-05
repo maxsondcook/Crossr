@@ -833,7 +833,6 @@ td.range-col { background: rgba(212, 175, 55, 0.06); }
 .markup-icon { display: block; }
 .markup-btn.on { border-color: var(--gold); color: var(--gold); background: rgba(212, 175, 55, 0.12); }
 /* Horse page tabbed layout (trial): one section at a time, full width. */
-.layout-switch { margin-left: auto; padding: 8px 12px; font-size: 12px; }
 .horse-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .horse-tab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 10px 14px; font-weight: 700; letter-spacing: 0.06em; cursor: pointer; }
 .horse-tab:hover { color: var(--text); }
